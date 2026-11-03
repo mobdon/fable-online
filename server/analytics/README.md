@@ -48,8 +48,8 @@ checked against these rules (`src/economy.ts`). The watchdog only reports; the s
 | `phial_rate` | More than 2 Resurrection Phials per hero per day (draft limit) |
 | `self_trade` | A hero trading with themselves |
 
-Limits are in `DEFAULT_WATCHDOG_CONFIG` and can be overridden per server. Nobody knows
-yet how players will earn gold, so `earn_outlier` learns it: every finished hour, each
+Limits are in `DEFAULT_WATCHDOG_CONFIG` and can be overridden per server. Gold income
+per hero has no reference data before launch, so `earn_outlier` derives it: every finished hour, each
 hero's earnings go into `fable_gold_earned_per_hero_hour`, and the Economy dashboard's
 "What normal play looks like" row shows the typical, top 10% and top 1% hero. After the
 first week, use those numbers to set the fixed limits.
