@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "devkit.h"
+#include "herolook.h"
 #include "log.h"
 #include "probe.h"
 
@@ -40,7 +41,7 @@ DWORD WINAPI main_thread(LPVOID) {
 
     char probe[4] = {};
     bool probing = GetEnvironmentVariableA("FABLE_ONLINE_PROBE", probe, sizeof(probe)) > 0 && probe[0] == '1';
-    fo::log("  probe: %s (build 5: devkit)", probing ? "on" : "off");
+    fo::log("  probe: %s (build 6: devkit, herolook)", probing ? "on" : "off");
 
     char dev[4] = {};
     if (GetEnvironmentVariableA("FABLE_ONLINE_DEV", dev, sizeof(dev)) > 0 && dev[0] == '1') fo::devkit::install();
@@ -66,6 +67,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(module);
+        // Before the game is resumed, so the hooks see graphics.big open (test-only, env-gated).
+        fo::herolook::install();
         g_running = true;
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);
