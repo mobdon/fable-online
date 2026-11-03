@@ -115,6 +115,34 @@ void diff(Target& t) {
         before = std::move(now);
     }
 }
+
+// The hero's physics component (pointer at hero+0x60, CTCPhysicsControlled) is where the
+// live position should be. Watch it the same way as the hero itself.
+Target g_physics = {"CTCPhysicsControlled", 0, 0x300, {}, {}};
+
+void watch_physics() {
+    auto& hero = g_targets[0];
+    if (hero.found.empty() || !hero.found[0]) return;
+    uint32_t ptr = 0;
+    if (!safe_read(hero.found[0] + 0x60, &ptr, 4) || !ptr) return;
+    uint32_t vt = 0;
+    if (!safe_read(ptr, &vt, 4)) return;
+    if (g_physics.found.empty() || g_physics.found[0] != ptr) {
+        g_physics.vtable = vt;
+        g_physics.found.assign(1, ptr);
+        g_physics.prev.assign(1, {});
+        fo::log("probe: CTCPhysicsControlled at 0x%08X (vtable %08X)", ptr, vt);
+        std::vector<uint8_t> raw(g_physics.bytes);
+        if (safe_read(ptr, raw.data(), raw.size()))
+            for (uint32_t off = 4; off + 4 <= g_physics.bytes; off += 4) {
+                float f;
+                std::memcpy(&f, &raw[off], 4);
+                if (std::isfinite(f) && std::fabs(f) > 1.0f && std::fabs(f) < 100000.0f)
+                    fo::log("  dump CTCPhysicsControlled+0x%03X  %g", off, f);
+            }
+    }
+    diff(g_physics);
+}
 }  // namespace
 
 namespace fo {
@@ -125,6 +153,7 @@ void probe_tick() {
         if (t.vtable && (t.found.empty() || !t.found[0])) stale = true;
     if (tick % 15 == 0 || stale) scan();  // full scan every ~30 s, or when an object vanished
     for (auto& t : g_targets) if (t.vtable) diff(t);
+    watch_physics();
     ++tick;
 }
 }  // namespace fo
