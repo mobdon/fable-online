@@ -336,11 +336,16 @@ void on_status(std::unique_ptr<api::Status> st) {
         ListView_SetItemText(lv, row, 2, &pop[0]);
         if (r.id == keep) ListView_SetItemState(lv, row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
     }
+    // One realm: pick it and show it as a card. Several: show the list.
+    bool single = app.status.regions.size() == 1;
+    if (single) ListView_SetItemState(lv, 0, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+    ShowWindow(lv, single || app.status.regions.empty() ? SW_HIDE : SW_SHOW);
     SendMessageW(lv, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(lv, nullptr, TRUE);
-    if (!st->reachable) { set_text(ID_SERVER, L"REALMS UNREACHABLE"); set_text(ID_MOTD, widen(st->error)); }
-    else if (!st->online) { set_text(ID_SERVER, L"REALMS RESTING"); set_text(ID_MOTD, L"Down for maintenance"); }
-    else { set_text(ID_SERVER, L"REALMS OPEN"); set_text(ID_MOTD, widen(st->motd)); }
+    std::wstring realm = st->regions.size() == 1 ? L"REALM" : L"REALMS";
+    if (!st->reachable) { set_text(ID_SERVER, L"REALM UNREACHABLE"); set_text(ID_MOTD, widen(st->error)); }
+    else if (!st->online) { set_text(ID_SERVER, realm + L" RESTING"); set_text(ID_MOTD, L"Down for maintenance"); }
+    else { set_text(ID_SERVER, realm + L" OPEN"); set_text(ID_MOTD, widen(st->motd)); }
     // Patch once the gateway answers, and try again on later polls if it failed.
     if (st->reachable && !app.patched) start_patch();
     refresh_controls();
@@ -769,17 +774,7 @@ void build_backdrop() {
 
     frame(dc, kNewsFrame, L"TIDINGS");
     frame(dc, kHeroFrame, L"HERO");
-    frame(dc, kRealmFrame, L"REALMS");
-
-    // Column heads for the realm list.
-    SelectObject(dc, app.small);
-    SetTextColor(dc, kPewter);
-    SetTextCharacterExtra(dc, app.S(2));
-    TextOutW(dc, app.S(560), app.S(388), L"REALM", 5);
-    TextOutW(dc, app.S(684), app.S(388), L"STATE", 5);
-    TextOutW(dc, app.S(756), app.S(388), L"HEROES", 6);
-    SetTextCharacterExtra(dc, 0);
-    line(dc, app.S(556), app.S(406), app.S(836), app.S(406), kPewterDeep);
+    frame(dc, kRealmFrame, nullptr);  // heading depends on how many realms there are; see paint()
 
     SelectObject(dc, old);
     DeleteDC(dc);
@@ -812,8 +807,8 @@ void paint(HDC target) {
 
     // Realm status, top right.
     const std::wstring& srv = app.text[ID_SERVER];
-    COLORREF dot = srv == L"REALMS OPEN" ? kGood : srv.empty() ? kMuted : kBad;
-    std::wstring srv_text = srv.empty() ? L"SEEKING THE REALMS" : srv;
+    COLORREF dot = srv.size() > 5 && srv.compare(srv.size() - 5, 5, L" OPEN") == 0 ? kGood : srv.empty() ? kMuted : kBad;
+    std::wstring srv_text = srv.empty() ? L"SEEKING THE REALM" : srv;
     RECT sr = {app.width - app.S(380), app.S(26), app.width - app.S(36), app.S(48)};
     SelectObject(dc, app.heading);
     SetTextCharacterExtra(dc, app.S(3));
@@ -825,6 +820,51 @@ void paint(HDC target) {
     RECT mr = {app.width - app.S(420), app.S(50), app.width - app.S(36), app.S(72)};
     SelectObject(dc, app.body);
     shadow_text(dc, app.text[ID_MOTD], mr, DT_RIGHT | DT_SINGLELINE | DT_END_ELLIPSIS, kMuted);
+
+    // Realm panel: a card for a single realm, column heads over the list for several.
+    RECT rf = scaled(kRealmFrame);
+    int rcx = (rf.left + rf.right) / 2;
+    if (app.status.regions.size() == 1) {
+        const api::Region& g = app.status.regions[0];
+        spaced(dc, L"REALM", rcx, rf.top + app.S(12), app.heading, kHighlight, app.S(4));
+        RECT nr = {rf.left + app.S(16), rf.top + app.S(34), rf.right - app.S(16), rf.top + app.S(66)};
+        SelectObject(dc, app.subtitle);
+        shadow_text(dc, widen(g.name), nr, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS, kHighlight);
+        COLORREF sc = g.status == "online" ? kGood : g.status == "busy" ? kWarn : g.status == "full" ? kBad : kPewter;
+        std::wstring state = g.status == "online" ? L"OPEN" : g.status == "maintenance" ? L"CLOSED"
+                           : g.status == "offline" ? L"DOWN" : upper(widen(g.status));
+        spaced(dc, state, rcx, rf.top + app.S(70), app.small, sc, app.S(3));
+        // Population as a pewter gauge.
+        RECT gauge = {rf.left + app.S(40), rf.top + app.S(94), rf.right - app.S(40), rf.top + app.S(100)};
+        fill(dc, gauge, kField);
+        outline(dc, gauge, kPewterDeep);
+        if (g.capacity > 0 && g.players > 0) {
+            RECT f = gauge;
+            InflateRect(&f, -1, -1);
+            f.right = f.left + int((f.right - f.left) * std::min(1.0, double(g.players) / g.capacity));
+            vgradient(dc, f, kHighlight, kPewterOn);
+        }
+        RECT pr = {rf.left + app.S(16), rf.top + app.S(102), rf.right - app.S(16), rf.top + app.S(122)};
+        SelectObject(dc, app.small);
+        shadow_text(dc, std::to_wstring(g.players) + L" of " + std::to_wstring(g.capacity) + L" heroes in Albion", pr,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER, kMuted);
+    } else {
+        spaced(dc, app.status.regions.empty() ? L"REALM" : L"REALMS", rcx, rf.top + app.S(12), app.heading, kHighlight, app.S(4));
+        if (!app.status.regions.empty()) {
+            SelectObject(dc, app.small);
+            SetTextColor(dc, kPewter);
+            SetTextCharacterExtra(dc, app.S(2));
+            TextOutW(dc, app.S(560), app.S(388), L"REALM", 5);
+            TextOutW(dc, app.S(684), app.S(388), L"STATE", 5);
+            TextOutW(dc, app.S(756), app.S(388), L"HEROES", 6);
+            SetTextCharacterExtra(dc, 0);
+            line(dc, app.S(556), app.S(406), app.S(836), app.S(406), kPewterDeep);
+        } else {
+            RECT er = {rf.left + app.S(16), rf.top + app.S(40), rf.right - app.S(16), rf.bottom - app.S(16)};
+            SelectObject(dc, app.body);
+            shadow_text(dc, L"Seeking the realm...", er, DT_CENTER | DT_SINGLELINE | DT_VCENTER, kMuted);
+        }
+    }
 
     // Hero panel.
     if (!app.logged_in()) {

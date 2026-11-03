@@ -84,5 +84,5 @@ fable_online_launcher.exe        # defaults to http://127.0.0.1:8787
 ```
 
 Logic tests: configure with `-DFO_BUILD_TESTS=ON`, start the dev gateway with
-`--files` pointing at a folder holding a copy of `fable_online.dll`, then run
+`--files` pointing at a folder holding a copy of `fable_online.dll` and `--realms 3`, then run
 `launcher_tests.exe http://127.0.0.1:8787` from an empty folder.

@@ -2,7 +2,7 @@
 // before server/ exists. Implements shared/protocol/launcher-api.md in memory.
 // Not for players: accounts vanish on restart.
 //
-//   node tools/dev-gateway/gateway.mjs [--port 8787] [--files <folder>] [--version 0.1.0]
+//   node tools/dev-gateway/gateway.mjs [--port 8787] [--files <folder>] [--version 0.1.0] [--realms 1]
 //
 // --files serves every file in that folder as the patch manifest (point it at
 // the folder holding fable_online.dll and fable_online_launcher.exe).
@@ -21,14 +21,15 @@ const users = new Map();     // name -> { id, salt, hash }
 const access = new Map();    // token -> { name, exp }
 const refresh = new Map();   // token -> name
 const tickets = new Map();   // ticket -> { name, region, exp }
+// One realm by default; --realms 3 adds a busy and a closed one (launcher_tests uses that).
 const regions = [
-  { id: 'albion-1', name: 'Albion 1', status: 'online', players: 42, capacity: 1000, ping_host: '127.0.0.1', ping_port: 27015 },
+  { id: 'albion-1', name: 'Albion', status: 'online', players: 42, capacity: 1000, ping_host: '127.0.0.1', ping_port: 27015 },
   { id: 'albion-2', name: 'Albion 2', status: 'busy', players: 910, capacity: 1000, ping_host: '127.0.0.1', ping_port: 27016 },
   { id: 'test', name: 'Test realm', status: 'maintenance', players: 0, capacity: 200, ping_host: '127.0.0.1', ping_port: 27017 },
-];
+].slice(0, Math.max(1, Number(args.realms || 1)));
 const news = [
   { id: 'n2', title: 'Dev gateway running', date: new Date().toISOString().slice(0, 10), body: 'You are talking to tools/dev-gateway.\nAccounts reset when it restarts.', url: '' },
-  { id: 'n1', title: 'Welcome to Chapters of the Lost', date: '2026-11-03', body: 'The launcher works: log in, pick a region, press Play.', url: '' },
+  { id: 'n1', title: 'Welcome to Chapters of the Lost', date: '2026-11-03', body: 'Log in and press Enter Albion.', url: '' },
 ];
 
 const token = () => crypto.randomBytes(24).toString('base64url');
