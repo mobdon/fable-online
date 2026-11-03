@@ -9,6 +9,8 @@ import { TradeSessions } from './economy/trade.js';
 import { RegionTable } from './world/regions.js';
 import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
+import { navSimFactory } from './world/nav-sim.js';
+import { NavStore } from './world/nav/navmesh.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -33,7 +35,7 @@ export function createApp(overrides: Partial<ServerConfig> = {}, opts: { events?
   const economy = new Economy(db, events, new ItemCatalog(STARTER_ITEMS));
   const trades = new TradeSessions(economy);
   const regions = RegionTable.load(cfg.regionsPath);
-  const director = new Director(cfg, regions, opts.sim ?? stubSimFactory, events, (id, region, p) =>
+  const director = new Director(cfg, regions, opts.sim ?? (cfg.navDir ? navSimFactory(new NavStore(cfg.navDir)) : stubSimFactory), events, (id, region, p) =>
     heroes.savePosition(id, region, p.x, p.y, p.z),
   );
   return {

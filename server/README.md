@@ -58,6 +58,9 @@ exit (checked against the region graph) or a Cullis Gate, never on client reques
 | `src/heroes/` | Heroes, life stages (childhood, guild_training, world), PvP unlock flag |
 | `src/economy/` | Gold ledger, items, vendor prices, trade windows, audit |
 | `src/world/` | Region table, channels, the director (placement and scaling), simulation interface |
+| `src/world/nav/` | Walkable ground per region from Fable's own level files: A*, ground height, snapping ([docs/navigation.md](../docs/navigation.md)) |
+| `src/world/ai/` | Server-run monsters: wander, notice, chase, attack, flee, leash, threat ([docs/creature-sync.md](../docs/creature-sync.md) for the client side) |
+| `src/world/nav-sim.ts` | `NavSim`: heroes held to the ground plus AI creatures, used when `FO_NAV_DIR` is set |
 | `src/net/` | HTTP launcher API, game WebSocket, protocol validation |
 | `src/analytics/` | Typed game events written as JSON lines to `data/events.jsonl` |
 
@@ -73,9 +76,10 @@ Admin (`/admin/v1`, admin accounts only): `GET stats`, `GET economy/audit`.
 
 ## What's a stand-in for now
 
-- **`StubSim`** walks heroes around at run speed instead of running Fable. The real
-  `RegionSim` drives a server-mode Fable.exe per channel once phase 2 maps the hero, NPC and
-  combat state. Everything around it (join, ticks, persistence, scaling) is already real.
+- **`StubSim`** walks heroes around at run speed with no ground. Regions with an extracted
+  navmesh (`node tools/extractor/navmesh.mjs <install>`, then `FO_NAV_DIR=../shared/defs/nav`)
+  run on `NavSim` instead: heroes stay on walkable ground and monsters are run by the
+  server's AI. Combat there is `StubCombat` (flat damage) until the combat module lands.
 - **JSON frames.** About 45 KB/s per player in a full channel at 20 Hz. Moving to protobuf
   binary with delta updates and interest management is the next network step.
 - **SQLite.** Fine for one machine and tests. Production moves to Postgres with SERIALIZABLE

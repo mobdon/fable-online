@@ -24,6 +24,8 @@ export interface EntityState {
   yaw: number;
   anim: number;
   health: number;
+  /** Creatures only: Fable def name, so the client knows which local creature to drive. */
+  def?: string;
 }
 
 /**
