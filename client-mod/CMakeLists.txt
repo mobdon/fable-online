@@ -8,7 +8,7 @@ set(FO_MOD_SOURCES
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
-  src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp
+  src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp src/display/present.cpp src/display/hud_patch.cpp src/display/hud_scale.cpp
   src/assets/fable_font.cpp src/assets/fable_ui.cpp
   ../shared/art/big.cpp ../shared/art/lzo1x.cpp ../shared/art/dxt.cpp)
 

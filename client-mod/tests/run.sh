@@ -26,3 +26,5 @@ $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_
 $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_online_objects_tests" \
   "$here/objects_test.cpp" "$src/world/objects.cpp"
 "$out/fable_online_objects_tests"
+$cxx $flags -o "$out/fable_online_hud_test" "$here/hud_test.cpp" "$src/display/hud_patch.cpp"
+"$out/fable_online_hud_test"

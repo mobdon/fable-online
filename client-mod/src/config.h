@@ -5,6 +5,8 @@
 #include <windows.h>
 
 namespace fo {
+enum class WindowMode { Fullscreen, Windowed, Borderless };
+
 struct Config {
     // [chat]
     bool chat_enabled = true;
@@ -30,6 +32,12 @@ struct Config {
     bool widescreen = true;      // Hor+ field of view on screens wider than 4:3
     float fov_scale = 1.0f;      // 1 = Fable's own view; 1.1 = 10% more in every direction
     bool frame_probe = false;    // F10 logs one frame's Direct3D calls (for HUD work)
+    WindowMode window_mode = WindowMode::Fullscreen;
+    int res_w = -1, res_h = -1;  // -1 = the desktop's resolution, 0 = the game's, else pixels
+    int refresh_hz = -1;         // -1 = the monitor's highest at that resolution, 0 = the game's, else Hz
+    int vsync = -1;              // -1 = the game's setting, 0 = off, 1 = on
+    bool low_latency = true;
+    float hud_scale = 0;         // 0 = automatic (as on a 900-pixel-tall screen), -1 = off, else the factor     // keep the CPU at most one frame ahead of the GPU (less mouse lag)
 };
 
 void config_load(HMODULE self);

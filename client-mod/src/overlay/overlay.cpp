@@ -9,6 +9,8 @@
 #include "../assets/fable_ui.h"
 #include "../config.h"
 #include "../display/frame_probe.h"
+#include "../display/hud_scale.h"
+#include "../display/present.h"
 #include "../display/widescreen.h"
 #include "../log.h"
 #include "../menu/menu.h"
@@ -337,13 +339,27 @@ HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, H
     if (config().frame_probe) display::probe::on_present(dev);
     g_present_seen = true;
     g_drawn = false;
-    return o_Present(dev, a, b, w, r);
+    display::before_present(dev);
+    HRESULT hr = o_Present(dev, a, b, w, r);
+    display::after_present(dev);
+    return hr;
 }
 
 HRESULT WINAPI hk_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     g_r.on_lost();
     menu::on_device_lost();
+    display::on_device_lost();
+    {
+        IDirect3D9* d3d = nullptr;
+        D3DDEVICE_CREATION_PARAMETERS cp = {};
+        dev->GetCreationParameters(&cp);
+        dev->GetDirect3D(&d3d);
+        display::adjust_present(d3d, cp.AdapterOrdinal, pp, cp.hFocusWindow ? cp.hFocusWindow : g_hwnd, "reset");
+        if (d3d) d3d->Release();
+    }
     HRESULT hr = o_Reset(dev, pp);
+    if (SUCCEEDED(hr)) display::fix_window(g_hwnd);
+    else display::log_failure("Reset", hr);
     if (SUCCEEDED(hr) && pp) display::on_backbuffer(pp->BackBufferWidth, pp->BackBufferHeight, pp->hDeviceWindow ? pp->hDeviceWindow : g_hwnd);
     return hr;
 }
@@ -432,7 +448,7 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         }
         }
     }
-    return CallWindowProcW(o_WndProc, h, msg, w, l);
+    return CallWindowProcW(o_WndProc, h, msg, w, display::hud::map_mouse(msg, l));
 }
 
 bool is_keyboard(void* dev) {
@@ -502,13 +518,17 @@ void hook_device(IDirect3DDevice9* dev, HWND w) {
     if (auto o = patch::vtable(dev, kDev_EndScene, reinterpret_cast<void*>(hk_EndScene))) o_EndScene = reinterpret_cast<EndScene_t>(o);
     if (auto o = patch::vtable(dev, kDev_SetTransform, reinterpret_cast<void*>(hk_SetTransform))) o_SetTransform = reinterpret_cast<SetTransform_t>(o);
     hook_window(w);
+    display::hud::hook_device(dev);
     if (config().frame_probe) display::probe::hook(dev);
     g_device_hooked = o_EndScene && o_Present && o_Reset && o_SetTransform;
 }
 
 HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags,
                                D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
+    display::adjust_present(d3d, adapter, pp, focus ? focus : (pp ? pp->hDeviceWindow : nullptr), "start");
     HRESULT hr = o_CreateDevice(d3d, adapter, type, focus, flags, pp, out);
+    if (SUCCEEDED(hr)) display::fix_window(focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
+    else display::log_failure("CreateDevice", hr);
     if (SUCCEEDED(hr) && out && *out) hook_device(*out, focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
     if (SUCCEEDED(hr) && pp) display::on_backbuffer(pp->BackBufferWidth, pp->BackBufferHeight, pp->hDeviceWindow ? pp->hDeviceWindow : focus);
     return hr;
