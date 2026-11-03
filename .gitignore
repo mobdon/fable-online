@@ -22,3 +22,6 @@ shared/defs/*.json
 
 dist/
 tools/re-notes/rtti.json
+
+# Game files copied for local tests (never commit)
+private-test/
