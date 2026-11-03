@@ -66,8 +66,8 @@ test("say reaches only nearby players in the same region", () => {
   send(a, { t: "say", ch: "region", text: "HEY" });
   assert.deepEqual(far.texts(), ["region:Alpha:HEY"]);
   assert.deepEqual(other.texts(), []);
-  send(a, { t: "say", ch: "world", text: "anyone?" });
-  assert.deepEqual(other.texts(), ["world:Alpha:anyone?"]);
+  send(a, { t: "say", ch: "realm", text: "anyone?" });
+  assert.deepEqual(other.texts(), ["realm:Alpha:anyone?"]);
 });
 
 test("whisper, reply target and ignore", () => {
@@ -98,11 +98,11 @@ test("party and guild need membership", () => {
 test("flood control, duplicates and automatic mute", () => {
   const { join, send, advance, events } = setup();
   const a = join("Alpha");
-  send(a, { t: "say", ch: "world", text: "one" });
-  send(a, { t: "say", ch: "world", text: "two" });
-  assert.deepEqual(a.errs(), ["rate_limited"]);   // world cooldown 10 s
+  send(a, { t: "say", ch: "realm", text: "one" });
+  send(a, { t: "say", ch: "realm", text: "two" });
+  assert.deepEqual(a.errs(), ["rate_limited"]);   // realm cooldown 10 s
   advance(11_000);
-  send(a, { t: "say", ch: "world", text: "one" });
+  send(a, { t: "say", ch: "realm", text: "one" });
   assert.deepEqual(a.errs(), ["rate_limited", "duplicate"]);
   for (let i = 0; i < 10; i++) send(a, { t: "say", ch: "trade", text: "WTS " + i });
   assert.ok(a.errs().includes("muted"));
@@ -118,8 +118,8 @@ test("flood control, duplicates and automatic mute", () => {
 test("text is cleaned and filtered", () => {
   const { join, send } = setup({ bannedWords: ["darn"] });
   const a = join("Alpha");
-  send(a, { t: "say", ch: "world", text: "  oh‮  d4rn\u0007 it  " });
-  assert.deepEqual(a.texts(), ["world:Alpha:oh **** it"]);
+  send(a, { t: "say", ch: "realm", text: "  oh‮  d4rn\u0007 it  " });
+  assert.deepEqual(a.texts(), ["realm:Alpha:oh **** it"]);
   send(a, { t: "say", ch: "region", text: "x".repeat(201) });
   assert.deepEqual(a.errs(), ["too_long"]);
 });
@@ -130,7 +130,7 @@ test("moderators can mute and kick; players can't", () => {
   send(q, { t: "mod", action: "mute", name: "Pest" });
   assert.deepEqual(q.errs(), ["forbidden"]);
   send(mod, { t: "mod", action: "mute", name: "Pest", minutes: 10, reason: "spam" });
-  send(p, { t: "say", ch: "world", text: "hi" });
+  send(p, { t: "say", ch: "realm", text: "hi" });
   assert.deepEqual(p.errs(), ["muted"]);
   send(mod, { t: "mod", action: "kick", name: "Pest" });
   assert.equal(p.closedWith, "kicked");

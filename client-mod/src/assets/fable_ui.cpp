@@ -4,7 +4,7 @@
 namespace fo::assets {
 namespace {
 template <class Path>
-UiArt load(const Path& fonts_path, const Path& frontend_path) {
+UiArt load(const Path& fonts_path, const Path& frontend_path, const Path& textures_path) {
     UiArt ui;
     std::string err;
     art::Bank fonts;
@@ -57,17 +57,39 @@ UiArt load(const Path& fonts_path, const Path& frontend_path) {
     } else {
         ui.report += "frontend.big not found; ";
     }
+    // The chat window's frame. textures.big is large (about 500 MB) but only its entry table
+    // and these nine small sprites are read.
+    art::Bank tx;
+    if (tx.open(textures_path)) {
+        ui.msn_ok = true;
+        std::string sizes;
+        for (int i = 0; i < 9 && ui.msn_ok; ++i) {
+            std::string name = "PC_UI_MSN_FRAME_" + std::to_string(i + 1) + "_SPRITE";
+            art::Texture t;
+            if (!tx.load(name, t) || !art::decode(t, ui.msn[i]) || ui.msn[i].empty() || ui.msn[i].w > 256 || ui.msn[i].h > 256) {
+                ui.msn_ok = false;
+                ui.report += name + " not readable (" + tx.error() + "); ";
+                break;
+            }
+            sizes += (i ? " " : "") + std::to_string(ui.msn[i].w) + "x" + std::to_string(ui.msn[i].h);
+        }
+        if (ui.msn_ok) ui.report += "chat window frame " + sizes + "; ";
+    } else {
+        ui.report += "textures.big not found (" + tx.error() + "); ";
+    }
     if (ui.report.empty()) ui.report = "Fable fonts and frame loaded";
     return ui;
 }
 }  // namespace
 
 UiArt load_ui(const std::wstring& dir) {
-    return load(dir + L"\\data\\lang\\English\\fonts.big", dir + L"\\data\\graphics\\pc\\frontend.big");
+    return load(dir + L"\\data\\lang\\English\\fonts.big", dir + L"\\data\\graphics\\pc\\frontend.big",
+                dir + L"\\data\\graphics\\pc\\textures.big");
 }
 
 UiArt load_ui_utf8(const std::string& dir) {
-    return load(dir + "/data/lang/English/fonts.big", dir + "/data/graphics/pc/frontend.big");
+    return load(dir + "/data/lang/English/fonts.big", dir + "/data/graphics/pc/frontend.big",
+                dir + "/data/graphics/pc/textures.big");
 }
 
 }  // namespace fo::assets

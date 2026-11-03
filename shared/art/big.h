@@ -38,6 +38,7 @@ public:
 private:
     struct Entry { uint32_t size = 0, offset = 0; std::vector<uint8_t> subheader; };
     bool read_index();
+    void read_entries(uint32_t count, uint32_t eoff, uint32_t esize);
     bool read_at(uint32_t off, void* dst, size_t n);
     std::FILE* f_ = nullptr;
     std::unordered_map<std::string, Entry> index_;

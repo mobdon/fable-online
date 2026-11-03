@@ -40,25 +40,9 @@ bool Bank::read_at(uint32_t off, void* dst, size_t n) {
     return std::fseek(f_, static_cast<long>(off), SEEK_SET) == 0 && std::fread(dst, 1, n, f_) == n;
 }
 
-bool Bank::read_index() {
-    uint8_t hdr[16];
-    if (!read_at(0, hdr, sizeof hdr) || std::memcmp(hdr, "BIGB", 4) != 0) { error_ = "not a BIGB file"; return false; }
-    uint32_t bank_index = u32(hdr + 8);
-    // Bank index: u32 bank_count, cstring name, u32 id, u32 entry_count, u32 entries_offset, u32 entries_size.
-    std::vector<uint8_t> bi(512);
-    std::fseek(f_, 0, SEEK_END);
-    long file_size = std::ftell(f_);
-    if (bank_index + 8u > static_cast<uint32_t>(file_size)) { error_ = "bad bank index"; return false; }
-    size_t bn = std::min<size_t>(bi.size(), static_cast<size_t>(file_size) - bank_index);
-    if (!read_at(bank_index, bi.data(), bn)) { error_ = "bad bank index"; return false; }
-    size_t p = 4;
-    while (p < bn && bi[p]) ++p;
-    ++p;
-    if (p + 16 > bn) { error_ = "bad bank index"; return false; }
-    uint32_t count = u32(&bi[p + 4]), eoff = u32(&bi[p + 8]), esize = u32(&bi[p + 12]);
-    if (eoff + static_cast<uint64_t>(esize) > static_cast<uint64_t>(file_size)) { error_ = "bad entry table"; return false; }
+void Bank::read_entries(uint32_t count, uint32_t eoff, uint32_t esize) {
     std::vector<uint8_t> e(esize);
-    if (!read_at(eoff, e.data(), esize)) { error_ = "bad entry table"; return false; }
+    if (!read_at(eoff, e.data(), esize)) return;
     size_t q = 12;  // three u32s before the first entry
     auto need = [&](size_t n) { return q + n <= e.size(); };
     for (uint32_t i = 0; i < count; ++i) {
@@ -79,12 +63,41 @@ bool Bank::read_index() {
         uint32_t sl = u32(&e[q]);
         q += 4;
         if (!need(sl)) break;
-        Entry ent;
-        ent.size = size;
-        ent.offset = offset;
-        ent.subheader.assign(e.begin() + q, e.begin() + q + sl);
+        if (!index_.count(name)) {
+            Entry ent;
+            ent.size = size;
+            ent.offset = offset;
+            ent.subheader.assign(e.begin() + q, e.begin() + q + sl);
+            index_[name] = std::move(ent);
+        }
         q += sl;
-        index_[name] = std::move(ent);
+    }
+}
+
+bool Bank::read_index() {
+    uint8_t hdr[16];
+    if (!read_at(0, hdr, sizeof hdr) || std::memcmp(hdr, "BIGB", 4) != 0) { error_ = "not a BIGB file"; return false; }
+    uint32_t bank_index = u32(hdr + 8);
+    // Bank index: u32 bank_count, then per bank: cstring name, u32 id, u32 entry_count,
+    // u32 entries_offset, u32 entries_size, u32 block size. frontend.big has one bank,
+    // fonts.big three, textures.big several; every bank's entries go into one index, and the
+    // first bank that names a texture wins.
+    std::vector<uint8_t> bi(4096);
+    std::fseek(f_, 0, SEEK_END);
+    long file_size = std::ftell(f_);
+    if (bank_index + 8u > static_cast<uint32_t>(file_size)) { error_ = "bad bank index"; return false; }
+    size_t bn = std::min<size_t>(bi.size(), static_cast<size_t>(file_size) - bank_index);
+    if (!read_at(bank_index, bi.data(), bn)) { error_ = "bad bank index"; return false; }
+    uint32_t banks = u32(&bi[0]);
+    size_t p = 4;
+    for (uint32_t b = 0; b < banks && b < 64; ++b) {
+        while (p < bn && bi[p]) ++p;
+        ++p;
+        if (p + 20 > bn) break;
+        uint32_t count = u32(&bi[p + 4]), eoff = u32(&bi[p + 8]), esize = u32(&bi[p + 12]);
+        p += 20;
+        if (eoff + static_cast<uint64_t>(esize) > static_cast<uint64_t>(file_size)) { error_ = "bad entry table"; continue; }
+        read_entries(count, eoff, esize);
     }
     if (index_.empty()) { error_ = "no entries"; return false; }
     return true;

@@ -50,11 +50,11 @@ static void test_chat_commands() {
     EQ(out[0], R"({"t":"say","ch":"say","text":"hello there"})");
 
     type(c, U"/1 anyone?");
-    type(c, U"still world");                 // sticky channel
+    type(c, U"still realm");                 // sticky channel
     out = c.take_outbox();
     CHECK(out.size() == 2);
-    EQ(out[1], R"({"t":"say","ch":"world","text":"still world"})");
-    EQ(c.channel_label(), "World");
+    EQ(out[1], R"({"t":"say","ch":"realm","text":"still realm"})");
+    EQ(c.channel_label(), "Realm");
 
     type(c, U"/w \"Mod Kay\" hi \"there\"");
     out = c.take_outbox();
@@ -69,6 +69,9 @@ static void test_chat_commands() {
     type(c, U"/r what");
     out = c.take_outbox();
     EQ(out[0], R"({"t":"whisper","to":"Maze","text":"what"})");
+    c.on_server(parse(R"({"t":"msg","ch":"whisper","from":"Hal","to":"Ann","text":"hi"})"), 0);
+    c.on_server(parse(R"({"t":"msg","ch":"whisper","from":"Maze","to":"Hal","text":"again"})"), 0);
+    CHECK(c.contacts().size() == 2 && c.contacts()[0] == "Maze" && c.contacts()[1] == "Ann");  // newest first, no repeats
 
     type(c, U"/mute Pest 10 spamming trade");
     type(c, U"/kick Pest");
@@ -121,6 +124,7 @@ static void test_chat_editing_and_log() {
     EQ(v[0].line->text, "[Region] Bob: HEY");
     EQ(v[1].line->text, "[Trade] Bob: WTS sword");
     EQ(v[2].line->text, "To Bob: how much");
+    CHECK(c.contacts().size() == 1 && c.contacts()[0] == "Bob");  // heroes you whispered with
     CHECK(v[1].line->color == ui::ChatModel::kColorTrade);
     CHECK(c.visible(8, 10 + 13.5).size() == 3 && c.visible(8, 23.5)[0].alpha < 1.0f);  // fading
     CHECK(c.visible(8, 30).empty());          // faded out while closed
@@ -132,13 +136,13 @@ static void test_tabs() {
     ui::ChatModel c;
     c.on_server(parse(R"({"t":"welcome","name":"Hal"})"), 0);
     c.on_server(parse(R"({"t":"msg","ch":"region","from":"Bob","text":"in Oakvale"})"), 1);
-    c.on_server(parse(R"({"t":"msg","ch":"world","from":"Ann","text":"anyone?"})"), 1);
+    c.on_server(parse(R"({"t":"msg","ch":"realm","from":"Ann","text":"anyone?"})"), 1);
     c.on_server(parse(R"({"t":"msg","ch":"guild","from":"Ann","text":"muster"})"), 1);
     c.on_server(parse(R"({"t":"msg","ch":"whisper","from":"Ann","to":"Hal","text":"psst"})"), 1);
     c.on_server(parse(R"({"t":"sys","text":"Server restarts soon"})"), 1);
     c.key(ui::Key::Enter, 1);
     CHECK(c.tab() == ui::ChatTab::All && c.visible(20, 1).size() == 5);
-    CHECK(c.unread(ui::ChatTab::Guild) && c.unread(ui::ChatTab::World) && !c.unread(ui::ChatTab::All));
+    CHECK(c.unread(ui::ChatTab::Guild) && c.unread(ui::ChatTab::Realm) && !c.unread(ui::ChatTab::All));
     c.key(ui::Key::Tab, 1);
     CHECK(c.tab() == ui::ChatTab::Region);
     auto v = c.visible(20, 1);
