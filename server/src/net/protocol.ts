@@ -5,13 +5,17 @@ import type { PlayerInput } from '../world/sim.js';
  * shared/protocol/messages.proto). The codec is isolated here so it can move to protobuf
  * binary frames without touching game code.
  *
- * Client -> server: hello, input, chat, ping. That is all a client can say: intent, never
- * state. Positions, health, gold and items only ever flow server -> client.
+ * Client -> server: hello, input, chat, interact, region_ready, ping. That is all a client
+ * can say: intent, never state. Positions, health, gold and items only ever flow
+ * server -> client. "interact" names a thing the hero wants to use; the server decides
+ * whether they can reach it and what happens.
  */
 export type ClientMessage =
   | { t: 'hello'; protocol: number; exe_timestamp: string; token: string }
   | ({ t: 'input' } & PlayerInput)
   | { t: 'chat'; text: string }
+  | { t: 'interact'; thing: string; action: string }
+  | { t: 'region_ready'; region: string }
   | { t: 'ping'; n: number };
 
 export class ProtocolError extends Error {}
@@ -20,6 +24,10 @@ const MAX_FRAME = 2048;
 export const CHAT_MAX = 200;
 /** Buttons the mod is allowed to report. Unknown bits are dropped. */
 export const BUTTON_MASK = 0x0000_ffff;
+
+/** "<LevelScript>:<uid in level>" */
+const THING_ID = /^[A-Za-z0-9_]{1,64}:\d{1,20}$/;
+const ACTIONS = new Set(['use', 'open', 'close', 'opened']);
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -56,6 +64,14 @@ export function decode(raw: string): ClientMessage {
       const text = m.text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, CHAT_MAX);
       return { t: 'chat', text };
     }
+    case 'interact': {
+      if (typeof m.thing !== 'string' || !THING_ID.test(m.thing)) throw new ProtocolError('bad thing');
+      const action = typeof m.action === 'string' && ACTIONS.has(m.action) ? m.action : 'use';
+      return { t: 'interact', thing: m.thing, action };
+    }
+    case 'region_ready':
+      if (typeof m.region !== 'string' || m.region.length > 64) throw new ProtocolError('bad region');
+      return { t: 'region_ready', region: m.region };
     case 'ping':
       return { t: 'ping', n: isNum(m.n) ? m.n : 0 };
     default:

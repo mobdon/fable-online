@@ -31,15 +31,22 @@ export class ItemCatalog {
   private defs = new Map<string, ItemDef>();
 
   constructor(defs: ItemDef[]) {
-    for (const d of defs) {
-      if (!Number.isInteger(d.maxStack) || d.maxStack < 1) throw new Error(`${d.id}: bad maxStack`);
-      for (const p of [d.buy, d.sell]) if (p !== null && (!Number.isInteger(p) || p < 0)) throw new Error(`${d.id}: bad price`);
-      // The loophole check: if you could buy for X and sell for >= X you could print gold.
-      if (d.buy !== null && d.sell !== null && d.sell > Math.floor(d.buy * MAX_SELL_RATIO))
-        throw new Error(`${d.id}: sell price ${d.sell} must be <= ${MAX_SELL_RATIO} x buy price ${d.buy}`);
-      if (this.defs.has(d.id)) throw new Error(`duplicate item def ${d.id}`);
-      this.defs.set(d.id, d);
-    }
+    for (const d of defs) this.add(d);
+  }
+
+  /** Register one def. Same validation as the constructor. */
+  add(d: ItemDef): void {
+    if (!Number.isInteger(d.maxStack) || d.maxStack < 1) throw new Error(`${d.id}: bad maxStack`);
+    for (const p of [d.buy, d.sell]) if (p !== null && (!Number.isInteger(p) || p < 0)) throw new Error(`${d.id}: bad price`);
+    // The loophole check: if you could buy for X and sell for >= X you could print gold.
+    if (d.buy !== null && d.sell !== null && d.sell > Math.floor(d.buy * MAX_SELL_RATIO))
+      throw new Error(`${d.id}: sell price ${d.sell} must be <= ${MAX_SELL_RATIO} x buy price ${d.buy}`);
+    if (this.defs.has(d.id)) throw new Error(`duplicate item def ${d.id}`);
+    this.defs.set(d.id, d);
+  }
+
+  has(id: string): boolean {
+    return this.defs.has(id);
   }
 
   get(id: string): ItemDef {

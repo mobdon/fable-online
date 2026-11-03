@@ -18,6 +18,10 @@ export type GameEvent =
   | { type: 'item'; txId: number; action: string; itemId: string; defId: string; fromHero: number | null; toHero: number | null; quantity: number }
   | { type: 'trade'; txId: number; a: number; b: number }
   | { type: 'input_rejected'; heroId: number; reason: string }
+  | { type: 'interact'; heroId: number; thing: string; kind: string; ok: boolean; reason?: string }
+  | { type: 'loot'; heroId: number; thing: string; txId: number; gold: number; items: number; blocked: string[] }
+  | { type: 'theft'; heroId: number; thing: string; def: string; region: string }
+  | { type: 'region_exit'; heroId: number; from: string; to: string; via: string; thing: string }
   | { type: 'tick_stats'; channels: number; players: number; tickMs: number };
 
 export interface EventSink {

@@ -168,6 +168,36 @@ export class Economy {
     });
   }
 
+  // ---------------------------------------------------------------- world loot
+
+  /**
+   * Hand a hero the contents of a chest, container, digging spot or pickup, all in one
+   * transaction. `key` is the claim: it encodes who may take what and how often (for
+   * example once per hero per chest), so a second claim with the same key is a replay
+   * and creates nothing. The ledger row is the record that the hero took it.
+   */
+  claimLoot(heroId: number, key: string, gold: number, items: { defId: string; quantity: number }[], source: string): TxResult & { itemIds: string[] } {
+    const itemIds: string[] = [];
+    if (gold > MINT_REASONS.loot) throw new GameError('over_cap', `loot is capped at ${MINT_REASONS.loot} gold per action`);
+    const r = this.action('loot', 'system', key, { heroId, gold, items, source }, (tx) => {
+      if (!this.db.get('SELECT 1 FROM heroes WHERE id = ?', heroId)) throw new GameError('no_hero', 'Hero not found', 404);
+      if (gold > 0) this.moveGold(tx, MINT, wallet(heroId), gold, 'loot');
+      for (const it of items) itemIds.push(this.createItem(tx, heroId, it.defId, it.quantity));
+    });
+    if (r.replayed) for (const row of this.db.all<{ id: string }>('SELECT id FROM items WHERE created_tx = ? ORDER BY rowid', r.txId)) itemIds.push(row.id);
+    return { ...r, itemIds };
+  }
+
+  /** True if this claim key has been used (the hero already took that loot). */
+  claimed(key: string): boolean {
+    return this.db.get('SELECT 1 FROM ledger_tx WHERE idempotency_key = ?', key) !== undefined;
+  }
+
+  /** How many of an item the hero holds (inventory, equipped and bank). */
+  countOf(heroId: number, defId: string): number {
+    return this.db.get<{ n: number }>("SELECT COALESCE(SUM(quantity),0) AS n FROM items WHERE owner_hero = ? AND def_id = ? AND location IN ('inventory','equipped','bank')", heroId, defId)!.n;
+  }
+
   // ---------------------------------------------------------------- vendors
 
   vendorBuy(heroId: number, defId: string, quantity: number, key: string): TxResult & { itemId: string } {
