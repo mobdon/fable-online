@@ -119,14 +119,18 @@ bool Renderer::build_atlas(const assets::UiArt* art, int fallback_px) {
             if (!blit(imgs[i]->px.data(), imgs[i]->w, imgs[i]->h, *slots[i])) { fable_frame_ = false; break; }
     }
 
+    fable_msn_ = art && art->msn_ok;
+    for (int i = 0; i < 9 && fable_msn_; ++i)
+        if (!blit(art->msn[i].px.data(), art->msn[i].w, art->msn[i].h, msn_[i])) fable_msn_ = false;
+
     if (FAILED(dev_->CreateTexture(tex_w_, tex_h_, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex_, nullptr))) return false;
     D3DLOCKED_RECT lr;
     if (FAILED(tex_->LockRect(0, &lr, nullptr, 0))) { tex_->Release(); tex_ = nullptr; return false; }
     for (int y = 0; y < tex_h_; ++y)
         std::memcpy(static_cast<uint8_t*>(lr.pBits) + y * lr.Pitch, &px[static_cast<size_t>(y) * tex_w_], tex_w_ * 4);
     tex_->UnlockRect(0);
-    fo::log("overlay: text %s, frame %s", fable_fonts_ ? "Fable's own fonts" : "Windows Tahoma (fonts.big not read)",
-            fable_frame_ ? "Fable's pewter frame" : "plain");
+    fo::log("overlay: text %s, frame %s, chat window %s", fable_fonts_ ? "Fable's own fonts" : "Windows Tahoma (fonts.big not read)",
+            fable_frame_ ? "Fable's pewter frame" : "plain", fable_msn_ ? "the PC chat screen frame" : "the pewter frame");
     return true;
 }
 
@@ -246,6 +250,26 @@ void Renderer::panel(float x, float y, float w, float h, float a) {
     sprite(bottom_, x + cs, y + h - e, w - 2 * cs, e, c);
     sprite(left_, x, y + cs, e, h - 2 * cs, c);
     sprite(right_, x + w - e, y + cs, e, h - 2 * cs, c);
+}
+
+void Renderer::window(float x, float y, float w, float h, float a) {
+    if (!fable_msn_) { panel(x, y, w, h, a); return; }
+    rect(x + 4, y + 4, w - 8, h - 8, scale_alpha(fill_, 0.82f * a));
+    uint32_t c = scale_alpha(0xFFFFFFFF, a);
+    // Corners and edges at their own size (capped, so a big frame can't swallow a small
+    // window); edges and centre stretch.
+    auto cap = [](int v) { return static_cast<float>(v > 40 ? 40 : v); };
+    const float l = cap(msn_[0].w), r = cap(msn_[2].w), t = cap(msn_[0].h), b = cap(msn_[6].h);
+    const float mw = w - l - r, mh = h - t - b;
+    sprite(msn_[4], x + l, y + t, mw, mh, c);
+    sprite(msn_[0], x, y, l, t, c);
+    sprite(msn_[1], x + l, y, mw, t, c);
+    sprite(msn_[2], x + w - r, y, r, t, c);
+    sprite(msn_[3], x, y + t, l, mh, c);
+    sprite(msn_[5], x + w - r, y + t, r, mh, c);
+    sprite(msn_[6], x, y + h - b, l, b, c);
+    sprite(msn_[7], x + l, y + h - b, mw, b, c);
+    sprite(msn_[8], x + w - r, y + h - b, r, b, c);
 }
 
 float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends) {

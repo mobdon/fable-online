@@ -24,6 +24,10 @@ public:
     void rect(float x, float y, float w, float h, uint32_t argb);
     // A Fable panel: dark fill, pewter frame with rivets in the corners.
     void panel(float x, float y, float w, float h, float alpha);
+    // The chat window: the 9-slice frame of Lionhead's unused PC chat screen when
+    // textures.big could be read, otherwise the same pewter frame as panel().
+    void window(float x, float y, float w, float h, float alpha);
+    bool using_chat_frame() const { return fable_msn_; }
     // Fable's pewter scroll bar (its menu buttons): ornate ends when `ends`, warm when `on`.
     // Returns the width of one end piece at this height, so callers can inset text.
     float bar(float x, float y, float w, float h, float alpha, bool on, bool ends);
@@ -56,8 +60,9 @@ private:
     FaceInfo faces_[3];
     assets::Font fallback_[3];              // GDI Tahoma, when fonts.big couldn't be read
     Rect white_, tl_, tr_, bl_, br_, top_, bottom_, left_, right_;
-    Rect bar_[2][3];                         // [off/on][left, middle, right]
-    bool fable_fonts_ = false, fable_frame_ = false, fable_bar_ = false;
+    Rect bar_[2][3];
+    Rect msn_[9];                            // chat window 9-slice, reading order                         // [off/on][left, middle, right]
+    bool fable_fonts_ = false, fable_frame_ = false, fable_bar_ = false, fable_msn_ = false;
     uint32_t fill_ = 0xFF141E26;
     float screen_w_ = 0, screen_h_ = 0;
     std::vector<Vertex> verts_;

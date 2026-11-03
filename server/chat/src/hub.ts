@@ -196,7 +196,7 @@ export class ChatHub {
         break;
       }
       case "region": targets = this.all().filter((o) => o.region === s.region); break;
-      case "world": case "trade": targets = this.all(); break;
+      case "realm": case "trade": targets = this.all(); break;
       case "party":
         if (!s.party) return this.err(s.conn, "not_in_party", "You are not in a party.");
         targets = this.all().filter((o) => o.party === s.party); break;

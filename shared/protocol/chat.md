@@ -37,7 +37,7 @@ Hero names: 3 to 16 characters, letters, digits, spaces, `'` and `-`, starting w
 | --- | --- | --- |
 | `say` | heroes within 30 units, same region | none |
 | `region` | everyone in your region (Bowerstone, Oakvale, ...) | 3 s |
-| `world` | everyone online | 10 s |
+| `realm` | everyone online in the realm (Realm chat) | 10 s |
 | `trade` | everyone online | 30 s |
 | `party` | your party (party system: later) | none |
 | `guild` | your guild: every guild, sub guilds included, is its own channel (`guildId` from the login token or the region server) | none |

@@ -2,7 +2,7 @@
 //   npm run bot -- --name "Test Bot" --region 12 --at 100,20,5 --renown 2500 --title "Hero" --guild OAK [--pvp]
 // (renown, title, guild and pvp only work on a dev server: production takes them from the account)
 // Walks in a small circle at --at and answers whispers. Type lines to chat as the bot
-// ("/w Hal hi", "/world hello", or plain text for say).
+// ("/w Hal hi", "/realm hello", or plain text for say).
 import { connect } from "node:net";
 import { createInterface } from "node:readline";
 
@@ -40,8 +40,8 @@ setInterval(() => send({ t: "ping", n: Date.now() }), 30_000);
 
 createInterface({ input: process.stdin }).on("line", (l) => {
   const w = /^\/w\s+(\S+)\s+(.+)/.exec(l);
-  const c = /^\/(say|region|world|trade|party|guild|1|2)\s+(.+)/.exec(l);
-  const alias: Record<string, string> = { "1": "world", "2": "trade" };
+  const c = /^\/(say|region|realm|world|trade|party|guild|1|2)\s+(.+)/.exec(l);
+  const alias: Record<string, string> = { "1": "realm", world: "realm", "2": "trade" };
   if (w) send({ t: "whisper", to: w[1], text: w[2] });
   else if (c) send({ t: "say", ch: alias[c[1]] ?? c[1], text: c[2] });
   else if (l.trim()) send({ t: "say", ch: "say", text: l });

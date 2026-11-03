@@ -7,7 +7,7 @@ export const MAX_LINE_BYTES = 4096;   // a client line longer than this drops th
 export const MAX_TEXT_CHARS = 200;    // one chat message
 
 /** Channels a player can type into. "whisper" and "system" are server-made. */
-export const TALK_CHANNELS = ["say", "region", "world", "trade", "party", "guild"] as const;
+export const TALK_CHANNELS = ["say", "region", "realm", "trade", "party", "guild"] as const;
 export type TalkChannel = (typeof TALK_CHANNELS)[number];
 export type Channel = TalkChannel | "whisper" | "system";
 

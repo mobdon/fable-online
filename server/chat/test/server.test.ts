@@ -35,7 +35,7 @@ test("two clients chat over TCP", async () => {
   a.send({ t: "hello", v: 1, name: "Alpha" });
   b.send({ t: "hello", v: 1, name: "Bravo" });
   await a.next("welcome"); await b.next("welcome");
-  a.raw('{"t":"say","ch":"world",');            // split across packets
+  a.raw('{"t":"say","ch":"realm",');            // split across packets
   a.raw('"text":"hi there"}\n{"t":"ping","n":7}\n');
   assert.equal((await b.next("msg")).text, "hi there");
   assert.equal((await a.next("pong")).n, 7);

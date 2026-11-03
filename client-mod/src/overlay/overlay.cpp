@@ -1,6 +1,7 @@
 #include "overlay.h"
 #include <windows.h>
 #include <d3d9.h>
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -141,62 +142,135 @@ void draw_tags(const Config& cfg) {
     }
 }
 
+// Realm chat, laid out like Lionhead's unused PC chat screen (PC_MSN_SCREEN): one framed
+// window with a list down the left (channels, the heroes you whisper with, heroes nearby),
+// the conversation on the right and the edit box under it. Closed, only the newest lines
+// stay up and fade.
+void draw_text_line(float x, float y, float room, const std::string& s, uint32_t c, Face f) {
+    if (g_r.measure(s, f) <= room) { g_r.text(x, y, s, c, f); return; }
+    std::u32string u = ui::utf8_to_u32(s);
+    while (!u.empty() && g_r.measure(ui::u32_to_utf8(u) + "...", f) > room) u.pop_back();
+    g_r.text(x, y, ui::u32_to_utf8(u) + "...", c, f);
+}
+
 void draw_chat(const Config& cfg, double now) {
-    const float lh = g_r.line_height(Face::Chat);
-    const float pad = 14;
-    const float w = g_r.screen_w() * 0.42f > 620 ? 620 : g_r.screen_w() * 0.42f;
-    const int rows = cfg.chat_rows;
-    const float box_x = 16, box_bottom = g_r.screen_h() - 40;
-    const float input_h = lh + 10;
-    const float box_h = lh * rows + input_h + pad * 2 + 4;
-    const float box_y = box_bottom - box_h;
-    const float x = box_x + pad;
-    const float input_y = box_bottom - pad - lh - 2;
-    const float log_bottom = input_y - 10;
+    const float lh = g_r.line_height(Face::Chat), sh = g_r.line_height(Face::Small), th = g_r.line_height(Face::Title);
+    const bool open = g_chat.is_open();
+    const float pad = 16;
+    const float win_w = std::min(780.0f, std::max(480.0f, g_r.screen_w() * 0.58f));
+    const float side_w = 168;                      // the list column
+    const float title_h = th + 10, edit_h = lh + 12;
+    // Tall enough for the channels and a few contacts; the conversation gets the rest.
+    int rows = cfg.chat_rows;
+    if (open) {
+        const size_t whispers = std::min<size_t>(g_chat.contacts().size(), 3);
+        const size_t near_n = std::min<size_t>(std::max<size_t>(g_tags.size(), 1), 4);
+        const float side = (sh + 3) + static_cast<float>(ui::ChatTab::Count) * (lh + 4) + 6 +
+                           (whispers ? sh + 3 + lh * whispers + 6 : 0) + sh + 3 + lh * near_n;
+        while (lh * rows + 10 + edit_h < side && rows < 30) ++rows;
+    }
+    const float win_h = pad + title_h + lh * rows + 10 + edit_h + pad;
+    const float win_x = 16, win_y = g_r.screen_h() - 40 - win_h;
+    const float conv_x = open ? win_x + pad + side_w + 16 : win_x + pad;
+    const float conv_w = win_x + win_w - pad - conv_x;
+    const float edit_y = win_y + win_h - pad - edit_h;
+    const float conv_bottom = edit_y - 8;
 
     std::vector<std::pair<std::string, uint32_t>> phys;
     for (const auto& v : g_chat.visible(static_cast<size_t>(rows), now)) {
         uint32_t a = static_cast<uint32_t>(v.alpha * ((v.line->color >> 24) & 0xFF));
         uint32_t c = (a << 24) | (v.line->color & 0x00FFFFFF);
-        for (auto& part : g_r.wrap(v.line->text, w - pad * 2)) phys.emplace_back(std::move(part), c);
+        for (auto& part : g_r.wrap(v.line->text, conv_w - 4)) phys.emplace_back(std::move(part), c);
     }
     size_t first = phys.size() > static_cast<size_t>(rows) ? phys.size() - rows : 0;
-    if (g_chat.is_open()) {
-        // Tabs on Fable's pewter bars along the top of the box: the open one warm, a tab
-        // with new lines in bright parchment. Tab / Shift+Tab switch.
-        const float tab_h = lh + 8;
-        float tx = box_x + 8;
+
+    if (open) {
+        const uint32_t kHead = 0xFFC9C0A8, kText = 0xFFE9E4D6, kBright = 0xFFFFF6DC, kDim = 0xFF7E786C;
+        g_r.window(win_x, win_y, win_w, win_h, 1.0f);
+
+        // Title bar: the window's name, and the connection on the right.
+        const float ty = win_y + pad - 2;
+        g_r.text(win_x + pad + 2, ty, "Realm Chat", kBright, Face::Title);
+        std::string status = net::chat_connected() ? "Online" : "Offline - reconnecting";
+        g_r.text(win_x + win_w - pad - g_r.measure(status, Face::Small), ty + th - sh - 2, status,
+                 net::chat_connected() ? kHead : ui::ChatModel::kColorError, Face::Small);
+        g_r.rule(win_x + 10, win_y + pad + title_h - 6, win_w - 20, 0.9f);
+
+        // Left column: channels (the tabs), then whispers and nearby heroes like a contact list.
+        const float sx = win_x + pad, top = win_y + pad + title_h + 2, bottom = win_y + win_h - pad;
+        float y = top;
+        auto heading = [&](const char* name) {
+            g_r.text(sx + 2, y, name, kHead, Face::Small);
+            y += sh + 3;
+        };
+        heading("Channels");
+        const float row_h = lh + 4;
         for (int t = 0; t < static_cast<int>(ui::ChatTab::Count); ++t) {
             auto tab = static_cast<ui::ChatTab>(t);
-            std::string name = ui::tab_name(tab);
             bool active = g_chat.tab() == tab, fresh = g_chat.unread(tab);
-            float tw = g_r.measure(name) + 22;
-            g_r.bar(tx, box_y - tab_h + 3, tw, tab_h, active ? 1.0f : 0.75f, active, false);
-            g_r.text(tx + 11, box_y - tab_h + 3 + (tab_h - lh) / 2, name,
-                     active ? 0xFFFFF6DC : fresh ? 0xFFF4E3A8 : 0xFFC9C0A8);
-            tx += tw + 4;
+            if (active) g_r.bar(sx, y, side_w, row_h, 1.0f, true, false);
+            g_r.text(sx + 10, y + (row_h - lh) / 2, ui::tab_name(tab), active ? kBright : fresh ? 0xFFF4E3A8 : kText);
+            if (fresh && !active) g_r.text(sx + side_w - 14, y + (row_h - lh) / 2, "*", 0xFFF4E3A8);
+            y += row_h;
         }
-        g_r.panel(box_x, box_y, w, box_h, 1.0f);
-        g_r.rule(box_x + 10, input_y - 9, w - 20, 0.9f);
+        y += 6;
+        auto room_for_row = [&] { return y + lh <= bottom; };
+        if (!g_chat.contacts().empty() && y + sh + 3 + lh <= bottom) {
+            heading("Whispers");
+            for (const auto& name : g_chat.contacts()) {
+                if (!room_for_row()) break;
+                bool target = g_chat.channel_label() == "To " + name;
+                draw_text_line(sx + 10, y, side_w - 12, name, target ? ui::ChatModel::kColorWhisper : kText, Face::Chat);
+                y += lh;
+            }
+            y += 6;
+        }
+        std::vector<const ui::Tag*> nearby;
+        for (const auto& kv : g_tags.tags()) nearby.push_back(&kv.second);
+        std::sort(nearby.begin(), nearby.end(), [](const ui::Tag* a, const ui::Tag* b) { return a->renown > b->renown; });
+        if (y + sh + 3 + lh <= bottom) {
+            heading(nearby.empty() ? "Nearby: nobody" : "Nearby");
+            size_t shown = 0;
+            for (const ui::Tag* t : nearby) {
+                if (!room_for_row()) break;
+                if (shown + 1 < nearby.size() && y + 2 * lh > bottom) {   // last row: say how many more
+                    g_r.text(sx + 10, y, "and " + std::to_string(nearby.size() - shown) + " more", kDim, Face::Small);
+                    break;
+                }
+                draw_text_line(sx + 10, y, side_w - 12, t->name, ui::renown_color(t->renown) | 0xFF000000, Face::Chat);
+                y += lh;
+                ++shown;
+            }
+        }
+
+        // Divider between the list and the conversation.
+        g_r.rect(sx + side_w + 7, top, 1, bottom - top, 0x90938D7E);
+        g_r.rect(sx + side_w + 8, top, 1, bottom - top, 0x60000000);
+
+        // Scrolled up: a note at the top of the conversation.
+        if (g_chat.scrolled() > 0)
+            g_r.text(conv_x + conv_w - g_r.measure("PgDn: newer", Face::Small), top, "PgDn: newer", kDim, Face::Small);
+
+        // Edit box: an inset frame under the conversation, like PC_MSN_EDIT_BOX.
+        g_r.panel(conv_x - 8, edit_y, conv_w + 16, edit_h, 0.95f);
+        const float iy = edit_y + (edit_h - lh) / 2, ix = conv_x + 2;
         std::string label = g_chat.channel_label() + ": ";
-        float lx = x + g_r.text(x, input_y, label, net::chat_connected() ? 0xFFC9C0A8 : 0xFF7E786C);
+        float lx = ix + g_r.text(ix, iy, label, net::chat_connected() ? kHead : kDim);
         // Long input scrolls sideways so the cursor stays in the box.
         std::u32string u = ui::utf8_to_u32(g_chat.input_utf8());
-        const float room = box_x + w - pad - 4 - lx;
+        const float room = conv_x + conv_w - 4 - lx;
         size_t from = 0;
         while (from < g_chat.cursor() && g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from))) > room) ++from;
         size_t to = from;
         while (to < u.size() && g_r.measure(ui::u32_to_utf8(u.substr(from, to + 1 - from))) <= room) ++to;
-        g_r.text(lx, input_y, ui::u32_to_utf8(u.substr(from, to - from)), 0xFFFFF6DC);
+        g_r.text(lx, iy, ui::u32_to_utf8(u.substr(from, to - from)), kBright);
         if (static_cast<int>(now * 2) % 2 == 0) {
             float cx = lx + g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from)));
-            g_r.rect(cx, input_y + 1, 1, lh - 2, 0xE0FFF6DC);
+            g_r.rect(cx, iy + 1, 1, lh - 2, 0xE0FFF6DC);
         }
-        if (!net::chat_connected())
-            g_r.text(box_x + 4, box_y - lh * 2 - 14, "The chat server can't be reached. Trying again...", ui::ChatModel::kColorError);
     }
-    float y = log_bottom - lh * static_cast<float>(phys.size() - first);
-    for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(x, y, phys[i].first, phys[i].second);
+    float y = conv_bottom - lh * static_cast<float>(phys.size() - first);
+    for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(conv_x, y, phys[i].first, phys[i].second);
 }
 
 void draw(IDirect3DDevice9* dev) {

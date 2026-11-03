@@ -69,7 +69,7 @@ std::string trim(const std::string& s) {
 
 uint32_t channel_color(const std::string& ch) {
     if (ch == "region") return ChatModel::kColorRegion;
-    if (ch == "world") return ChatModel::kColorWorld;
+    if (ch == "realm") return ChatModel::kColorRealm;
     if (ch == "trade") return ChatModel::kColorTrade;
     if (ch == "party") return ChatModel::kColorParty;
     if (ch == "guild") return ChatModel::kColorGuild;
@@ -83,7 +83,7 @@ uint8_t bit(ChatTab t) { return static_cast<uint8_t>(1u << static_cast<int>(t));
 uint8_t tabs_for(const std::string& ch) {
     uint8_t all = bit(ChatTab::All);
     if (ch == "say" || ch == "region") return all | bit(ChatTab::Region);
-    if (ch == "world" || ch == "trade") return all | bit(ChatTab::World);
+    if (ch == "realm" || ch == "trade") return all | bit(ChatTab::Realm);
     if (ch == "guild") return all | bit(ChatTab::Guild);
     if (ch == "whisper") return all | bit(ChatTab::Whispers);
     return all;  // party
@@ -91,7 +91,7 @@ uint8_t tabs_for(const std::string& ch) {
 
 const char* kHelp[] = {
     "Enter: chat.  Esc: close.  Tab: next tab.  Up/Down: history.  PgUp/PgDn: scroll.",
-    "/s say (nearby)  /re region  /1 world  /2 trade  /p party  /g guild",
+    "/s say (nearby)  /re region  /1 realm  /2 trade  /p party  /g guild",
     "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
     "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
 };
@@ -101,7 +101,7 @@ const char* tab_name(ChatTab t) {
     switch (t) {
     case ChatTab::All: return "All";
     case ChatTab::Region: return "Region";
-    case ChatTab::World: return "World";
+    case ChatTab::Realm: return "Realm";
     case ChatTab::Guild: return "Guild";
     case ChatTab::Whispers: return "Whispers";
     default: return "";
@@ -114,7 +114,7 @@ void ChatModel::set_tab(ChatTab t) {
     unread_ &= static_cast<uint8_t>(~bit(t));
     switch (t) {
     case ChatTab::Region: channel_ = "region"; whisper_to_.clear(); break;
-    case ChatTab::World: channel_ = "world"; whisper_to_.clear(); break;
+    case ChatTab::Realm: channel_ = "realm"; whisper_to_.clear(); break;
     case ChatTab::Guild: channel_ = "guild"; whisper_to_.clear(); break;
     case ChatTab::Whispers:
         if (!reply_to_.empty()) { channel_ = "whisper"; whisper_to_ = reply_to_; }
@@ -192,6 +192,14 @@ void ChatModel::send_whisper(const std::string& to, const std::string& text) {
     outbox_.push_back("{\"t\":\"whisper\",\"to\":" + json::quote(to) + ",\"text\":" + json::quote(text) + "}");
 }
 
+void ChatModel::remember_contact(const std::string& name) {
+    if (name.empty()) return;
+    for (auto it = contacts_.begin(); it != contacts_.end(); ++it)
+        if (*it == name) { contacts_.erase(it); break; }
+    contacts_.push_front(name);
+    if (contacts_.size() > kMaxContacts) contacts_.pop_back();
+}
+
 void ChatModel::submit(double now) {
     std::string line = trim(u32_to_utf8(input_));
     if (line.empty()) return;
@@ -209,12 +217,12 @@ void ChatModel::submit(double now) {
     struct Alias { const char* name; const char* ch; };
     static const Alias talk[] = {
         {"s", "say"}, {"say", "say"}, {"re", "region"}, {"region", "region"}, {"y", "region"}, {"sh", "region"}, {"shout", "region"},
-        {"1", "world"}, {"world", "world"}, {"2", "trade"}, {"trade", "trade"},
+        {"1", "realm"}, {"realm", "realm"}, {"world", "realm"}, {"2", "trade"}, {"trade", "trade"},
         {"p", "party"}, {"party", "party"}, {"g", "guild"}, {"guild", "guild"},
     };
     for (const auto& a : talk) {
         if (cmd != a.name) continue;
-        channel_ = a.ch;  // typing "/1" alone switches the box to world chat
+        channel_ = a.ch;  // typing "/1" alone switches the box to Realm chat
         whisper_to_.clear();
         if (!rest.empty()) send_say(channel_, rest);
         return;
@@ -291,8 +299,10 @@ void ChatModel::on_server(const json::Value& m, double now) {
         std::string ch = m.str("ch"), from = m.str("from"), text = m.str("text");
         std::string line;
         if (ch == "whisper") {
-            if (from == me_) line = "To " + m.str("to") + ": " + text;
+            std::string who = from == me_ ? m.str("to") : from;
+            if (from == me_) line = "To " + who + ": " + text;
             else { line = from + " whispers: " + text; reply_to_ = from; }
+            remember_contact(who);
         } else if (ch == "say") {
             line = from + ": " + text;
         } else {

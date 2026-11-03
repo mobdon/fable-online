@@ -13,7 +13,7 @@ namespace fo::ui {
 enum class Key { Enter, Escape, Backspace, Delete, Left, Right, Home, End, Up, Down, PageUp, PageDown, Tab, BackTab };
 
 // Chat tabs. Each line belongs to All plus at most one other tab; system lines show everywhere.
-enum class ChatTab : uint8_t { All = 0, Region, World, Guild, Whispers, Count };
+enum class ChatTab : uint8_t { All = 0, Region, Realm, Guild, Whispers, Count };
 const char* tab_name(ChatTab t);
 
 struct ChatLine {
@@ -53,13 +53,19 @@ public:
 
     std::string input_utf8() const;
     size_t cursor() const { return cursor_; }  // in characters
-    std::string channel_label() const;         // "Say", "World", "To Hal", ...
+    std::string channel_label() const;         // "Say", "Realm", "To Hal", ...
 
-    // Tab / Shift+Tab while typing switch tabs. Picking Region, World, Guild or Whispers also
+    // Tab / Shift+Tab while typing switch tabs. Picking Region, Realm, Guild or Whispers also
     // makes that the channel you type into.
     ChatTab tab() const { return tab_; }
+    size_t scrolled() const { return scroll_; }  // lines up from the newest
     void set_tab(ChatTab t);
     bool unread(ChatTab t) const { return (unread_ >> static_cast<int>(t)) & 1; }
+
+    // Heroes you have whispered with, most recent first: the contact list of the chat window.
+    static constexpr size_t kMaxContacts = 8;
+    const std::deque<std::string>& contacts() const { return contacts_; }
+    const std::string& whisper_target() const { return whisper_to_; }
 
     bool tags_enabled() const { return tags_enabled_; }
     const std::string& me() const { return me_; }
@@ -67,7 +73,7 @@ public:
     // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
     static constexpr uint32_t kColorSay = 0xFFE9E4D6;
     static constexpr uint32_t kColorRegion = 0xFFE8B46A;
-    static constexpr uint32_t kColorWorld = 0xFFF4E3A8;
+    static constexpr uint32_t kColorRealm = 0xFFF4E3A8;
     static constexpr uint32_t kColorTrade = 0xFFD2A878;
     static constexpr uint32_t kColorParty = 0xFF9AA3F4;
     static constexpr uint32_t kColorGuild = 0xFFA8CF8E;
@@ -80,6 +86,7 @@ private:
     void push(std::string text, uint32_t color, double now, uint8_t tabs = 0xFF);
     void send_say(const std::string& ch, const std::string& text);
     void send_whisper(const std::string& to, const std::string& text);
+    void remember_contact(const std::string& name);
 
     bool open_ = false;
     std::u32string input_;
@@ -96,6 +103,7 @@ private:
     bool tags_enabled_ = true;
     ChatTab tab_ = ChatTab::All;
     uint8_t unread_ = 0;
+    std::deque<std::string> contacts_;
 };
 
 // UTF-8 <-> UTF-32 helpers (also used by the renderer).
