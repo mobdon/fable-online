@@ -24,6 +24,8 @@ export interface EntityState {
   yaw: number;
   anim: number;
   health: number;
+  /** Fable def name for anything that isn't a hero; the client mod picks the puppet's mesh from it. */
+  def?: string;
 }
 
 /**

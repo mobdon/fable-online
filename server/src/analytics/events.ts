@@ -24,7 +24,9 @@ export type GameEvent =
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }
   | { type: 'staff_item_blocked'; heroId: number; defId: string; action: string; actor: string }
   | { type: 'quest_reward'; heroId: number; quest: string; gold: number; items: number }
-  | { type: 'quest_reward_rejected'; heroId: number; quest: string; gold: number; reason: string };
+  | { type: 'quest_reward_rejected'; heroId: number; quest: string; gold: number; reason: string }
+  | { type: 'shop_buy'; heroId: number; shopId: string; defId: string; quantity: number; price: number; replayed: boolean }
+  | { type: 'shop_sell'; heroId: number; shopId: string; itemId: string; gold: number; replayed: boolean };
 
 export interface EventSink {
   emit(e: GameEvent): void;

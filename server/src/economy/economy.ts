@@ -174,13 +174,19 @@ export class Economy {
 
   // ---------------------------------------------------------------- vendors
 
-  vendorBuy(heroId: number, defId: string, quantity: number, key: string): TxResult & { itemId: string } {
+  /**
+   * Buy from a vendor. `unitPrice` lets a shop charge its markup; it can never be below the
+   * catalog price, so no shop can sell under what vendors pay back.
+   */
+  vendorBuy(heroId: number, defId: string, quantity: number, key: string, unitPrice?: number): TxResult & { itemId: string } {
     const def = this.catalog.get(defId);
     if (def.buy === null) throw new GameError('not_for_sale', 'Vendors do not sell that');
+    const price = unitPrice ?? def.buy;
+    if (!Number.isInteger(price) || price < def.buy) throw new GameError('bad_price', 'Bad price');
     let itemId = '';
-    const r = this.action('vendor_buy', wallet(heroId), key, { defId, quantity }, (tx) => {
+    const r = this.action('vendor_buy', wallet(heroId), key, { defId, quantity, price }, (tx) => {
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > def.maxStack) throw new GameError('bad_quantity', 'Bad quantity');
-      if (def.buy! > 0) this.moveGold(tx, wallet(heroId), SINK, def.buy! * quantity, 'vendor_buy');
+      if (price > 0) this.moveGold(tx, wallet(heroId), SINK, price * quantity, 'vendor_buy');
       itemId = this.createItem(tx, heroId, defId, quantity);
     });
     if (r.replayed) itemId = this.firstItemOfTx(r.txId);

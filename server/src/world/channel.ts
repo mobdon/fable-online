@@ -23,6 +23,9 @@ export class Channel {
   readonly openedAt = Date.now();
   emptySince: number | null = Date.now();
   tick = 0;
+  /** Last sky state sent to this channel (Director.syncSky). */
+  skyKey = '';
+  skyAt = 0;
 
   constructor(
     readonly id: string,

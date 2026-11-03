@@ -5,6 +5,10 @@ import type { Hero } from '../heroes/heroes.js';
 import { Channel, type PlayerLink } from './channel.js';
 import { STAGE_REGIONS, type RegionTable } from './regions.js';
 import type { PlayerInput, SimFactory, Vec3 } from './sim.js';
+import type { WorldClock } from './clock.js';
+
+const SKY_CHECK_MS = 1000;
+const SKY_RESYNC_MS = 60_000;
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
@@ -33,6 +37,7 @@ export class Director {
   private nextIndex = new Map<string, number>();
   private privateCount = 0;
   private lastPersist = Date.now();
+  private lastSky = 0;
   private timer: NodeJS.Timeout | null = null;
   lastTickMs = 0;
 
@@ -42,6 +47,7 @@ export class Director {
     private simFactory: SimFactory,
     private events: EventSink,
     private persist: PersistFn,
+    private clock?: WorldClock,
   ) {}
 
   start(): void {
@@ -125,6 +131,10 @@ export class Director {
     const t0 = performance.now();
     for (const c of this.channels.values()) c.step(dtMs);
     const now = Date.now();
+    if (this.clock && now - this.lastSky >= SKY_CHECK_MS) {
+      this.lastSky = now;
+      for (const c of this.channels.values()) this.syncSky(c, now);
+    }
     if (now - this.lastPersist >= this.cfg.persistEveryMs) {
       this.lastPersist = now;
       this.persistAll();
@@ -167,6 +177,19 @@ export class Director {
     this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
     this.events.emit({ type: 'region_enter', heroId: link.heroId, region: ch.region.name, channelId: ch.id, private: ch.kind === 'private' });
     link.send(JSON.stringify({ t: 'enter_region', region: ch.region.name, region_uid: ch.region.uid, channel: ch.id, x: at.x, y: at.y, z: at.z }));
+    if (this.clock) link.send(JSON.stringify({ t: 'sky', ...this.clock.sky(ch.region.name) }));
+  }
+
+  /**
+   * Tell a channel's players about the sky when the weather or day/night changes, and every
+   * SKY_RESYNC_MS anyway so clients that drifted (a paused game, a slow machine) snap back.
+   */
+  private syncSky(ch: Channel, now: number): void {
+    const key = this.clock!.skyKey(ch.region.name, now);
+    if (key === ch.skyKey && now - ch.skyAt < SKY_RESYNC_MS) return;
+    ch.skyKey = key;
+    ch.skyAt = now;
+    if (ch.count) ch.broadcast(JSON.stringify({ t: 'sky', ...this.clock!.sky(ch.region.name, now) }));
   }
 
   private pickShared(region: string): Channel {

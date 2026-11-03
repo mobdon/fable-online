@@ -18,6 +18,10 @@ import { TradeSessions } from './economy/trade.js';
 import { RegionTable } from './world/regions.js';
 import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
+import { WorldClock } from './world/clock.js';
+import { loadTownData, type TownData } from './world/town/town-data.js';
+import { shopsFromTown } from './world/town/town-shops.js';
+import { withTown } from './world/town/town-sim.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -35,12 +39,14 @@ export interface App {
   quests: QuestRewards;
   regions: RegionTable;
   director: Director;
+  clock: WorldClock;
+  town: TownData;
   close(): void;
 }
 
 export function createApp(
   overrides: Partial<ServerConfig> = {},
-  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi } = {},
+  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi; town?: TownData; clock?: WorldClock } = {},
 ): App {
   const cfg = loadConfig(overrides);
   const db = new Database(cfg.dbPath);
@@ -54,7 +60,11 @@ export function createApp(
   const trades = new TradeSessions(economy);
   const progress = new Progress(db);
   const loot = new LootService(economy, data);
-  const shops = Shops.load(economy, cfg.contentDir && path.join(cfg.contentDir, 'shops.json'));
+  const clock = opts.clock ?? new WorldClock({ dayMs: cfg.dayMinutes * 60_000, weatherSlotMs: cfg.weatherMinutes * 60_000, seed: cfg.weatherSeed });
+  const town = opts.town ?? loadTownData(cfg.townDataPath);
+  const shops = Shops.load(economy, cfg.contentDir && path.join(cfg.contentDir, 'shops.json'), shopsFromTown(town, catalog), {
+    day: () => clock.day(),
+  });
   const quests = new QuestRewards(
     db,
     economy,
@@ -67,7 +77,7 @@ export function createApp(
   const regions = RegionTable.load(cfg.regionsPath);
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
-  const sim =
+  const baseSim =
     opts.sim ??
     (cfg.combat
       ? combatSimFactory({
@@ -84,8 +94,14 @@ export function createApp(
           ...(opts.ai ? { ai: opts.ai } : {}),
         })
       : stubSimFactory);
-  const director = new Director(cfg, regions, sim, events, (id, region, p) =>
-    heroes.savePosition(id, region, p.x, p.y, p.z),
+  const sim = cfg.town ? withTown(baseSim, { data: town, clock }) : baseSim;
+  const director = new Director(
+    cfg,
+    regions,
+    sim,
+    events,
+    (id, region, p) => heroes.savePosition(id, region, p.x, p.y, p.z),
+    clock,
   );
   return {
     cfg,
@@ -102,6 +118,8 @@ export function createApp(
     quests,
     regions,
     director,
+    clock,
+    town,
     close() {
       director.stop();
       if (events instanceof JsonlSink) events.close();

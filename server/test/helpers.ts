@@ -4,7 +4,7 @@ import type { ServerConfig } from '../src/config.js';
 
 export function testApp(overrides: Partial<ServerConfig> = {}): App & { sink: MemorySink } {
   const sink = new MemorySink();
-  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', gameDataPath: '', spawnsPath: '', questsPath: '', contentDir: '', ...overrides }, { events: sink });
+  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', gameDataPath: '', spawnsPath: '', questsPath: '', contentDir: '', townDataPath: '', ...overrides }, { events: sink });
   return Object.assign(app, { sink });
 }
 
