@@ -2,6 +2,7 @@ import { AiDirector } from './ai/brain.js';
 import { Anim, type AttackKind, type AiWorld, type Combatant, type CombatPort, type Creature } from './ai/types.js';
 import type { NavMesh, NavStore } from './nav/navmesh.js';
 import type { RegionDef } from './regions.js';
+import { ChannelLaw, type LawServices } from '../law/guards.js';
 import { StubSim, type EntityState, type PlayerInput, type RegionSim, type SimFactory, type Vec3 } from './sim.js';
 
 export const FIRST_CREATURE_ID = 1_000_000;
@@ -29,11 +30,13 @@ export class NavSim implements RegionSim {
   private heroes = new Map<number, Hero>();
   private nextId = FIRST_CREATURE_ID;
   private world: AiWorld;
+  readonly law?: ChannelLaw;
 
   constructor(
     readonly nav: NavMesh,
     combat?: CombatPort,
     seed = 1,
+    opts: { law?: LawServices; channelId?: string; region?: string } = {},
   ) {
     const self = this;
     this.world = {
@@ -43,8 +46,28 @@ export class NavSim implements RegionSim {
       *targets(): Iterable<Combatant> {
         for (const [id, h] of self.heroes) yield { id, pos: h.pos, alive: h.health > 0, faction: 'hero' };
       },
+      isHostile: (c, t) => (self.law ? self.law.guardHostile(c, t) : t.faction !== c.faction),
     };
     this.ai = new AiDirector(this.world, seed);
+    if (opts.law) {
+      const channelId = opts.channelId ?? nav.script;
+      const out = opts.law.out;
+      this.law = new ChannelLaw(
+        {
+          channelId,
+          region: opts.region ?? nav.script,
+          nav,
+          creatures: () => this.creatures.values(),
+          *heroes() {
+            for (const [id, h] of self.heroes) yield { id, pos: h.pos, alive: h.health > 0 };
+          },
+          ai: this.ai,
+          send: (heroId, msg) => out?.send(heroId, msg),
+          broadcast: (msg) => out?.broadcast(channelId, msg),
+        },
+        opts.law,
+      );
+    }
   }
 
   // ---------- heroes ----------
@@ -56,6 +79,7 @@ export class NavSim implements RegionSim {
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
     this.heroes.delete(heroId);
+    this.law?.heroLeft(heroId);
     return h?.pos;
   }
   applyInput(heroId: number, input: PlayerInput): void {
@@ -133,6 +157,7 @@ export class NavSim implements RegionSim {
       c.stunnedMs = Math.max(0, c.stunnedMs - dtMs);
     }
     this.ai.step(dtMs);
+    this.law?.step(dtMs);
   }
 
   snapshot(): EntityState[] {
@@ -165,7 +190,10 @@ export class StubCombat implements CombatPort {
     a.attackCooldownMs = 1200;
     this.log.push({ attacker: attackerId, target: targetId, kind });
     const h = this.sim.hero(targetId);
-    if (h) h.health = Math.max(0, h.health - (kind === 'heavy' ? 15 : 10));
+    if (!h) return;
+    h.health = Math.max(0, h.health - (kind === 'heavy' ? 15 : 10));
+    // Felled by the watch: arrested rather than killed.
+    if (h.health === 0 && this.sim.law?.onHeroDowned(targetId, attackerId)) h.health = 100;
   }
   setBlocking(id: number, on: boolean): void {
     const c = this.sim.creatures.get(id);
@@ -174,10 +202,10 @@ export class StubCombat implements CombatPort {
 }
 
 /** Use the navmesh sim for regions that have one, the kinematic stub for the rest. */
-export function navSimFactory(store: NavStore): SimFactory {
-  return (region: RegionDef) => {
+export function navSimFactory(store: NavStore, law?: LawServices): SimFactory {
+  return (region: RegionDef, channelId: string) => {
     const nav = store.get(region.name);
-    return nav ? new NavSim(nav) : new StubSim();
+    return nav ? new NavSim(nav, undefined, 1, { ...(law ? { law } : {}), channelId, region: region.name }) : new StubSim();
   };
 }
 

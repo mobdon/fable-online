@@ -118,6 +118,7 @@ platinum set never drops.
 | `src/world/` | Region table, channels, the director (placement and scaling), combat sim, spawns, shared entity model |
 | `src/combat/` | Combat rules and balance table, hero and creature loadouts |
 | `src/data/` | game.bin / names.bin reader and the extractor |
+| `src/law/` | Crime records, fines, bribes, kick-outs, jail and Bargate sentences, stealing rules, and the town watch that runs guards ([docs/law.md](../docs/law.md)) |
 | `src/net/` | HTTP launcher API, game WebSocket, protocol validation |
 | `src/analytics/` | Typed game events written as JSON lines to `data/events.jsonl` |
 

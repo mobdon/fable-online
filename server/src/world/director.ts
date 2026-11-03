@@ -8,7 +8,7 @@ import type { PlayerInput, SimFactory, Vec3 } from './sim.js';
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
-export type TransferVia = 'exit' | 'door' | 'cullis_gate';
+export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law';
 
 /** Extra detail for a region change, passed through to the client's enter_region. */
 export interface ArrivalInfo {
@@ -33,6 +33,20 @@ export interface DirectorHooks {
 
 /** How long a hero may take to load the next region before the server unfreezes them anyway. */
 export const REGION_LOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * Rules other systems put on placement. The law module uses them to keep prisoners in
+ * their cells, keep heroes thrown out of a town out of it, and count online time.
+ */
+export interface DirectorPolicy {
+  /** Where this hero must appear on login instead of their saved region. */
+  placement?(hero: Hero): { region: string; private: boolean } | undefined;
+  /** Refuse a region change by returning an error. 'law' moves are the law's own. */
+  canEnter?(heroId: number, from: string, to: string, via: TransferVia): GameError | null;
+  /** After every frame, with every hero in the world. */
+  tick?(dtMs: number, heroIds: Iterable<number>): void;
+  left?(heroId: number): void;
+}
 
 export interface DirectorStats {
   players: number;
@@ -62,6 +76,7 @@ export class Director {
   private timer: NodeJS.Timeout | null = null;
   lastTickMs = 0;
   hooks: DirectorHooks = {};
+  readonly policies: DirectorPolicy[] = [];
 
   constructor(
     private cfg: ServerConfig,
@@ -96,10 +111,19 @@ export class Director {
   /** Put a hero into the world. Region and position come from the database, never the client. */
   join(hero: Hero, link: PlayerLink): Channel {
     if (this.where.has(hero.id)) throw new GameError('already_online', 'That hero is already in the world', 409);
-    const region = hero.phase === 'world' ? hero.region : STAGE_REGIONS[hero.phase];
+    let region: string = hero.phase === 'world' ? hero.region : STAGE_REGIONS[hero.phase];
+    let solo = hero.phase !== 'world';
+    for (const p of this.policies) {
+      const forced = hero.phase === 'world' ? p.placement?.(hero) : undefined;
+      if (forced && this.regions.has(forced.region)) {
+        region = forced.region;
+        solo = forced.private;
+        break;
+      }
+    }
     const def = this.regions.get(region) ?? this.regions.get(STAGE_REGIONS.world);
     if (!def) throw new GameError('no_region', `Unknown region ${region}`, 500);
-    const ch = hero.phase === 'world' ? this.pickShared(def.name) : this.openPrivate(def.name, hero.id);
+    const ch = solo ? this.openPrivate(def.name, hero.id) : this.pickShared(def.name);
     this.place(ch, link, { x: hero.x, y: hero.y, z: hero.z });
     return ch;
   }
@@ -114,6 +138,7 @@ export class Director {
     if (pos) this.persist(heroId, ch.region.name, pos);
     if (p) this.events.emit({ type: 'player_disconnected', heroId, channelId: ch.id, sessionMs: Date.now() - p.joinedAt });
     if (ch.kind === 'private') this.closeChannel(ch);
+    for (const pol of this.policies) pol.left?.(heroId);
   }
 
   /**
@@ -126,15 +151,20 @@ export class Director {
    *
    * The hero is frozen in the new channel until the client reports the region loaded.
    */
-  transfer(heroId: number, toRegion: string, at: Vec3, via: TransferVia, info: ArrivalInfo = {}): Channel {
+  transfer(heroId: number, toRegion: string, at: Vec3, via: TransferVia, info: ArrivalInfo = {}, solo?: boolean): Channel {
     const from = this.where.get(heroId);
     if (!from) throw new GameError('offline', 'Hero is not in the world');
     if (!this.regions.has(toRegion)) throw new GameError('no_region', `Unknown region ${toRegion}`);
     if (via === 'exit' && !this.regions.areNeighbours(from.region.name, toRegion))
       throw new GameError('not_adjacent', `${from.region.name} does not lead to ${toRegion}`);
+    for (const p of this.policies) {
+      const err = p.canEnter?.(heroId, from.region.name, toRegion, via);
+      if (err) throw err;
+    }
     const link = from.players.get(heroId)!;
     // Pick (or open) the target before leaving, so a full region leaves the hero where they are.
-    const target = from.kind === 'private' ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion);
+    const priv = solo ?? (via === 'law' ? false : from.kind === 'private');
+    const target = priv ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion);
     from.remove(heroId);
     this.where.delete(heroId);
     this.hooks.onLeave?.(from, heroId);
@@ -155,6 +185,16 @@ export class Director {
     this.where.get(heroId)?.input(heroId, input);
   }
 
+  /** Send one frame to one online hero. */
+  sendTo(heroId: number, frame: string): void {
+    this.where.get(heroId)?.players.get(heroId)?.send(frame);
+  }
+
+  /** Send one frame to everyone in a channel. */
+  broadcastTo(channelId: string, frame: string): void {
+    this.channels.get(channelId)?.broadcast(frame);
+  }
+
   channelOf(heroId: number): Channel | undefined {
     return this.where.get(heroId);
   }
@@ -172,6 +212,7 @@ export class Director {
       this.hooks.onTick?.(c, now);
     }
     this.hooks.afterTick?.();
+    for (const p of this.policies) p.tick?.(dtMs, this.where.keys());
     if (now - this.lastPersist >= this.cfg.persistEveryMs) {
       this.lastPersist = now;
       this.persistAll();

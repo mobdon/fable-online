@@ -3,7 +3,7 @@ import type { Vec3 } from '../sim.js';
 import { profileFor, type AiProfile } from './profiles.js';
 import { Anim, type AiHooks, type AiWorld, type AttackKind, type Combatant, type Creature } from './types.js';
 
-export type AiState = 'idle' | 'wander' | 'alert' | 'chase' | 'attack' | 'strafe' | 'flee' | 'return' | 'dead';
+export type AiState = 'idle' | 'wander' | 'alert' | 'chase' | 'attack' | 'strafe' | 'flee' | 'return' | 'approach' | 'dead';
 
 /** How often a creature re-thinks. Movement still runs every tick. */
 const THINK_MS = 200;
@@ -35,6 +35,11 @@ interface Brain {
   leapUntil: number;
   blockUntil: number;
   strafeDir: 1 | -1;
+  /** 'approach' only: who to walk up to, and how close to stop. */
+  approachId: number | null;
+  approachStop: number;
+  /** Got there: hold the spot (just keep facing) until approach() is called again. */
+  approachArrived: boolean;
 }
 
 /**
@@ -86,6 +91,9 @@ export class AiDirector implements AiHooks {
       leapUntil: 0,
       blockUntil: 0,
       strafeDir: this.rng() < 0.5 ? 1 : -1,
+      approachId: null,
+      approachStop: 2,
+      approachArrived: false,
     };
     c.anim = Anim.Idle;
     this.brains.set(c.id, b);
@@ -96,7 +104,7 @@ export class AiDirector implements AiHooks {
     if (!b || b.state === 'dead' || b.state === 'return') return; // evading creatures shrug it off
     b.threat.set(attackerId, (b.threat.get(attackerId) ?? 0) + Math.max(1, amount) * 2);
     b.lastSeen.set(attackerId, this.now);
-    if (b.state === 'idle' || b.state === 'wander' || b.state === 'alert') {
+    if (b.state === 'idle' || b.state === 'wander' || b.state === 'alert' || b.state === 'approach') {
       const t = this.findTarget(attackerId);
       if (t) {
         this.engage(b, t, false);
@@ -127,6 +135,49 @@ export class AiDirector implements AiHooks {
   /** Forget a creature (despawned or removed). */
   remove(creatureId: number): void {
     this.brains.delete(creatureId);
+  }
+
+  // ---------- orders from other server systems (the law module's guards) ----------
+
+  /** Chase and fight this target now, skipping the alert pause, and keep it as top threat. */
+  pursue(creatureId: number, targetId: number): boolean {
+    const b = this.brains.get(creatureId);
+    const t = this.findTarget(targetId);
+    if (!b || b.state === 'dead' || !t || !t.alive) return false;
+    b.threat.set(t.id, Math.max(b.threat.get(t.id) ?? 0, 1000));
+    if (b.c.targetId === t.id && (b.state === 'chase' || b.state === 'attack' || b.state === 'strafe')) return true;
+    this.engage(b, t, false);
+    return true;
+  }
+
+  /** Walk up to a target and stand facing it without attacking (a guard asking for a fine). */
+  approach(creatureId: number, targetId: number, stopAt = 2): boolean {
+    const b = this.brains.get(creatureId);
+    const t = this.findTarget(targetId);
+    if (!b || b.state === 'dead' || !t || !t.alive) return false;
+    if (b.state === 'approach' && b.approachId === targetId) {
+      b.approachStop = stopAt;
+      b.approachArrived = false;
+      return true;
+    }
+    if (b.c.blocking) this.world.combat.setBlocking(b.c.id, false);
+    b.state = 'approach';
+    b.approachId = targetId;
+    b.approachStop = stopAt;
+    b.approachArrived = false;
+    b.c.targetId = targetId;
+    b.nextThink = this.now;
+    return true;
+  }
+
+  /** Drop every target and go back to the post (fine paid, bribe taken, hero arrested). */
+  standDown(creatureId: number): void {
+    const b = this.brains.get(creatureId);
+    if (!b || b.state === 'dead') return;
+    b.threat.clear();
+    b.lastSeen.clear();
+    b.approachId = null;
+    this.goHome(b);
   }
 
   state(creatureId: number): AiState | undefined {
@@ -205,6 +256,27 @@ export class AiDirector implements AiHooks {
           return;
         }
         if (!b.goal && t) this.runFrom(b, t.pos);
+        return;
+      }
+      case 'approach': {
+        const t = b.approachId === null ? undefined : this.findTarget(b.approachId);
+        if (!t || !t.alive) {
+          b.approachId = null;
+          return this.goHome(b);
+        }
+        if (dist(b.c.pos, b.home) > b.p.leash) {
+          b.approachId = null;
+          return this.goHome(b);
+        }
+        const d = dist(b.c.pos, t.pos);
+        if (b.approachArrived) {
+          this.face(b, t.pos);
+        } else if (d <= b.approachStop) {
+          this.stop(b);
+          this.face(b, t.pos);
+          b.c.anim = Anim.Idle;
+          b.approachArrived = true;
+        } else if (!b.goal || dist(b.goal, t.pos) > 1 || this.now >= b.repathAt) this.goTo(b, t.pos, b.p.runSpeed * 0.75, Anim.Run);
         return;
       }
       case 'return':
@@ -345,6 +417,7 @@ export class AiDirector implements AiHooks {
 
   private goHome(b: Brain): void {
     b.state = 'return';
+    b.approachId = null;
     b.c.targetId = null;
     if (b.c.blocking) this.world.combat.setBlocking(b.c.id, false);
     this.goTo(b, b.home, b.p.runSpeed, Anim.Run);
@@ -353,7 +426,8 @@ export class AiDirector implements AiHooks {
   // ---------- targets ----------
 
   private hostile(b: Brain, t: Combatant): boolean {
-    return t.alive && t.faction !== b.c.faction;
+    if (!t.alive) return false;
+    return this.world.isHostile ? this.world.isHostile(b.c, t) : t.faction !== b.c.faction;
   }
 
   /** The nearest hostile it can see or hear, if any, that is inside its patch. */

@@ -119,6 +119,15 @@ export class CombatSim implements RegionSim {
     return h && { ...h.hero.pos };
   }
 
+  /** Dev only (trustClientPositions): put the hero where the mod says it is. */
+  placeHero(heroId: number, at: Vec3, yaw?: number): void {
+    const slot = this.heroes.get(heroId);
+    if (!slot) return;
+    slot.hero.pos = { x: at.x, y: at.y, z: at.z };
+    if (yaw !== undefined) slot.hero.yaw = yaw;
+    slot.move = [0, 0];
+  }
+
   applyInput(heroId: number, input: PlayerInput): void {
     const slot = this.heroes.get(heroId);
     if (!slot) return;

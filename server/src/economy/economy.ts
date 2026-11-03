@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Database } from '../db/database.js';
 import type { EventSink } from '../analytics/events.js';
 import { GameError } from '../errors.js';
-import type { ItemCatalog } from './catalog.js';
+import { MAX_SELL_RATIO, type ItemCatalog } from './catalog.js';
 
 /**
  * Gold and items, server-authoritative, double-entry, idempotent.
@@ -33,7 +33,7 @@ export const MINT_REASONS = {
 } as const;
 export type MintReason = keyof typeof MINT_REASONS;
 
-export const SINK_REASONS = ['vendor_buy', 'repair', 'tattoo_haircut', 'property', 'arena_fee', 'death_penalty', 'gm_remove'] as const;
+export const SINK_REASONS = ['vendor_buy', 'repair', 'tattoo_haircut', 'property', 'arena_fee', 'death_penalty', 'crime', 'gm_remove'] as const;
 export type SinkReason = (typeof SINK_REASONS)[number];
 
 export type ItemLocation = 'inventory' | 'equipped' | 'bank';
@@ -60,11 +60,25 @@ export interface TradeSide {
   itemIds: string[];
 }
 
+/**
+ * Extra checks other systems hang on the economy without it depending on them. The law
+ * module uses them to keep stolen goods away from normal traders and other players, and
+ * to refuse shop trades while a hero is wanted. Each returns an error to refuse, or null.
+ */
+export interface EconomyPolicy {
+  /** May this item be sold to a normal vendor ('sell') or handed to another hero ('trade')? */
+  item?(itemId: string, use: 'sell' | 'trade'): GameError | null;
+  /** May this hero use a shop right now? */
+  service?(heroId: number, service: 'shop'): GameError | null;
+}
+
 const MINT = 'system:mint';
 const SINK = 'system:sink';
 const wallet = (heroId: number) => `hero:${heroId}`;
 
 export class Economy {
+  readonly policies: EconomyPolicy[] = [];
+
   constructor(
     private db: Database,
     private events: EventSink,
@@ -205,6 +219,7 @@ export class Economy {
   // ---------------------------------------------------------------- vendors
 
   vendorBuy(heroId: number, defId: string, quantity: number, key: string): TxResult & { itemId: string } {
+    this.checkService(heroId, 'shop');
     const def = this.catalog.get(defId);
     if (def.buy === null) throw new GameError('not_for_sale', 'Vendors do not sell that');
     let itemId = '';
@@ -219,8 +234,10 @@ export class Economy {
 
   vendorSell(heroId: number, itemId: string, key: string): TxResult & { gold: number } {
     let gold = 0;
+    this.checkService(heroId, 'shop');
     const r = this.action('vendor_sell', wallet(heroId), key, { itemId }, (tx) => {
       const it = this.ownedItem(heroId, itemId, 'inventory');
+      this.checkItem(it.id, 'sell');
       const def = this.catalog.get(it.def_id);
       if (def.sell === null) throw new GameError('not_buyable', 'Vendors will not buy that');
       gold = def.sell * it.quantity;
@@ -230,6 +247,41 @@ export class Economy {
     });
     if (r.replayed) gold = this.db.get<{ s: number }>('SELECT COALESCE(SUM(amount),0) AS s FROM ledger_entries WHERE tx_id = ?', r.txId)!.s;
     return { ...r, gold };
+  }
+
+  /**
+   * Sell an item to a special buyer (the fence) for `ratio` of its vendor price. The ratio
+   * can never beat the normal buy/sell rule, so this can't print gold. Item policies are
+   * skipped on purpose: the caller is the one buyer allowed to take what they forbid.
+   */
+  sellAtRatio(heroId: number, itemId: string, ratio: number, key: string, kind = 'fence_sell'): TxResult & { gold: number } {
+    if (!(ratio > 0 && ratio <= MAX_SELL_RATIO)) throw new GameError('bad_ratio', `Ratio must be in (0, ${MAX_SELL_RATIO}]`);
+    let gold = 0;
+    const r = this.action(kind, wallet(heroId), key, { itemId, ratio }, (tx) => {
+      const it = this.ownedItem(heroId, itemId, 'inventory');
+      const def = this.catalog.get(it.def_id);
+      if (def.buy === null) throw new GameError('not_buyable', 'Nobody will buy that');
+      gold = Math.floor(def.buy * ratio) * it.quantity;
+      this.db.run("UPDATE items SET location = 'destroyed', destroyed_tx = ? WHERE id = ?", tx, it.id);
+      this.history(tx, it, 'destroy', heroId, null, -it.quantity);
+      if (gold > 0) this.moveGold(tx, MINT, wallet(heroId), gold, 'vendor_sell');
+    });
+    if (r.replayed) gold = this.db.get<{ s: number }>('SELECT COALESCE(SUM(amount),0) AS s FROM ledger_entries WHERE tx_id = ?', r.txId)!.s;
+    return { ...r, gold };
+  }
+
+  private checkItem(itemId: string, use: 'sell' | 'trade'): void {
+    for (const p of this.policies) {
+      const e = p.item?.(itemId, use);
+      if (e) throw e;
+    }
+  }
+
+  private checkService(heroId: number, service: 'shop'): void {
+    for (const p of this.policies) {
+      const e = p.service?.(heroId, service);
+      if (e) throw e;
+    }
   }
 
   // ---------------------------------------------------------------- trade
@@ -249,6 +301,7 @@ export class Economy {
           const def = this.catalog.get(it.def_id);
           if (def.staffOnly) this.events.emit({ type: 'staff_item_blocked', heroId: from.heroId, defId: it.def_id, action: 'trade', actor: `hero:${from.heroId}` });
           if (!def.tradeable) throw new GameError('untradeable', `${it.def_id} cannot be traded`);
+          this.checkItem(it.id, 'trade');
           this.db.run('UPDATE items SET owner_hero = ? WHERE id = ?', to.heroId, it.id);
           this.history(tx, it, 'transfer', from.heroId, to.heroId, it.quantity);
         }

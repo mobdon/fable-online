@@ -142,9 +142,54 @@ export const PROFILES: Record<string, AiProfile> = {
     leap: { min: 4, max: 9, speed: 15, cooldownMs: 5000 },
     attacks: { light: 2, heavy: 1 },
   },
+  /**
+   * Town guards (CREATURE_BS_GUARD*, CREATURE_KHG_GUARD, CREATURE_BS_SHERIFF, prison guards).
+   * They stand near their post, never flee, call every guard in earshot, block a lot, and
+   * follow a criminal further than a monster would. Who counts as a criminal comes from the
+   * law module through AiWorld.isHostile.
+   */
+  guard: {
+    ...base,
+    family: 'guard',
+    walkSpeed: 1.4,
+    runSpeed: 5.8,
+    sight: 18,
+    fov: 200,
+    hear: 5,
+    attackRange: 2.2,
+    leash: 120,
+    wanderRadius: 3,
+    idleMs: [4000, 10000],
+    alertMs: 300,
+    packRadius: 25,
+    blockChance: 0.35,
+    attacks: { light: 3, heavy: 1 },
+  },
+  guardCrossbow: {
+    ...base,
+    family: 'guard',
+    walkSpeed: 1.4,
+    runSpeed: 5.5,
+    sight: 24,
+    fov: 200,
+    hear: 5,
+    attackRange: 18,
+    preferredRange: 10,
+    leash: 120,
+    wanderRadius: 3,
+    idleMs: [4000, 10000],
+    alertMs: 300,
+    packRadius: 25,
+    attacks: { ranged: 1 },
+  },
 };
 
+/** Def names of the law's creatures: guards, sheriffs, prison guards. */
+export const GUARD_DEF = /GUARD|SHERIFF/;
+
 const RULES: [RegExp, string][] = [
+  [/GUARD.*CROSSBOW/, 'guardCrossbow'],
+  [GUARD_DEF, 'guard'],
   [/BANDIT.*(ARCHER|BOW)/, 'banditArcher'],
   [/BANDIT/, 'bandit'],
   [/HOBBE/, 'hobbe'],

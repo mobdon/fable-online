@@ -80,10 +80,6 @@ export class ItemCatalog {
     return this.defs.has(id);
   }
 
-  has(id: string): boolean {
-    return this.defs.has(id);
-  }
-
   get(id: string): ItemDef {
     const d = this.defs.get(id);
     if (!d) throw new GameError('bad_item', `Unknown item ${id}`);
