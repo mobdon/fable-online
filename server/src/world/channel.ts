@@ -1,5 +1,5 @@
 import type { RegionDef } from './regions.js';
-import type { PlayerInput, RegionSim } from './sim.js';
+import type { PlayerInput, RegionSim, Vec3, WireEntity } from './sim.js';
 
 /** A connected player as the world sees it. `send` takes an already-encoded frame. */
 export interface PlayerLink {
@@ -36,6 +36,12 @@ export class Channel {
     readonly kind: ChannelKind,
     readonly sim: RegionSim,
     readonly ownerHeroId?: number,
+    /**
+     * Entities further than this from a player are left out of that player's frames.
+     * A region can hold hundreds of creatures, and the mod can only show what is near
+     * enough to see. 0 sends everything (and lets every player share one encoded frame).
+     */
+    readonly interestRadius = 0,
   ) {}
 
   get count(): number {
@@ -64,7 +70,26 @@ export class Channel {
     this.sim.applyInput(heroId, input);
   }
 
-  /** Advance the sim and send every player the world state. Entities are encoded once. */
+  /** Dev only: trust the mod's own idea of where its hero is. See RegionSim.placeHero. */
+  placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
+    if (!this.players.has(heroId) || !this.sim.placeHero || this.loading.has(heroId)) return false;
+    this.sim.placeHero(heroId, at, yaw);
+    return true;
+  }
+
+  /**
+   * Everything in the channel as the wire sees it: the sim's entities, with the players'
+   * names and renown attached so the mod can label their stand-ins.
+   */
+  entities(): WireEntity[] {
+    return this.sim.snapshot().map((e) => {
+      const p = this.players.get(e.id);
+      if (p) return { ...e, kind: 'hero' as const, name: p.name, renown: p.renown };
+      return { ...e, kind: 'creature' as const };
+    });
+  }
+
+  /** Advance the sim and send every player the world state. */
   step(dtMs: number): void {
     if (this.loading.size) {
       const now = Date.now();
@@ -73,9 +98,25 @@ export class Channel {
     this.sim.step(dtMs);
     this.tick++;
     if (this.players.size === 0) return;
-    const entities = JSON.stringify(this.sim.snapshot());
+    const all = this.entities();
     const head = `{"t":"tick","tick":${this.tick},"last_input_seq":`;
-    for (const p of this.players.values()) p.send(`${head}${p.lastSeq},"entities":${entities}}`);
+
+    // Without an interest radius every player sees the same thing, so encode it once.
+    if (this.interestRadius <= 0) {
+      const encoded = JSON.stringify(all);
+      for (const p of this.players.values()) p.send(`${head}${p.lastSeq},"entities":${encoded}}`);
+      return;
+    }
+
+    const r2 = this.interestRadius * this.interestRadius;
+    for (const p of this.players.values()) {
+      const me = this.sim.position(p.heroId);
+      // A player whose own position is unknown gets everything rather than nothing.
+      const near = me
+        ? all.filter((e) => e.id === p.heroId || (e.x - me.x) ** 2 + (e.y - me.y) ** 2 <= r2)
+        : all;
+      p.send(`${head}${p.lastSeq},"entities":${JSON.stringify(near)}}`);
+    }
   }
 
   broadcast(frame: string): void {

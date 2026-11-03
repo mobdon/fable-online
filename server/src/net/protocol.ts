@@ -16,7 +16,13 @@ export type ClientMessage =
   | { t: 'chat'; text: string }
   | { t: 'interact'; thing: string; action: string }
   | { t: 'region_ready'; region: string }
-  | { t: 'ping'; n: number };
+  | { t: 'ping'; n: number }
+  /**
+   * Dev only. The mod reporting where the local game put its hero, used until Fable's
+   * own input is mapped. The server throws it away unless trustClientPositions is on,
+   * because a position from a client is a position a cheat can choose.
+   */
+  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number };
 
 export class ProtocolError extends Error {}
 
@@ -72,6 +78,19 @@ export function decode(raw: string): ClientMessage {
     case 'region_ready':
       if (typeof m.region !== 'string' || m.region.length > 64) throw new ProtocolError('bad region');
       return { t: 'region_ready', region: m.region };
+    case 'hero_pos': {
+      if (!isNum(m.x) || !isNum(m.y) || !isNum(m.z)) throw new ProtocolError('bad hero_pos');
+      const big = (v: number) => Math.abs(v) > 1e6;
+      if (big(m.x) || big(m.y) || big(m.z)) throw new ProtocolError('hero_pos out of range');
+      return {
+        t: 'hero_pos',
+        x: m.x,
+        y: m.y,
+        z: m.z,
+        yaw: isNum(m.yaw) ? wrapAngle(m.yaw) : undefined,
+        area: isNum(m.area) ? m.area >>> 0 : 0,
+      };
+    }
     case 'ping':
       return { t: 'ping', n: isNum(m.n) ? m.n : 0 };
     default:

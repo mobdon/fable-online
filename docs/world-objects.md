@@ -186,5 +186,23 @@ The jobs in the mod, in order:
 6. **Demon doors.** The face's riddle script runs locally. When it opens, send
    `interact` with `opened`. Until the server agrees, the exit behind it does nothing.
 
-Not done yet: mapping the slots and offsets above in the running game, and the inventory
-sync the loot relies on.
+### What the mod does today
+
+Built on the entity sync layer (`docs/entity-sync.md`):
+
+- `client-mod/src/world/objects.{h,cpp}` (pure logic, `tests/objects_test.cpp`) keeps the
+  server's answers: door states, items gone, chests and demon doors opened, loot received
+  and refusals. It builds `interact` and `region_ready` frames, sends a request for a
+  thing at most once a second while it waits for the answer, refuses requests while a
+  region is loading, and forgets the old region on every region change.
+- `client-mod/src/sync.cpp` feeds it every frame. After an `enter_region` with
+  `loading`, it waits for the local game's own load to finish (the hero exists again and
+  is in a different area) and sends `region_ready`, or sends it after 25 s so the hero is
+  never stuck. Until job 2 is mapped, the local game loads the next region itself when the
+  hero walks through the exit, at the same moment the server moves them.
+- `client-mod/src/game/things.{h,cpp}` is where the changes reach Fable. Finding the local
+  thing for a server id is not mapped yet, so each change is logged
+  (`things: open door LookoutPoint:...`) instead of applied.
+
+Not done yet: jobs 1 and 3 to 6 above (the slots and offsets in the running game), and the
+inventory sync the loot relies on.
