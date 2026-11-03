@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include "devkit.h"
 #include "log.h"
 #include "probe.h"
 
@@ -39,7 +40,10 @@ DWORD WINAPI main_thread(LPVOID) {
 
     char probe[4] = {};
     bool probing = GetEnvironmentVariableA("FABLE_ONLINE_PROBE", probe, sizeof(probe)) > 0 && probe[0] == '1';
-    fo::log("  probe: %s (build 3: dump + ints)", probing ? "on" : "off");
+    fo::log("  probe: %s (build 5: devkit)", probing ? "on" : "off");
+
+    char dev[4] = {};
+    if (GetEnvironmentVariableA("FABLE_ONLINE_DEV", dev, sizeof(dev)) > 0 && dev[0] == '1') fo::devkit::install();
 
     unsigned beat = 0;
     while (g_running.load()) {
