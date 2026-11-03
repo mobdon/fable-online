@@ -1,0 +1,25 @@
+{
+  "name": "@fable-online/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative Fable Online server: gateway, region channels, accounts, gold ledger, items.",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "dev": "tsx --disable-warning=ExperimentalWarning src/main.ts",
+    "start": "node --disable-warning=ExperimentalWarning dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
