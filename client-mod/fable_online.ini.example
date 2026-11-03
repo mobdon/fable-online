@@ -41,3 +41,14 @@ fov_scale=1.0
 ; 1 = press F10 in game to write one frame's drawing calls to fable_online.log
 ; (used to fix the HUD stretching next).
 frame_probe=0
+; fullscreen = Fable's own exclusive full screen; windowed = a normal window;
+; borderless = a window covering the whole monitor (quick alt-tab).
+window=fullscreen
+; max = the monitor's highest refresh rate at Fable's resolution; game = Fable's choice;
+; or a number such as 144. Full screen only (a window follows the desktop).
+refresh=max
+; game = Fable's own setting; on; off (more frames, may tear).
+vsync=game
+; 1 = keep the CPU at most one frame ahead of the graphics card, so the camera follows
+; the mouse sooner.
+low_latency=1

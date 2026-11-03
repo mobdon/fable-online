@@ -15,6 +15,7 @@
 #include "game/hero.h"
 #include "log.h"
 #include "net/chat_client.h"
+#include "display/present.h"
 #include "display/widescreen.h"
 #include "menu/menu.h"
 #include "overlay/overlay.h"
@@ -66,7 +67,8 @@ void online_thread() {
         }
         was_connected = connected;
         ++ticks;
-        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); if (ticks < 200) fo::display::log_status(); }  // 10 s, 30 s, then every 5 min
+        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); if (ticks < 200) fo::display::log_status(); }
+        if (ticks % 50 == 0 && (ticks <= 1500 || ticks % 1500 == 0)) fo::display::log_frame_rate();  // 10 s, 30 s, then every 5 min
     }
     fo::net::chat_stop();
 }

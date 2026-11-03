@@ -75,6 +75,14 @@ void config_load(HMODULE self) {
     c.fov_scale = ini_float(f, L"display", L"fov_scale", c.fov_scale);
     if (!(c.fov_scale >= 0.7f && c.fov_scale <= 1.6f)) c.fov_scale = 1.0f;
     c.frame_probe = ini_bool(f, L"display", L"frame_probe", c.frame_probe);
+    std::wstring win = ini_str(f, L"display", L"window", L"fullscreen");
+    c.window_mode = win == L"windowed" ? WindowMode::Windowed : win == L"borderless" ? WindowMode::Borderless : WindowMode::Fullscreen;
+    std::wstring hz = ini_str(f, L"display", L"refresh", L"max");
+    c.refresh_hz = hz == L"max" ? -1 : hz == L"game" ? 0 : _wtoi(hz.c_str());
+    if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = -1;
+    std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
+    c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
+    c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);
 
     set_server(c, env("FABLE_ONLINE_CHAT_SERVER"));
     if (auto n = env("FABLE_ONLINE_NAME"); !n.empty()) c.name = n;
