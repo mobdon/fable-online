@@ -25,3 +25,5 @@ tools/re-notes/rtti.json
 
 # Server runtime data
 server/data/
+# Game files copied for local tests (never commit)
+private-test/

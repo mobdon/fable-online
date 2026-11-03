@@ -1,0 +1,7 @@
+#include <winuser.h>
+1 RT_MANIFEST "launcher.manifest"
+// Open Font License fonts (see fonts/OFL-*.txt), loaded with AddFontMemResourceEx.
+201 RCDATA "fonts/Cinzel-Regular.ttf"
+202 RCDATA "fonts/Cinzel-Bold.ttf"
+203 RCDATA "fonts/CormorantGaramond-Medium.ttf"
+204 RCDATA "fonts/CormorantGaramond-Bold.ttf"
