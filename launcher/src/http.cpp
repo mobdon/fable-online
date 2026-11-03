@@ -56,7 +56,7 @@ Response open(const std::string& method, const std::string& url, const std::stri
     Url u;
     if (!crack(url, u)) { r.error = "bad URL: " + url; return r; }
     if (!u.https && !loopback(u.host)) { r.error = "refusing plain http to " + narrow(u.host); return r; }
-    session.h = WinHttpOpen(L"FableOnlineLauncher/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+    session.h = WinHttpOpen(L"ChaptersOfTheLostLauncher/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) { r.error = win_error("WinHttpOpen"); return r; }
     WinHttpSetTimeouts(session, 5000, 10000, 15000, 30000);

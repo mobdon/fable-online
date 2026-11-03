@@ -28,7 +28,7 @@ const regions = [
 ];
 const news = [
   { id: 'n2', title: 'Dev gateway running', date: new Date().toISOString().slice(0, 10), body: 'You are talking to tools/dev-gateway.\nAccounts reset when it restarts.', url: '' },
-  { id: 'n1', title: 'Welcome to Fable Online', date: '2026-11-03', body: 'The launcher works: log in, pick a region, press Play.', url: '' },
+  { id: 'n1', title: 'Welcome to Chapters of the Lost', date: '2026-11-03', body: 'The launcher works: log in, pick a region, press Play.', url: '' },
 ];
 
 const token = () => crypto.randomBytes(24).toString('base64url');
