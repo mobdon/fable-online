@@ -18,6 +18,7 @@ export class GameSocket {
   private heroId: number | null = null;
   private inputs = new Bucket(60, 90);
   private chats = new Bucket(1, 5);
+  private questClaims = new Bucket(0.2, 3);
   private drops = 0;
   private dropWindow = Date.now();
   private helloTimer: NodeJS.Timeout;
@@ -67,6 +68,11 @@ export class GameSocket {
       case 'ping':
         if (!this.inputs.take()) return this.dropped('ping flood');
         return this.send({ t: 'pong', n: msg.n });
+      case 'quest_complete': {
+        if (!this.questClaims.take()) return this.send({ t: 'quest_reward', ok: false, quest: msg.quest, reason: 'rate' });
+        const r = this.app.quests.claim(this.heroId, { quest: msg.quest, gold: msg.gold, renown: msg.renown, items: msg.items });
+        return this.send({ t: 'quest_reward', quest: msg.quest, ...r });
+      }
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }

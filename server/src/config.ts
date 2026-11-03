@@ -56,6 +56,19 @@ export interface ServerConfig {
   maxHeroesPerAccount: number;
   /** Login session lifetime. */
   sessionTtlMs: number;
+
+  /** server/data/game-data.json from `npm run extract` ('' or missing = built-in fallback). */
+  gameDataPath: string;
+  /** shared/defs/spawns.json from tools/extractor/spawns.mjs. */
+  spawnsPath: string;
+  /** shared/defs/quests.json from tools/extractor/quests.mjs (quest names in the game). */
+  questsPath: string;
+  /** Run combat, spawns and loot in each channel (false = movement-only stand-in). */
+  combat: boolean;
+  /** Gold a known quest may pay when content/quest-rewards.json has no entry for it. */
+  questDefaultMaxGold: number;
+  /** Most quest gold one hero can be paid in 24 hours, across all quests. */
+  questDailyGoldCap: number;
 }
 
 export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
@@ -82,6 +95,12 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     persistEveryMs: num('FO_PERSIST_MS', 30_000),
     maxHeroesPerAccount: num('FO_MAX_HEROES', 3),
     sessionTtlMs: num('FO_SESSION_TTL_MS', 7 * 24 * 3600_000),
+    gameDataPath: str('FO_GAME_DATA', 'data/game-data.json'),
+    spawnsPath: str('FO_SPAWNS', '../shared/defs/spawns.json'),
+    questsPath: str('FO_QUESTS', '../shared/defs/quests.json'),
+    combat: str('FO_COMBAT', '1') !== '0',
+    questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
+    questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
     ...overrides,
   };
 }

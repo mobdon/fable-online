@@ -12,7 +12,9 @@ export type ClientMessage =
   | { t: 'hello'; protocol: number; exe_timestamp: string; token: string }
   | ({ t: 'input' } & PlayerInput)
   | { t: 'chat'; text: string }
-  | { t: 'ping'; n: number };
+  | { t: 'ping'; n: number }
+  /** The client's Fable finished a quest. The server checks the reward before paying anything. */
+  | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] };
 
 export class ProtocolError extends Error {}
 
@@ -58,6 +60,11 @@ export function decode(raw: string): ClientMessage {
     }
     case 'ping':
       return { t: 'ping', n: isNum(m.n) ? m.n : 0 };
+    case 'quest_complete': {
+      if (typeof m.quest !== 'string' || m.quest.length > 64) throw new ProtocolError('bad quest');
+      const items = Array.isArray(m.items) ? m.items.filter((i): i is string => typeof i === 'string' && i.length <= 64).slice(0, 8) : [];
+      return { t: 'quest_complete', quest: m.quest, gold: isNum(m.gold) ? m.gold : -1, renown: isNum(m.renown) ? m.renown : 0, items };
+    }
     default:
       throw new ProtocolError('unknown message');
   }

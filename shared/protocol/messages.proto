@@ -11,8 +11,14 @@ package fable_online;
 // The only things a client can ever say. No positions, health, gold or items.
 message Hello        { uint32 protocol = 1; string exe_timestamp = 2; string token = 3; } // token = one-time ticket from POST /launcher/v1/join
 message InputFrame   { uint32 seq = 1; float move_x = 2; float move_y = 3; uint32 buttons = 4; float camera_yaw = 5; } // stick clamped to length 1, seq must increase
+// buttons: bit 0 attack (fires on release; held >= 0.9 s = flourish), bit 1 block, bit 2 cast,
+// bits 8-11 spell slot 1-7 (fireball, lightning, drain_life, force_push, enflame, heal_life, physical_shield).
+// The server picks the target in front of the hero; a client never names a target or a damage number.
 message Chat         { string text = 1; } // max 200 chars, 1/s burst 5
 message Ping         { uint32 n = 1; }
+// The player's own Fable finished a quest. quest = OBJECT_QUEST_CARD_* or a quest script name.
+// The server pays only what that quest can pay, once (see server/src/economy/quests.ts). 1 per 5 s, burst 3.
+message QuestComplete { string quest = 1; uint32 gold = 2; uint32 renown = 3; repeated string items = 4; }
 
 // ---- server -> client --------------------------------------------------
 message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6; }
@@ -22,3 +28,5 @@ message WorldTick    { uint32 tick = 1; uint32 last_input_seq = 2; repeated Enti
 message ChatOut      { uint32 from = 1; string text = 2; string name = 3; }
 message Pong         { uint32 n = 1; }
 message Error        { string error = 1; string message = 2; }
+// EntityState.def_id: 0 for heroes, fableHash(creature def name) for creatures. anim 2 = dead.
+message QuestReward  { string quest = 1; bool ok = 2; uint32 gold = 3; uint32 renown = 4; repeated string items = 5; string reason = 6; }

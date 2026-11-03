@@ -112,6 +112,10 @@ export class Economy {
 
   /** Create an item from nothing (loot, quest reward). Returns the new item's ID. */
   mintItem(heroId: number, defId: string, quantity: number, reason: string, key: string, actor = 'system'): TxResult & { itemId: string } {
+    if (this.catalog.get(defId).staffOnly && !actor.startsWith('gm:')) {
+      this.events.emit({ type: 'staff_item_blocked', heroId, defId, action: `mint:${reason}`, actor });
+      throw new GameError('staff_only', `${defId} is staff-only gear`, 403);
+    }
     let itemId = '';
     const r = this.action('mint_item', actor, key, { heroId, defId, quantity, reason }, (tx) => {
       itemId = this.createItem(tx, heroId, defId, quantity);
@@ -212,7 +216,9 @@ export class Economy {
       for (const [from, to] of [[a, b], [b, a]] as const) {
         for (const id of from.itemIds) {
           const it = this.ownedItem(from.heroId, id, 'inventory');
-          if (!this.catalog.get(it.def_id).tradeable) throw new GameError('untradeable', `${it.def_id} cannot be traded`);
+          const def = this.catalog.get(it.def_id);
+          if (def.staffOnly) this.events.emit({ type: 'staff_item_blocked', heroId: from.heroId, defId: it.def_id, action: 'trade', actor: `hero:${from.heroId}` });
+          if (!def.tradeable) throw new GameError('untradeable', `${it.def_id} cannot be traded`);
           this.db.run('UPDATE items SET owner_hero = ? WHERE id = ?', to.heroId, it.id);
           this.history(tx, it, 'transfer', from.heroId, to.heroId, it.quantity);
         }

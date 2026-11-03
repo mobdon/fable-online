@@ -18,7 +18,13 @@ export type GameEvent =
   | { type: 'item'; txId: number; action: string; itemId: string; defId: string; fromHero: number | null; toHero: number | null; quantity: number }
   | { type: 'trade'; txId: number; a: number; b: number }
   | { type: 'input_rejected'; heroId: number; reason: string }
-  | { type: 'tick_stats'; channels: number; players: number; tickMs: number };
+  | { type: 'tick_stats'; channels: number; players: number; tickMs: number }
+  | { type: 'kill'; heroId: number; creature: string; channelId: string; experience: number; gold: number; items: number }
+  | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
+  | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }
+  | { type: 'staff_item_blocked'; heroId: number; defId: string; action: string; actor: string }
+  | { type: 'quest_reward'; heroId: number; quest: string; gold: number; items: number }
+  | { type: 'quest_reward_rejected'; heroId: number; quest: string; gold: number; reason: string };
 
 export interface EventSink {
   emit(e: GameEvent): void;
