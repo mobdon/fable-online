@@ -185,7 +185,7 @@ export class Director {
     const n = (this.nextIndex.get(region) ?? 0) + 1;
     this.nextIndex.set(region, n);
     const id = `${region}#${n}`;
-    const ch = new Channel(id, def, 'shared', this.simFactory(def, id));
+    const ch = new Channel(id, def, 'shared', this.simFactory(def, id), undefined, this.cfg.interestRadius);
     this.channels.set(id, ch);
     this.shared.set(region, [...(this.shared.get(region) ?? []), ch]);
     this.events.emit({ type: 'channel_open', channelId: id, region, private: false });
@@ -197,7 +197,7 @@ export class Director {
       throw new GameError('instances_full', 'All solo instances are busy, try again shortly', 503);
     const def = this.regions.get(region)!;
     const id = `${region}~${heroId}`;
-    const ch = new Channel(id, def, 'private', this.simFactory(def, id), heroId);
+    const ch = new Channel(id, def, 'private', this.simFactory(def, id), heroId, this.cfg.interestRadius);
     this.channels.set(id, ch);
     this.privateCount++;
     this.events.emit({ type: 'channel_open', channelId: id, region, private: true });

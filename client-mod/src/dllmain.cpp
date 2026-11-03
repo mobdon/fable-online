@@ -10,6 +10,7 @@
 #include "devkit.h"
 #include "log.h"
 #include "probe.h"
+#include "sync.h"
 
 namespace {
 std::atomic<bool> g_running{false};
@@ -45,6 +46,10 @@ DWORD WINAPI main_thread(LPVOID) {
     char dev[4] = {};
     if (GetEnvironmentVariableA("FABLE_ONLINE_DEV", dev, sizeof(dev)) > 0 && dev[0] == '1') fo::devkit::install();
 
+    // Entity sync: other players and the server's creatures. Off while probing, which
+    // walks the whole address space and must not have puppets appearing underneath it.
+    if (!probing) fo::sync::start();
+
     unsigned beat = 0;
     while (g_running.load()) {
         if (probing) {
@@ -56,6 +61,7 @@ DWORD WINAPI main_thread(LPVOID) {
             fo::log("heartbeat %u", ++beat);
         }
     }
+    fo::sync::stop();
     fo::log("mod shutting down");
     fo::log_close();
     return 0;

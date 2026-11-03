@@ -20,6 +20,7 @@ export class GameSocket {
   private chats = new Bucket(1, 5);
   private drops = 0;
   private dropWindow = Date.now();
+  private warnedPos = false;
   private helloTimer: NodeJS.Timeout;
 
   constructor(
@@ -62,6 +63,20 @@ export class GameSocket {
         const ch = this.app.director.channelOf(this.heroId);
         const hero = this.app.heroes.get(this.heroId);
         ch?.broadcast(encode({ t: 'chat_out', from: this.heroId, name: hero?.name, text: msg.text }));
+        return;
+      }
+      case 'hero_pos': {
+        if (!this.inputs.take()) return this.dropped('hero_pos flood');
+        // Off by default: a client-chosen position is a cheat waiting to happen. It
+        // exists so the first in-game tests can run before Fable's input is mapped.
+        if (!this.app.cfg.trustClientPositions) {
+          if (!this.warnedPos) {
+            this.warnedPos = true;
+            this.app.events.emit({ type: 'input_rejected', heroId: this.heroId, reason: 'hero_pos not trusted' });
+          }
+          return;
+        }
+        this.app.director.channelOf(this.heroId)?.placeHero(this.heroId, { x: msg.x, y: msg.y, z: msg.z }, msg.yaw);
         return;
       }
       case 'ping':
