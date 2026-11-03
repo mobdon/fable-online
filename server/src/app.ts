@@ -20,6 +20,8 @@ import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
 import { navSimFactory } from './world/nav-sim.js';
 import { NavStore } from './world/nav/navmesh.js';
+import { WorldThings } from './world/things/world-things.js';
+import { WorldObjects } from './world/things/objects.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -37,12 +39,13 @@ export interface App {
   quests: QuestRewards;
   regions: RegionTable;
   director: Director;
+  objects: WorldObjects;
   close(): void;
 }
 
 export function createApp(
   overrides: Partial<ServerConfig> = {},
-  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi } = {},
+  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi; things?: WorldThings } = {},
 ): App {
   const cfg = loadConfig(overrides);
   const db = new Database(cfg.dbPath);
@@ -91,6 +94,7 @@ export function createApp(
   const director = new Director(cfg, regions, sim, events, (id, region, p) =>
     heroes.savePosition(id, region, p.x, p.y, p.z),
   );
+  const objects = new WorldObjects(opts.things ?? WorldThings.load(cfg.thingsPath), director, economy, db, events);
   return {
     cfg,
     db,
@@ -106,6 +110,7 @@ export function createApp(
     quests,
     regions,
     director,
+    objects,
     close() {
       director.stop();
       if (events instanceof JsonlSink) events.close();

@@ -25,6 +25,8 @@ export interface ServerConfig {
    * '' (the default for now) keeps every region on the kinematic StubSim.
    */
   navDir: string;
+  /** shared/defs/world-things.json, made by tools/extractor/things.mjs. Missing = no doors, loot or exits. */
+  thingsPath: string;
   /** JSON lines file for analytics events ('' disables). */
   eventsPath: string;
   /** Wire protocol version the client mod must speak. */
@@ -93,6 +95,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     dbPath: str('FO_DB', 'data/fable-online.sqlite'),
     regionsPath: str('FO_REGIONS', '../shared/defs/regions.json'),
     navDir: str('FO_NAV_DIR', ''),
+    thingsPath: str('FO_THINGS', '../shared/defs/world-things.json'),
     eventsPath: str('FO_EVENTS', 'data/events.jsonl'),
     protocolVersion: 1,
     minClientVersion: str('FO_MIN_CLIENT', '0.1.0'),

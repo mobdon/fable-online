@@ -23,6 +23,12 @@ export class Channel {
   readonly openedAt = Date.now();
   emptySince: number | null = Date.now();
   tick = 0;
+  /**
+   * Heroes who just arrived through a region change and are still loading the region in
+   * their own game. Their inputs are ignored until the client says it is ready (or the
+   * deadline passes), so nobody walks around blind on the server side.
+   */
+  readonly loading = new Map<number, number>();
 
   constructor(
     readonly id: string,
@@ -51,6 +57,7 @@ export class Channel {
   remove(heroId: number) {
     const pos = this.sim.removeHero(heroId);
     this.players.delete(heroId);
+    this.loading.delete(heroId);
     if (this.players.size === 0) this.emptySince = Date.now();
     return pos;
   }
@@ -59,12 +66,13 @@ export class Channel {
     const p = this.players.get(heroId);
     if (!p || input.seq <= p.lastSeq) return; // stale or replayed frame
     p.lastSeq = input.seq;
+    if (this.loading.has(heroId)) return;
     this.sim.applyInput(heroId, input);
   }
 
   /** Dev only: trust the mod's own idea of where its hero is. See RegionSim.placeHero. */
   placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
-    if (!this.players.has(heroId) || !this.sim.placeHero) return false;
+    if (!this.players.has(heroId) || !this.sim.placeHero || this.loading.has(heroId)) return false;
     this.sim.placeHero(heroId, at, yaw);
     return true;
   }
@@ -83,6 +91,10 @@ export class Channel {
 
   /** Advance the sim and send every player the world state. */
   step(dtMs: number): void {
+    if (this.loading.size) {
+      const now = Date.now();
+      for (const [id, until] of this.loading) if (now >= until) this.loading.delete(id);
+    }
     this.sim.step(dtMs);
     this.tick++;
     if (this.players.size === 0) return;

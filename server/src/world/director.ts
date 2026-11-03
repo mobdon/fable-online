@@ -8,6 +8,32 @@ import type { PlayerInput, SimFactory, Vec3 } from './sim.js';
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
+export type TransferVia = 'exit' | 'door' | 'cullis_gate';
+
+/** Extra detail for a region change, passed through to the client's enter_region. */
+export interface ArrivalInfo {
+  /** Thing id of the region entrance the hero arrives at, so the client loads to the same spot. */
+  entrance?: string;
+  yaw?: number;
+  /** Thing id of the exit or door used. */
+  thing?: string;
+}
+
+/** Other world systems that follow heroes and channels (doors, loot, exits). */
+export interface DirectorHooks {
+  /** A hero was placed in a channel (join or region change). */
+  onEnter?(ch: Channel, link: PlayerLink): void;
+  /** Called for each channel after its sim stepped. Must not move heroes between channels. */
+  onTick?(ch: Channel, now: number): void;
+  /** Called once per server frame after every channel stepped; may move heroes. */
+  afterTick?(): void;
+  onLeave?(ch: Channel, heroId: number): void;
+  onClose?(ch: Channel): void;
+}
+
+/** How long a hero may take to load the next region before the server unfreezes them anyway. */
+export const REGION_LOAD_TIMEOUT_MS = 30_000;
+
 export interface DirectorStats {
   players: number;
   sharedChannels: number;
@@ -35,6 +61,7 @@ export class Director {
   private lastPersist = Date.now();
   private timer: NodeJS.Timeout | null = null;
   lastTickMs = 0;
+  hooks: DirectorHooks = {};
 
   constructor(
     private cfg: ServerConfig,
@@ -83,6 +110,7 @@ export class Director {
     const p = ch.players.get(heroId);
     const pos = ch.remove(heroId);
     this.where.delete(heroId);
+    this.hooks.onLeave?.(ch, heroId);
     if (pos) this.persist(heroId, ch.region.name, pos);
     if (p) this.events.emit({ type: 'player_disconnected', heroId, channelId: ch.id, sessionMs: Date.now() - p.joinedAt });
     if (ch.kind === 'private') this.closeChannel(ch);
@@ -90,22 +118,37 @@ export class Director {
 
   /**
    * Move a hero to another region. Called by the server when the sim reports the hero
-   * walked through a region exit, or used a Cullis Gate. Never called on client say-so.
+   * walked through a region exit, used a door that leads elsewhere, or used a Cullis Gate.
+   * Never called on client say-so.
+   *
+   * 'exit' must follow the region graph. 'door' and 'cullis_gate' are checked by the
+   * caller against the level data (a door's link, a gate's network).
+   *
+   * The hero is frozen in the new channel until the client reports the region loaded.
    */
-  transfer(heroId: number, toRegion: string, at: Vec3, via: 'exit' | 'cullis_gate'): Channel {
+  transfer(heroId: number, toRegion: string, at: Vec3, via: TransferVia, info: ArrivalInfo = {}): Channel {
     const from = this.where.get(heroId);
     if (!from) throw new GameError('offline', 'Hero is not in the world');
     if (!this.regions.has(toRegion)) throw new GameError('no_region', `Unknown region ${toRegion}`);
     if (via === 'exit' && !this.regions.areNeighbours(from.region.name, toRegion))
       throw new GameError('not_adjacent', `${from.region.name} does not lead to ${toRegion}`);
     const link = from.players.get(heroId)!;
+    // Pick (or open) the target before leaving, so a full region leaves the hero where they are.
     const target = from.kind === 'private' ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion);
     from.remove(heroId);
     this.where.delete(heroId);
+    this.hooks.onLeave?.(from, heroId);
     if (from.kind === 'private') this.closeChannel(from);
     this.persist(heroId, toRegion, at);
-    this.place(target, link, at);
+    target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
+    this.place(target, link, at, { ...info, via, from: from.region.name });
     return target;
+  }
+
+  /** The client finished loading the region it was sent to. */
+  regionReady(heroId: number, region: string): void {
+    const ch = this.where.get(heroId);
+    if (ch && ch.region.name === region) ch.loading.delete(heroId);
   }
 
   input(heroId: number, input: PlayerInput): void {
@@ -123,8 +166,12 @@ export class Director {
   /** One server frame: step every channel, persist positions, close idle channels. */
   tick(dtMs: number): void {
     const t0 = performance.now();
-    for (const c of this.channels.values()) c.step(dtMs);
     const now = Date.now();
+    for (const c of this.channels.values()) {
+      c.step(dtMs);
+      this.hooks.onTick?.(c, now);
+    }
+    this.hooks.afterTick?.();
     if (now - this.lastPersist >= this.cfg.persistEveryMs) {
       this.lastPersist = now;
       this.persistAll();
@@ -161,12 +208,24 @@ export class Director {
 
   // ---------------------------------------------------------------- internals
 
-  private place(ch: Channel, link: PlayerLink, at: Vec3): void {
+  private place(ch: Channel, link: PlayerLink, at: Vec3, change?: ArrivalInfo & { via: TransferVia; from: string }): void {
     ch.add(link, at);
     this.where.set(link.heroId, ch);
-    this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
+    if (!change) this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
     this.events.emit({ type: 'region_enter', heroId: link.heroId, region: ch.region.name, channelId: ch.id, private: ch.kind === 'private' });
-    link.send(JSON.stringify({ t: 'enter_region', region: ch.region.name, region_uid: ch.region.uid, channel: ch.id, x: at.x, y: at.y, z: at.z }));
+    // The sim may have snapped the hero onto its ground; tell the client where they really are.
+    const p = ch.sim.position(link.heroId) ?? at;
+    const msg: Record<string, unknown> = { t: 'enter_region', region: ch.region.name, region_uid: ch.region.uid, channel: ch.id, x: p.x, y: p.y, z: p.z };
+    if (change) {
+      msg.from = change.from;
+      msg.via = change.via;
+      msg.loading = true;
+      if (change.entrance) msg.entrance = change.entrance;
+      if (change.thing) msg.thing = change.thing;
+      if (change.yaw !== undefined) msg.yaw = change.yaw;
+    }
+    link.send(JSON.stringify(msg));
+    this.hooks.onEnter?.(ch, link);
   }
 
   private pickShared(region: string): Channel {
@@ -213,6 +272,7 @@ export class Director {
       else this.shared.delete(ch.region.name);
     }
     ch.sim.dispose();
+    this.hooks.onClose?.(ch);
     this.events.emit({ type: 'channel_close', channelId: ch.id, region: ch.region.name, lifetimeMs: Date.now() - ch.openedAt });
   }
 

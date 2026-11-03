@@ -33,10 +33,11 @@ Needs Node 22.13 or newer (uses the built-in `node:sqlite`).
 
 ## The rules it enforces
 
-**The server owns everything.** A client can send exactly five things: `hello` (a one-time
-join ticket), `input` (stick, buttons, camera yaw), `chat`, `ping`, and `quest_complete`
-(a claim the server checks, below). It never sends a
-position, health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
+**The server owns everything.** A client can send exactly these things: `hello` (a one-time
+join ticket), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id of a door,
+chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server checks,
+below), and `ping`. It never sends a position,
+health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
 inputs are rate limited, and junk frames disconnect. The hero's region and position come
 from the database on join and are written back by the server.
 
@@ -90,7 +91,16 @@ fullest channel of their region under the soft cap (48). When all are at the sof
 channel opens, up to the global budget (64 channels). Past that, channels overflow to the hard
 cap (64), then the region reports full. Empty channels close after 2 minutes. Childhood and
 Guild training always get a private solo instance. Region changes only happen through a real
-exit (checked against the region graph) or a Cullis Gate, never on client request.
+exit (checked against the region graph), a door that leads to another region, or a Cullis
+Gate, never on client request. The server sees the hero walk into the exit, moves them to
+the linked entrance in the next region and holds them there until their game has loaded it.
+
+**Doors, chests and loot** (`src/world/things/`, [docs/world-objects.md](../docs/world-objects.md)).
+Each chest and digging spot pays each hero once, ever; common items on the ground are first
+come, first served per channel and come back after 10 minutes; doors are shared by the
+channel. Every claim is one ledger transaction with a unique claim key, so it can't be
+doubled, and every use is checked against the hero's server position. The staff-only
+platinum set never drops.
 
 ## Layout
 
@@ -103,6 +113,7 @@ exit (checked against the region graph) or a Cullis Gate, never on client reques
 | `src/economy/` | Gold ledger, items, vendor prices, trade windows, audit |
 | `src/world/nav/` | Walkable ground per region from Fable's own level files: A*, ground height, snapping ([docs/navigation.md](../docs/navigation.md)) |
 | `src/world/ai/` | Server-run monsters: wander, notice, chase, attack, flee, leash, threat ([docs/creature-sync.md](../docs/creature-sync.md) for the client side) |
+| `src/world/things/` | Doors, chests, containers, pickups, demon doors and region exits from the level files (`tools/extractor/things.mjs`, `FO_THINGS`) |
 | `src/world/nav-sim.ts` | `NavSim`: heroes held to the ground plus AI creatures, used when `FO_NAV_DIR` is set |
 | `src/world/` | Region table, channels, the director (placement and scaling), combat sim, spawns, shared entity model |
 | `src/combat/` | Combat rules and balance table, hero and creature loadouts |

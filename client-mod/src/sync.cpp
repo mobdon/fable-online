@@ -12,9 +12,11 @@
 #include "game/puppet.h"
 #include "game/spawns.h"
 #include "game/thing.h"
+#include "game/things.h"
 #include "log.h"
 #include "net/world_client.h"
 #include "world/entities.h"
+#include "world/objects.h"
 #include "world/snapshot.h"
 
 namespace fo::sync {
@@ -38,6 +40,10 @@ bool env_flag(const char* name, bool fallback) {
 
 struct State {
     world::EntityTable table;
+    /** Doors, chests, items on the ground and the region-change handshake. */
+    world::WorldObjects objects;
+    /** The hero's area when a region change began, to see the local load finish. */
+    uint32_t areaBeforeLoad = 0;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
     bool suppressSpawns = true;
@@ -55,6 +61,7 @@ State* g_state = nullptr;
 
 void on_connected() {
     if (!g_state) return;
+    g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
     if (g_state->suppressSpawns) game::spawns::suppress();
@@ -65,6 +72,7 @@ void on_disconnected(const std::string& why) {
     fo::log("sync: offline (%s); dropping %u puppets", why.c_str(),
             static_cast<unsigned>(g_state->puppets->live_count()));
     g_state->table.clear();
+    g_state->objects.clear();
     g_state->puppets->clear_all();
     // With no server driving them, the local generators should run the region again.
     game::spawns::restore();
@@ -72,6 +80,7 @@ void on_disconnected(const std::string& why) {
 
 void handle_frame(const std::string& json, uint32_t nowMs) {
     State& s = *g_state;
+    if (s.objects.on_frame(json, nowMs) != world::ObjectFrame::None) return;
     switch (world::frame_type(json)) {
     case world::FrameType::Welcome: {
         world::Welcome w;
@@ -93,6 +102,18 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         float x = 0, y = 0, z = 0;
         if (!world::parse_enter_region(json, region, x, y, z)) return;
         fo::log("sync: region %s at %.1f, %.1f, %.1f", region.c_str(), x, y, z);
+        world::RegionChange rc;
+        if (world::parse_region_change(json, rc)) {
+            if (rc.loading) {
+                // The server walked us through an exit or door and holds the hero until
+                // the local game has loaded the next region.
+                uintptr_t hero = game::local_hero();
+                s.areaBeforeLoad = hero ? game::area_id(hero) : 0;
+                fo::log("sync: %s from %s via %s, arriving at %s; waiting for the local load", rc.region.c_str(),
+                        rc.from.c_str(), rc.via.c_str(), rc.entrance.c_str());
+            }
+            s.objects.begin_region(rc, nowMs);
+        }
         // No entity id carries across a region, and the hero object is rebuilt.
         s.table.clear();
         s.puppets->clear_all();
@@ -122,6 +143,23 @@ void report_position(uint32_t nowMs) {
                   "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x, p.y, p.z,
                   game::area_id(hero));
     net::world_send(frame);
+}
+
+/** Region-change handshake, and the server's door / chest / item answers. */
+void sync_objects(uint32_t nowMs) {
+    State& s = *g_state;
+    std::string frame;
+    if (s.objects.loading() && s.objects.finish_loading(nowMs, game::things::region_loaded(s.areaBeforeLoad), frame)) {
+        fo::log("sync: %s loaded, telling the server", s.objects.region().region.c_str());
+        net::world_send(frame);
+    }
+    for (const world::ObjectChange& c : s.objects.drain_changes()) game::things::apply(c);
+    for (const world::Loot& l : s.objects.drain_loot()) {
+        fo::log("sync: %s gave %u gold and %u items%s%s", l.thing.c_str(), l.gold, static_cast<unsigned>(l.items.size()),
+                l.again ? " (already taken before)" : "", l.blocked.empty() ? "" : ", some blocked");
+    }
+    for (const world::Refusal& r : s.objects.drain_refusals())
+        fo::log("sync: server refused %s: %s (%s)", r.thing.empty() ? "a request" : r.thing.c_str(), r.code.c_str(), r.message.c_str());
 }
 
 /** Keeps the F8 test puppet walking a circle around the hero so movement is visible. */
@@ -158,6 +196,7 @@ void tick() {
     }
 
     report_position(now);
+    sync_objects(now);
 
     auto spawned = s.table.drain_spawned();
     auto removed = s.table.drain_removed();

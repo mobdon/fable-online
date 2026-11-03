@@ -19,6 +19,7 @@ export class GameSocket {
   private inputs = new Bucket(60, 90);
   private chats = new Bucket(1, 5);
   private questClaims = new Bucket(0.2, 3);
+  private interacts = new Bucket(4, 8);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -66,6 +67,12 @@ export class GameSocket {
         ch?.broadcast(encode({ t: 'chat_out', from: this.heroId, name: hero?.name, text: msg.text }));
         return;
       }
+      case 'interact':
+        if (!this.interacts.take()) return this.dropped('interact flood');
+        return this.send(this.app.objects.interact(this.heroId, msg.thing, msg.action));
+      case 'region_ready':
+        this.app.director.regionReady(this.heroId, msg.region);
+        return;
       case 'hero_pos': {
         if (!this.inputs.take()) return this.dropped('hero_pos flood');
         // Off by default: a client-chosen position is a cheat waiting to happen. It

@@ -117,4 +117,12 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX quest_claims_hero ON quest_claims(hero_id, quest);
   `,
+  /* 3: per-hero world flags (demon doors opened, ...) */ `
+  CREATE TABLE hero_flags (
+    hero_id  INTEGER NOT NULL REFERENCES heroes(id),
+    flag     TEXT NOT NULL,
+    set_at   INTEGER NOT NULL,
+    PRIMARY KEY (hero_id, flag)
+  );
+  `,
 ];

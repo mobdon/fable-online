@@ -2,9 +2,9 @@ set(FO_MOD_SOURCES
   src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp
   src/sync.cpp
   src/game/hero.cpp
-  src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp
+  src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
-  src/world/entities.cpp src/world/snapshot.cpp
+  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
@@ -25,4 +25,6 @@ add_custom_command(TARGET fable_online POST_BUILD
 if(FO_BUILD_TESTS)
   add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp)
   target_include_directories(world_tests PRIVATE src)
+  add_executable(objects_tests tests/objects_test.cpp src/world/objects.cpp)
+  target_include_directories(objects_tests PRIVATE src)
 endif()
