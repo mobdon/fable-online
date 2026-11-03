@@ -16,3 +16,5 @@ c++ $flags -o "$out/fable_online_assets_test" "$here/assets_test.cpp" \
 c++ $flags -o "$out/fable_online_menu_test" \
   "$here/menu_test.cpp" "$src/menu/menu_model.cpp" "$art/big.cpp" "$art/lzo1x.cpp"
 "$out/fable_online_menu_test"
+c++ $flags -o "$out/fable_online_display_test" "$here/display_test.cpp" "$src/display/camera_patch.cpp"
+"$out/fable_online_display_test"

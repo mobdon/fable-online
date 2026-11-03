@@ -1,6 +1,6 @@
 #pragma once
-// Low-level hooking helpers: import table and COM vtable patches. No inline code patching,
-// so nothing in Fable.exe's code bytes changes.
+// Low-level hooking helpers: import table and COM vtable patches. The only change to
+// Fable.exe's code bytes is the camera jump in display/widescreen.cpp.
 #include <windows.h>
 
 namespace fo::patch {

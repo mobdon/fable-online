@@ -30,3 +30,14 @@ enabled=1
 enabled=1
 font_px=15
 chat_rows=8
+
+[display]
+; 1 = widescreen field of view: on screens wider than 4:3 you see more to the sides
+; instead of a stretched or cropped picture (Hor+). Pick your screen's own resolution in
+; Fable's Options too.
+widescreen=1
+; How wide the camera sees. 1 = Fable's own view; 1.1 = 10% more; 0.9 = 10% less.
+fov_scale=1.0
+; 1 = press F10 in game to write one frame's drawing calls to fable_online.log
+; (used to fix the HUD stretching next).
+frame_probe=0

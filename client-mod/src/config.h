@@ -26,6 +26,10 @@ struct Config {
     bool overlay_enabled = true;
     int font_px = 15;
     int chat_rows = 8;
+    // [display]
+    bool widescreen = true;      // Hor+ field of view on screens wider than 4:3
+    float fov_scale = 1.0f;      // 1 = Fable's own view; 1.1 = 10% more in every direction
+    bool frame_probe = false;    // F10 logs one frame's Direct3D calls (for HUD work)
 };
 
 void config_load(HMODULE self);

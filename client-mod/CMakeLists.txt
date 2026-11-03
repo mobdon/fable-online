@@ -5,6 +5,7 @@ add_library(fable_online SHARED
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
+  src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp
   src/assets/fable_font.cpp src/assets/fable_ui.cpp
   ../shared/art/big.cpp ../shared/art/lzo1x.cpp ../shared/art/dxt.cpp)
 target_compile_definitions(fable_online PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0601)
