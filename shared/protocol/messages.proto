@@ -3,6 +3,7 @@
 // frame, with a "t" field naming the message (hello, input, chat, ping / welcome,
 // enter_region, tick, chat_out, pong, error). Field names below are the JSON keys.
 // See server/src/net/protocol.ts.
+// Chat and name tags have their own line-based JSON protocol: see chat.md.
 syntax = "proto3";
 package fable_online;
 

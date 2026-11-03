@@ -1,0 +1,18 @@
+{
+  "name": "@fable-online/chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fable Online chat and name tag service",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/main.ts",
+    "bot": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/bot.ts",
+    "test": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

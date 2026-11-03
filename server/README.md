@@ -82,3 +82,11 @@ Admin (`/admin/v1`, admin accounts only): `GET stats`, `GET economy/audit`.
   transactions, and the director to a separate process per region host.
 - **Region graph** comes from `shared/defs/regions.json`, which you generate from your own
   install with `tools/extractor/regions.mjs`. Without it the server uses a small built-in map.
+
+## chat/
+
+Chat channels, whispers, moderation, flood control and name tags. Runs on its own so chat
+survives region server restarts. See `chat/` and `../shared/protocol/chat.md`.
+Hooks: `ChatHub.updateHero()` (region server: positions, renown, PvP flag),
+`ChatHub.setParty()` (party system), the `EventSink` passed to `ChatHub` (analytics),
+and `auth.ts` (gateway login tokens).

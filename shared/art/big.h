@@ -30,12 +30,15 @@ public:
     bool has(const std::string& name) const { return index_.count(name) != 0; }
     // Reads and inflates one texture's top mip. False if unknown or corrupt.
     bool load(const std::string& name, Texture& out);
+    // Reads an entry's bytes as stored (for non-texture banks such as fonts.big).
+    bool load_raw(const std::string& name, std::vector<uint8_t>& out);
     std::vector<std::string> names() const;
     const std::string& error() const { return error_; }
 
 private:
     struct Entry { uint32_t size = 0, offset = 0; std::vector<uint8_t> subheader; };
     bool read_index();
+    void read_entries(uint32_t count, uint32_t eoff, uint32_t esize);
     bool read_at(uint32_t off, void* dst, size_t n);
     std::FILE* f_ = nullptr;
     std::unordered_map<std::string, Entry> index_;

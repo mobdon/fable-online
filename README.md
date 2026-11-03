@@ -18,6 +18,7 @@ Plan: https://claude.ai/artifact/H5LgN8n6CD1f8CFtjkGp1e
 | `launcher/` | `fable_online_launcher.exe`: login, news, region select, patching, then starts Fable with the DLL injected |
 | `tools/dev-gateway/` | Dev-only stand-in for the gateway, so the launcher runs before `server/` does |
 | `server/` | Gateway, region orchestrator, persistence (TypeScript) |
+| `server/chat/` | Chat and name tag service (TypeScript, Node 22) |
 | `tools/re-notes/` | What we've found inside Fable.exe, one file per system |
 | `tools/extractor/` | Reads game data from a local install into `shared/defs/` |
 
@@ -86,3 +87,38 @@ fable_online_launcher.exe        # defaults to http://127.0.0.1:8787
 Logic tests: configure with `-DFO_BUILD_TESTS=ON`, start the dev gateway with
 `--files` pointing at a folder holding a copy of `fable_online.dll` and `--realms 3`, then run
 `launcher_tests.exe http://127.0.0.1:8787` from an empty folder.
+## Chat and name tags
+
+The mod draws a chat box (bottom left) and name tags over other heroes (name, guild,
+title, renown; red name = flagged for PvP). Protocol and rules: `shared/protocol/chat.md`.
+
+### Run a chat server
+
+```
+cd server/chat
+npm install            # dev tools only; the server itself has no dependencies
+npm start              # dev mode: log in by name, port 7781
+npm test               # 13 tests
+npm run bot -- --name Maze --renown 12500 --title "Arrow Master"   # a fake player to chat with
+```
+
+Production sets `CHAT_TOKEN_SECRET` (shared with the gateway) so only launcher logins work.
+
+### In game
+
+Copy `client-mod/fable_online.ini.example` to `fable_online.ini` next to the DLL and set
+`server=` and `name=`. The chat window (Realm chat) follows the layout of the chat screen
+Lionhead left unfinished in the PC build: channels, whisper contacts and heroes nearby down the
+left, the conversation on the right, the edit box below. Its frame is read from the player's
+`textures.big` (`PC_UI_MSN_FRAME_1..9_SPRITE`); without it the pewter frame is used.
+Enter opens the chat box, Enter sends, Esc closes, `/help` lists
+commands (`/s`, `/re` region, `/1` realm, `/2` trade, `/p`, `/g`, `/w Name`, `/r`, `/ignore`, `/tags`).
+While the box is open the game doesn't see your keys. `fable_online.log` reports what got
+hooked and whether a camera matrix was found for the name tags.
+
+### Tests without the game
+
+- `client-mod/tests/run.sh`: chat box and name tag logic (any OS with a C++17 compiler).
+- `tools/overlay-test/`: a stand-in for Fable.exe that loads the DLL, fakes a hero and draws a
+  scene, so the overlay can be checked on Windows or under Wine
+  (`cmake -DFO_BUILD_OVERLAY_TEST=ON`).
