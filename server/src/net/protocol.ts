@@ -12,7 +12,23 @@ export type ClientMessage =
   | { t: 'hello'; protocol: number; exe_timestamp: string; token: string }
   | ({ t: 'input' } & PlayerInput)
   | { t: 'chat'; text: string }
-  | { t: 'ping'; n: number };
+  | { t: 'ping'; n: number }
+  | LawRequest;
+
+/**
+ * What the mod reports to the law: what the player tried (steal, draw a weapon, answer a
+ * guard), never an outcome. The server rolls, prices and records everything.
+ */
+export type LawRequest =
+  | { t: 'law'; a: 'weapon'; on: boolean }
+  | { t: 'law'; a: 'trespass'; zone: string | null }
+  | { t: 'law'; a: 'report'; kind: 'lockpicking' | 'vandalism'; value: number }
+  | { t: 'law'; a: 'steal'; shop: string; def: string; pickpocket: boolean; spotted: boolean; key: string }
+  | { t: 'law'; a: 'answer'; choice: 'pay' | 'bribe' | 'refuse'; key: string }
+  | { t: 'law'; a: 'fence'; item: string; key: string }
+  | { t: 'law'; a: 'payout'; key: string }
+  | { t: 'law'; a: 'warden'; key: string }
+  | { t: 'law'; a: 'status' };
 
 export class ProtocolError extends Error {}
 
@@ -58,8 +74,48 @@ export function decode(raw: string): ClientMessage {
     }
     case 'ping':
       return { t: 'ping', n: isNum(m.n) ? m.n : 0 };
+    case 'law':
+      return decodeLaw(m);
     default:
       throw new ProtocolError('unknown message');
+  }
+}
+
+const ID = /^[A-Za-z0-9_:.\-]{1,96}$/;
+const idOf = (v: unknown, what: string): string => {
+  if (typeof v !== 'string' || !ID.test(v)) throw new ProtocolError(`bad ${what}`);
+  return v;
+};
+const keyOf = (v: unknown): string => {
+  if (v === undefined) return `srv-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+  if (typeof v !== 'string' || v.length < 8 || v.length > 128) throw new ProtocolError('bad key');
+  return v;
+};
+
+function decodeLaw(m: Record<string, unknown>): LawRequest {
+  switch (m.a) {
+    case 'weapon':
+      return { t: 'law', a: 'weapon', on: m.on === true };
+    case 'trespass':
+      return { t: 'law', a: 'trespass', zone: m.zone === null || m.zone === undefined ? null : idOf(m.zone, 'zone') };
+    case 'report':
+      if (m.kind !== 'lockpicking' && m.kind !== 'vandalism') throw new ProtocolError('bad report');
+      // The value of a smashed object is the client's guess; cap it so it can't inflate a fine.
+      return { t: 'law', a: 'report', kind: m.kind, value: isNum(m.value) ? Math.min(500, Math.max(0, Math.floor(m.value))) : 0 };
+    case 'steal':
+      return { t: 'law', a: 'steal', shop: idOf(m.shop, 'shop'), def: idOf(m.def, 'def'), pickpocket: m.pickpocket === true, spotted: m.spotted === true, key: keyOf(m.key) };
+    case 'answer':
+      if (m.choice !== 'pay' && m.choice !== 'bribe' && m.choice !== 'refuse') throw new ProtocolError('bad answer');
+      return { t: 'law', a: 'answer', choice: m.choice, key: keyOf(m.key) };
+    case 'fence':
+      return { t: 'law', a: 'fence', item: idOf(m.item, 'item'), key: keyOf(m.key) };
+    case 'payout':
+    case 'warden':
+      return { t: 'law', a: m.a, key: keyOf(m.key) };
+    case 'status':
+      return { t: 'law', a: 'status' };
+    default:
+      throw new ProtocolError('unknown law request');
   }
 }
 

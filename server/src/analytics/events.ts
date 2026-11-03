@@ -18,7 +18,19 @@ export type GameEvent =
   | { type: 'item'; txId: number; action: string; itemId: string; defId: string; fromHero: number | null; toHero: number | null; quantity: number }
   | { type: 'trade'; txId: number; a: number; b: number }
   | { type: 'input_rejected'; heroId: number; reason: string }
-  | { type: 'tick_stats'; channels: number; players: number; tickMs: number };
+  | { type: 'tick_stats'; channels: number; players: number; tickMs: number }
+  | { type: 'crime'; heroId: number; kind: string; town: string | null; fine: number; level: number }
+  | { type: 'crime_witnessed'; heroId: number; kind: string; witness: 'guard' | 'villager'; channelId: string }
+  | { type: 'fine_paid'; heroId: number; gold: number; crimes: number }
+  | { type: 'bribe_paid'; heroId: number; town: string; gold: number }
+  | { type: 'kicked_out'; heroId: number; town: string; minutes: number }
+  | { type: 'arrest'; heroId: number; guardId: number | null; channelId: string; reason: string }
+  | { type: 'sentenced'; heroId: number; prison: 'jail' | 'bargate'; minutes: number; reason: string; fines: number }
+  | { type: 'released'; heroId: number; prison: 'jail' | 'bargate'; how: 'served' | 'paid' }
+  | { type: 'warden_paid'; heroId: number; gold: number }
+  | { type: 'escape'; heroId: number; made: boolean }
+  | { type: 'steal'; heroId: number; shop: string; defId: string; value: number; spotted: boolean; chance: number }
+  | { type: 'bounty_placed'; heroId: number; victim: string };
 
 export interface EventSink {
   emit(e: GameEvent): void;

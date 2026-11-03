@@ -2,7 +2,7 @@ import type { WebSocket } from 'ws';
 import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 import type { PlayerLink } from '../world/channel.js';
-import { Bucket, decode, encode, ProtocolError } from './protocol.js';
+import { Bucket, decode, encode, ProtocolError, type LawRequest } from './protocol.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
 /** Skip world ticks to a client whose socket is this far behind instead of buffering forever. */
@@ -18,6 +18,7 @@ export class GameSocket {
   private heroId: number | null = null;
   private inputs = new Bucket(60, 90);
   private chats = new Bucket(1, 5);
+  private lawReqs = new Bucket(5, 10);
   private drops = 0;
   private dropWindow = Date.now();
   private helloTimer: NodeJS.Timeout;
@@ -67,8 +68,45 @@ export class GameSocket {
       case 'ping':
         if (!this.inputs.take()) return this.dropped('ping flood');
         return this.send({ t: 'pong', n: msg.n });
+      case 'law':
+        if (!this.lawReqs.take()) return this.dropped('law flood');
+        return this.law(this.heroId, msg);
       case 'hello':
         return this.close(4002, 'duplicate hello');
+    }
+  }
+
+  private law(heroId: number, m: LawRequest): void {
+    const { app } = this;
+    const ch = app.director.channelOf(heroId)?.sim.law;
+    try {
+      switch (m.a) {
+        case 'weapon':
+          return ch?.setWeaponOut(heroId, m.on);
+        case 'trespass':
+          return ch?.setTrespass(heroId, m.zone);
+        case 'report':
+          return ch?.report(heroId, m.kind, m.value);
+        case 'steal': {
+          if (!ch) throw new GameError('no_law', 'Nothing to steal here', 409);
+          const r = ch.steal(heroId, m.shop, m.def, { pickpocket: m.pickpocket, clientSpotted: m.spotted }, m.key);
+          return this.send({ t: 'law_steal', spotted: r.spotted, item: r.itemId });
+        }
+        case 'answer':
+          if (!ch) throw new GameError('no_prompt', 'Nobody is asking you anything', 409);
+          return ch.answer(heroId, m.choice, m.key);
+        case 'fence':
+          return this.send({ t: 'law_fenced', ...app.law.fence(heroId, m.item, m.key) });
+        case 'payout':
+          return this.send({ t: 'law_released', ...app.law.payOut(heroId, m.key) });
+        case 'warden':
+          return this.send({ t: 'law_warden', ...app.law.warden(heroId, m.key) });
+        case 'status':
+          return app.law.pushStatus(heroId);
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.send({ t: 'error', error: e.code, message: e.message });
     }
   }
 
@@ -97,6 +135,7 @@ export class GameSocket {
       GameSocket.online.set(hero.id, this);
       this.send({ t: 'welcome', player_id: hero.id, name: hero.name, phase: hero.phase, renown: hero.renown, tick_rate: app.cfg.tickRate });
       app.director.join(hero, link);
+      app.law.pushStatus(hero.id);
     } catch (e) {
       if (this.heroId !== null && GameSocket.online.get(this.heroId) === this) GameSocket.online.delete(this.heroId);
       this.heroId = null;

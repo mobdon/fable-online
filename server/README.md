@@ -61,6 +61,7 @@ exit (checked against the region graph) or a Cullis Gate, never on client reques
 | `src/world/nav/` | Walkable ground per region from Fable's own level files: A*, ground height, snapping ([docs/navigation.md](../docs/navigation.md)) |
 | `src/world/ai/` | Server-run monsters: wander, notice, chase, attack, flee, leash, threat ([docs/creature-sync.md](../docs/creature-sync.md) for the client side) |
 | `src/world/nav-sim.ts` | `NavSim`: heroes held to the ground plus AI creatures, used when `FO_NAV_DIR` is set |
+| `src/law/` | Crime records, fines, bribes, kick-outs, jail and Bargate sentences, stealing rules, and the town watch that runs guards ([docs/law.md](../docs/law.md)) |
 | `src/net/` | HTTP launcher API, game WebSocket, protocol validation |
 | `src/analytics/` | Typed game events written as JSON lines to `data/events.jsonl` |
 

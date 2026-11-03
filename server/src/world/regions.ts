@@ -56,6 +56,13 @@ export class RegionTable {
       ['GreatwoodEntrance', 'Greatwood'],
       ['Greatwood', 'OakValeWest'],
       ['Greatwood', 'ArenaExterior'],
+      ['BowerstoneSlums', 'BowerstonePosh'],
+      ['BowerstonePosh', 'BowerstoneJail'],
+      ['PrisonCourtyard', 'PrisonCells_1'],
+      ['PrisonCourtyard', 'PrisonCells_2'],
+      ['PrisonCourtyard', 'PrisonCells_3'],
+      ['PrisonCourtyard', 'PrisonOffice'],
+      ['PrisonPath', 'GibbetWoods'],
     ];
     const defs = new Map<string, RegionDef>();
     const get = (n: string) => {

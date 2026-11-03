@@ -67,6 +67,11 @@ export interface AiWorld {
   /** Heroes in this channel (and anything else creatures may attack). */
   targets(): Iterable<Combatant>;
   combat: CombatPort;
+  /**
+   * Who this creature treats as an enemy. Defaults to "any other faction". Guards use it so
+   * they only go after heroes the law module has marked as wanted or resisting.
+   */
+  isHostile?(c: Creature, t: Combatant): boolean;
 }
 
 /**

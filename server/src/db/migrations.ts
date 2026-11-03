@@ -93,4 +93,78 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX item_history_item ON item_history(item_id);
   `,
+  /* 2: law: crimes, wanted level clock, kick-outs, sentences, stolen marks, steal log */ `
+  -- One row per crime. Unsettled rows are the hero's open record.
+  CREATE TABLE law_crimes (
+    id          INTEGER PRIMARY KEY,
+    hero_id     INTEGER NOT NULL REFERENCES heroes(id),
+    kind        TEXT NOT NULL,
+    town        TEXT,                 -- jurisdiction id; NULL = realm-wide (crimes against heroes)
+    fine        INTEGER NOT NULL CHECK (fine >= 0),
+    level       INTEGER NOT NULL CHECK (level BETWEEN 1 AND 4),
+    victim      TEXT,                 -- 'hero:<id>' or a creature def name
+    online_at   INTEGER NOT NULL,     -- the hero's online clock when it happened
+    created_at  INTEGER NOT NULL,
+    settled     TEXT CHECK (settled IN ('paid','bribed','forgiven','served')),
+    settled_at  INTEGER,
+    settled_tx  INTEGER REFERENCES ledger_tx(id)
+  );
+  CREATE INDEX law_crimes_hero ON law_crimes(hero_id, settled);
+
+  -- Per-hero law state. online_ms only advances while the hero is in the world, so petty
+  -- forgiveness, kick-outs and sentences can't be waited out logged off.
+  CREATE TABLE law_heroes (
+    hero_id      INTEGER PRIMARY KEY REFERENCES heroes(id),
+    online_ms    INTEGER NOT NULL DEFAULT 0,
+    day          TEXT,                -- UTC date the daily counters below belong to
+    bribes_today INTEGER NOT NULL DEFAULT 0,
+    stolen_today INTEGER NOT NULL DEFAULT 0,
+    fenced_today INTEGER NOT NULL DEFAULT 0,
+    last_steal_at INTEGER
+  );
+
+  CREATE TABLE law_kickouts (
+    hero_id     INTEGER NOT NULL REFERENCES heroes(id),
+    town        TEXT NOT NULL,
+    until_online_ms INTEGER NOT NULL,
+    PRIMARY KEY (hero_id, town)
+  );
+
+  CREATE TABLE law_sentences (
+    id          INTEGER PRIMARY KEY,
+    hero_id     INTEGER NOT NULL REFERENCES heroes(id),
+    prison      TEXT NOT NULL CHECK (prison IN ('jail','bargate')),
+    total_ms    INTEGER NOT NULL CHECK (total_ms > 0),
+    served_ms   INTEGER NOT NULL DEFAULT 0,
+    fines       INTEGER NOT NULL DEFAULT 0,  -- fines this sentence settled (jail pay-out price)
+    reason      TEXT NOT NULL,
+    warden_used INTEGER NOT NULL DEFAULT 0,
+    escape_tried INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL,
+    released_at INTEGER,
+    release     TEXT CHECK (release IN ('served','paid'))
+  );
+  CREATE INDEX law_sentences_hero ON law_sentences(hero_id, released_at);
+  CREATE UNIQUE INDEX law_sentences_one_open ON law_sentences(hero_id) WHERE released_at IS NULL;
+
+  -- Stolen items keep a mark until 'until' (ms): no normal traders, no trading to heroes.
+  CREATE TABLE law_stolen (
+    item_id   TEXT PRIMARY KEY REFERENCES items(id),
+    hero_id   INTEGER NOT NULL REFERENCES heroes(id),
+    value     INTEGER NOT NULL,
+    until     INTEGER NOT NULL
+  );
+
+  CREATE TABLE law_steals (
+    id        INTEGER PRIMARY KEY,
+    hero_id   INTEGER NOT NULL REFERENCES heroes(id),
+    shop      TEXT NOT NULL,
+    def_id    TEXT NOT NULL,
+    day       TEXT NOT NULL,
+    value     INTEGER NOT NULL,
+    spotted   INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX law_steals_hero ON law_steals(hero_id, day);
+  `,
 ];
