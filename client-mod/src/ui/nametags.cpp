@@ -112,6 +112,7 @@ std::vector<Label> TagStore::layout(const float m[16], float w, float h, const T
         l.name_color = with_alpha(t.pvp ? 0xFFE0503C : 0xFFFFF6DC, a);
         l.info_color = with_alpha(renown_color(t.renown), a);
         l.depth = dist;
+        l.pvp = t.pvp;
         out.push_back(std::move(l));
     };
     for (const auto& [id, t] : tags_) place(t);

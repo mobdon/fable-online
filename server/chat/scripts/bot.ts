@@ -40,7 +40,7 @@ setInterval(() => send({ t: "ping", n: Date.now() }), 30_000);
 
 createInterface({ input: process.stdin }).on("line", (l) => {
   const w = /^\/w\s+(\S+)\s+(.+)/.exec(l);
-  const c = /^\/(say|shout|world|trade|party|guild|1|2)\s+(.+)/.exec(l);
+  const c = /^\/(say|region|world|trade|party|guild|1|2)\s+(.+)/.exec(l);
   const alias: Record<string, string> = { "1": "world", "2": "trade" };
   if (w) send({ t: "whisper", to: w[1], text: w[2] });
   else if (c) send({ t: "say", ch: alias[c[1]] ?? c[1], text: c[2] });

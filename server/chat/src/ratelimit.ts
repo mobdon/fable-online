@@ -15,7 +15,7 @@ export interface RateConfig {
 export const DEFAULT_RATE: RateConfig = {
   burst: 5,
   refillPerSec: 0.5,
-  channelCooldownMs: { world: 10_000, trade: 30_000, shout: 3_000 },
+  channelCooldownMs: { world: 10_000, trade: 30_000, region: 3_000 },
   repeatWindowMs: 30_000,
   strikesToAutoMute: 5,
   strikeWindowMs: 60_000,

@@ -36,11 +36,11 @@ Hero names: 3 to 16 characters, letters, digits, spaces, `'` and `-`, starting w
 | Channel | Who hears it | Cooldown |
 | --- | --- | --- |
 | `say` | heroes within 30 units, same region | none |
-| `shout` | everyone in the region | 3 s |
+| `region` | everyone in your region (Bowerstone, Oakvale, ...) | 3 s |
 | `world` | everyone online | 10 s |
 | `trade` | everyone online | 30 s |
 | `party` | your party (party system: later) | none |
-| `guild` | your guild (from the login token) | none |
+| `guild` | your guild: every guild, sub guilds included, is its own channel (`guildId` from the login token or the region server) | none |
 | `whisper` | one hero | none |
 
 Flood control on top of that: a burst of 5 messages, refilling one every 2 s; the same text

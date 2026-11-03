@@ -10,7 +10,8 @@ export interface Claims {
   role: Role;
   renown?: number;   // starting renown; the region server updates it live
   title?: string;
-  guild?: string;
+  guild?: string;     // short tag shown on the name tag, e.g. "OAK"
+  guildId?: string;   // the guild's id: guild chat goes to everyone with the same id (sub guilds each have their own)
   exp: number;       // unix seconds
 }
 

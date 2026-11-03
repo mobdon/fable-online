@@ -106,6 +106,12 @@ bool Renderer::build_atlas(const assets::UiArt* art, int fallback_px) {
     uint32_t white[16];
     std::fill(std::begin(white), std::end(white), 0xFFFFFFFFu);
     if (!blit(white, 4, 4, white_)) return false;
+    fable_bar_ = art && art->bar_ok;
+    for (int on = 0; on < 2 && fable_bar_; ++on)
+        for (int i = 0; i < 3; ++i) {
+            const art::Image& im = on ? art->bar_on[i] : art->bar_off[i];
+            if (!blit(im.px.data(), im.w, im.h, bar_[on][i])) { fable_bar_ = false; break; }
+        }
     if (fable_frame_) {
         const art::Image* imgs[] = {&art->tl, &art->tr, &art->bl, &art->br, &art->top, &art->bottom, &art->left, &art->right};
         Rect* slots[] = {&tl_, &tr_, &bl_, &br_, &top_, &bottom_, &left_, &right_};
@@ -240,6 +246,22 @@ void Renderer::panel(float x, float y, float w, float h, float a) {
     sprite(bottom_, x + cs, y + h - e, w - 2 * cs, e, c);
     sprite(left_, x, y + cs, e, h - 2 * cs, c);
     sprite(right_, x + w - e, y + cs, e, h - 2 * cs, c);
+}
+
+float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends) {
+    if (!fable_bar_) {
+        rect(x, y, w, h, scale_alpha(on ? 0xC0A28F74 : 0xA0938D7E, a));
+        return 0;
+    }
+    uint32_t c = scale_alpha(0xFFFFFFFF, a);
+    const Rect* b = bar_[on ? 1 : 0];
+    if (!ends) { sprite(b[1], x, y, w, h, c); return 0; }
+    float e = b[0].w * h / b[0].h;          // keep the ornate ends' proportions
+    if (w < 2 * e) w = 2 * e;
+    sprite(b[0], x, y, e, h, c);
+    sprite(b[1], x + e, y, w - 2 * e, h, c);
+    sprite(b[2], x + w - e, y, e, h, c);
+    return e;
 }
 
 void Renderer::rule(float x, float y, float w, float a) {

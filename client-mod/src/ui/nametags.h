@@ -25,6 +25,7 @@ struct Label {
     std::string info_line;             // "Arrow Master - 1,250 renown"
     uint32_t name_color, info_color;   // 0xAARRGGBB, alpha already applied
     float depth;                       // view distance, for sorting
+    bool pvp;                          // flagged for open-world PvP
 };
 
 struct TagSettings {

@@ -24,6 +24,9 @@ public:
     void rect(float x, float y, float w, float h, uint32_t argb);
     // A Fable panel: dark fill, pewter frame with rivets in the corners.
     void panel(float x, float y, float w, float h, float alpha);
+    // Fable's pewter scroll bar (its menu buttons): ornate ends when `ends`, warm when `on`.
+    // Returns the width of one end piece at this height, so callers can inset text.
+    float bar(float x, float y, float w, float h, float alpha, bool on, bool ends);
     // A thin pewter rule, like the dividers in Fable's menus.
     void rule(float x, float y, float w, float alpha);
     // UTF-8 text with Fable's soft black shadow (or a full outline for name tags).
@@ -53,7 +56,8 @@ private:
     FaceInfo faces_[3];
     assets::Font fallback_[3];              // GDI Tahoma, when fonts.big couldn't be read
     Rect white_, tl_, tr_, bl_, br_, top_, bottom_, left_, right_;
-    bool fable_fonts_ = false, fable_frame_ = false;
+    Rect bar_[2][3];                         // [off/on][left, middle, right]
+    bool fable_fonts_ = false, fable_frame_ = false, fable_bar_ = false;
     uint32_t fill_ = 0xFF141E26;
     float screen_w_ = 0, screen_h_ = 0;
     std::vector<Vertex> verts_;
