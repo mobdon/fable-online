@@ -10,6 +10,7 @@ import { GOLD_SINKS, GOLD_SOURCES } from "./metrics.js";
 export const ANOMALY_RULES = [
   "unknown_source", "unknown_sink", "duplicate_txn", "large_delta", "earn_rate",
   "negative_balance", "balance_mismatch", "supply_drift", "phial_rate", "self_trade",
+  "earn_outlier",
 ] as const;
 
 export type AnomalyRule =
@@ -22,7 +23,8 @@ export type AnomalyRule =
   | "balance_mismatch"   // before + delta != after: something changed the balance off-ledger
   | "supply_drift"       // sum of all balances in the DB != what the ledger says exists
   | "phial_rate"         // one hero getting too many Resurrection Phials
-  | "self_trade";        // a hero trading with themselves (alt-account laundering shows up as rate)
+  | "self_trade"         // a hero trading with themselves (alt-account laundering shows up as rate)
+  | "earn_outlier";      // a hero earning far more this hour than nearly every hero has in past hours
 
 export interface Anomaly {
   rule: AnomalyRule;
@@ -46,6 +48,18 @@ export interface WatchdogConfig {
   txnMemory: number;
   /** Allowed gap between ledger and DB supply before supply_drift fires. */
   supplyTolerance: number;
+  /**
+   * earn_outlier: compares a hero's gold this clock hour with the 99th percentile of
+   * all finished hero-hours seen so far. Needs no hand-set limit: it learns what normal
+   * play looks like and flags heroes at outlierMultiplier x that.
+   */
+  outlierMultiplier: number;
+  /** Never flag below this many gold per hour, however quiet the server is. */
+  outlierFloor: number;
+  /** Finished hero-hours needed before the rule switches on. */
+  outlierMinSamples: number;
+  /** How many finished hero-hours to keep as the baseline (oldest dropped first). */
+  outlierHistory: number;
 }
 
 export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
@@ -58,7 +72,13 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   maxPhialsPerWindow: 2,
   txnMemory: 200_000,
   supplyTolerance: 0,
+  outlierMultiplier: 5,
+  outlierFloor: 5_000,
+  outlierMinSamples: 200,
+  outlierHistory: 50_000,
 };
+
+const HOUR_MS = 60 * 60 * 1000;
 
 const FLAG_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -69,6 +89,12 @@ export class EconomyWatchdog {
   private seenTxns = new Set<string>();
   private txnOrder: string[] = [];
   private flagged = new Map<string, number>();
+  private hour = -1;
+  private hourEarned = new Map<string, number>();
+  private hourFlagged = new Set<string>();
+  private history: number[] = [];
+  private closed: number[] = [];
+  private p99 = 0;
 
   constructor(config: Partial<WatchdogConfig> = {}, private readonly now: () => number = Date.now) {
     this.config = { ...DEFAULT_WATCHDOG_CONFIG, ...config };
@@ -98,6 +124,12 @@ export class EconomyWatchdog {
       const limit = this.config.maxSingleMint[c.reason] ?? this.config.maxSingleMint.default;
       if (Math.abs(c.delta) > limit) out.push({ rule: "large_delta", playerId: p, detail: { source: c.reason, delta: c.delta, limit } });
       if (!this.config.earnRateExempt.includes(c.reason)) {
+        const hourTotal = this.addToHour(p, Math.abs(c.delta));
+        const limit = this.outlierLimit();
+        if (limit !== undefined && hourTotal > limit && !this.hourFlagged.has(p)) {
+          this.hourFlagged.add(p);
+          out.push({ rule: "earn_outlier", playerId: p, detail: { earnedThisHour: hourTotal, baselineP99: this.p99, limit } });
+        }
         const total = this.addToWindow(p, Math.abs(c.delta));
         if (total > this.config.maxEarnPerWindow && total - Math.abs(c.delta) <= this.config.maxEarnPerWindow) {
           // Fire once when the hero crosses the line, not on every later transaction.
@@ -151,6 +183,45 @@ export class EconomyWatchdog {
     const now = this.now();
     for (const [p, t] of this.flagged) if (now - t > FLAG_TTL_MS) this.flagged.delete(p);
     return this.flagged.size;
+  }
+
+  /** p99 of finished hero-hours, or 0 before there is enough data. */
+  get baselineP99() { this.rollHour(); return this.p99; }
+
+  /** The earn_outlier limit right now, or undefined while still learning. */
+  outlierLimit(): number | undefined {
+    this.rollHour();
+    if (this.history.length < this.config.outlierMinSamples) return undefined;
+    return Math.max(this.p99 * this.config.outlierMultiplier, this.config.outlierFloor);
+  }
+
+  /** Per-hero totals of hours that have finished since the last call (for the histogram). */
+  drainClosedHours(): number[] {
+    this.rollHour();
+    const out = this.closed;
+    this.closed = [];
+    return out;
+  }
+
+  private rollHour() {
+    const h = Math.floor(this.now() / HOUR_MS);
+    if (h === this.hour) return;
+    if (this.hourEarned.size) {
+      for (const v of this.hourEarned.values()) { this.history.push(v); this.closed.push(v); }
+      if (this.history.length > this.config.outlierHistory) this.history.splice(0, this.history.length - this.config.outlierHistory);
+      const sorted = [...this.history].sort((a, b) => a - b);
+      this.p99 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))] ?? 0;
+    }
+    this.hour = h;
+    this.hourEarned.clear();
+    this.hourFlagged.clear();
+  }
+
+  private addToHour(playerId: string, amount: number): number {
+    this.rollHour();
+    const total = (this.hourEarned.get(playerId) ?? 0) + amount;
+    this.hourEarned.set(playerId, total);
+    return total;
   }
 
   private addToWindow(playerId: string, amount: number): number {

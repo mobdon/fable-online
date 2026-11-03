@@ -49,6 +49,9 @@ export class Analytics {
       this.onAnomaly?.(a);
     }
     this.metrics.economyFlaggedPlayers.set(this.watchdog.flaggedCount());
+    for (const v of this.watchdog.drainClosedHours()) this.metrics.goldEarnedPerHeroHour.observe(v);
+    this.metrics.goldEarnBaselineP99.set(this.watchdog.baselineP99);
+    this.metrics.goldEarnOutlierLimit.set(this.watchdog.outlierLimit() ?? 0);
     return anomalies;
   }
 

@@ -81,6 +81,12 @@ export function createMetrics(opts: { prefix?: string; defaultMetrics?: boolean 
     phialsCreated: new Counter({ name: p + "resurrection_phials_created_total", help: "Resurrection Phials entering the world", labelNames: ["source"], registers: r }),
     phialsUsed: new Counter({ name: p + "resurrection_phials_used_total", help: "Resurrection Phials consumed", labelNames: ["venue"], registers: r }),
     economyAnomalies: new Counter({ name: p + "economy_anomalies_total", help: "Ledger rule violations (possible exploits)", labelNames: ["rule"], registers: r }),
+    goldEarnedPerHeroHour: new Histogram({
+      name: p + "gold_earned_per_hero_hour", help: "Gold one hero earned in one finished clock hour (heroes who earned nothing are not counted)",
+      buckets: [100, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000, 250000, 1000000], registers: r,
+    }),
+    goldEarnBaselineP99: new Gauge({ name: p + "gold_earn_baseline_p99", help: "99th percentile of gold per hero-hour that the watchdog has learned (0 while learning)", registers: r }),
+    goldEarnOutlierLimit: new Gauge({ name: p + "gold_earn_outlier_limit", help: "Gold per hour above which earn_outlier fires (0 while learning)", registers: r }),
     economyFlaggedPlayers: new Gauge({ name: p + "economy_flagged_players", help: "Distinct heroes flagged by the economy watchdog in the last 24h", registers: r }),
 
     // ---- PvP & Arena -----------------------------------------------------------

@@ -42,12 +42,17 @@ checked against these rules (`src/economy.ts`). The watchdog only reports; the s
 | `supply_drift` | Sum of all DB balances differs from minted minus burned |
 | `unknown_source` / `unknown_sink` | Gold created or destroyed by code that isn't on the allowed list |
 | `large_delta` | One payout bigger than that source should ever give |
-| `earn_rate` | One hero earning more than 100,000 gold an hour (draft limit) |
+| `earn_outlier` | One hero earning 5x what the top 1% of heroes normally earn in an hour. Learns "normal" from real play, so it needs no hand-set number (switches on after 200 hero-hours) |
+| `earn_rate` | One hero earning more than 100,000 gold an hour (fixed backstop, draft limit) |
 | `negative_balance` | A balance below zero |
 | `phial_rate` | More than 2 Resurrection Phials per hero per day (draft limit) |
 | `self_trade` | A hero trading with themselves |
 
-Limits are in `DEFAULT_WATCHDOG_CONFIG` and can be overridden per server.
+Limits are in `DEFAULT_WATCHDOG_CONFIG` and can be overridden per server. Gold income
+per hero has no reference data before launch, so `earn_outlier` derives it: every finished hour, each
+hero's earnings go into `fable_gold_earned_per_hero_hour`, and the Economy dashboard's
+"What normal play looks like" row shows the typical, top 10% and top 1% hero. After the
+first week, use those numbers to set the fixed limits.
 
 ## Commands
 

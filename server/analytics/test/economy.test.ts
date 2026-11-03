@@ -96,3 +96,22 @@ test("unknown labels are clamped to 'other'", async () => {
   const text = await a.metrics.registry.metrics();
   assert.match(text, /fable_pvp_ability_uses_total\{venue="arena",ability="other"\} 1/);
 });
+
+test("earn_outlier learns normal play and flags a hero far above it", () => {
+  let now = 0;
+  const w = new EconomyWatchdog({ outlierMinSamples: 50, outlierFloor: 1000, outlierMultiplier: 5 }, () => now);
+  // Hour 0: 100 ordinary heroes earn 100..1090 gold. Still learning, nothing flagged.
+  for (let i = 0; i < 100; i++) w.checkGold({ playerId: `h${i}`, delta: 100 + i * 10, kind: "mint", reason: "quest_reward" });
+  assert.equal(w.outlierLimit(), undefined);
+  // Hour 1: baseline p99 is 1090, so the limit is 5450.
+  now = 3_600_000;
+  assert.equal(w.baselineP99, 1090);
+  assert.equal(w.outlierLimit(), 5450);
+  assert.deepEqual(w.drainClosedHours().length, 100);
+  assert.deepEqual(w.checkGold({ playerId: "normal", delta: 900, kind: "mint", reason: "quest_reward" }), []);
+  assert.deepEqual(w.checkGold({ playerId: "farmer", delta: 5000, kind: "mint", reason: "monster_drop" }), []);
+  assert.deepEqual(rules(w.checkGold({ playerId: "farmer", delta: 1000, kind: "mint", reason: "monster_drop" })), ["earn_outlier"]);
+  assert.deepEqual(w.checkGold({ playerId: "farmer", delta: 1000, kind: "mint", reason: "monster_drop" }), []); // once per hour
+  // GM grants don't count.
+  assert.deepEqual(w.checkGold({ playerId: "gm", delta: 1e6, kind: "mint", reason: "gm_grant" }), []);
+});
