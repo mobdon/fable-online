@@ -30,6 +30,7 @@ import { WorldClock } from './world/clock.js';
 import { loadTownData, type TownData } from './world/town/town-data.js';
 import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
+import { Scoreboard } from './scoreboard/scoreboard.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -51,6 +52,7 @@ export interface App {
   law: Law;
   clock: WorldClock;
   town: TownData;
+  scoreboard: Scoreboard;
   close(): void;
 }
 
@@ -135,6 +137,7 @@ export function createApp(
     tick: (dt, ids) => law.tick(dt, ids),
     left: (heroId) => law.flush(heroId),
   });
+  const scoreboard = new Scoreboard(db);
   return {
     cfg,
     db,
@@ -154,6 +157,7 @@ export function createApp(
     law,
     clock,
     town,
+    scoreboard,
     close() {
       director.stop();
       law.flush();

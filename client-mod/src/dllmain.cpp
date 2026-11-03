@@ -23,6 +23,7 @@
 #include "probe.h"
 #include "ui/json.h"
 #include "sync.h"
+#include "scoreboard.h"
 
 namespace {
 std::atomic<bool> g_running{false};
@@ -87,6 +88,7 @@ DWORD WINAPI main_thread(LPVOID) {
     fo::log("  exe: %s", narrow);
     fo::log("  image base: 0x%08X", static_cast<unsigned>(reinterpret_cast<uintptr_t>(exe)));
     fo::log("  mode: %s", mode == Mode::Server ? "server" : "client");
+    fo::scoreboard_report();
 
     char probe[4] = {};
     bool probing = GetEnvironmentVariableA("FABLE_ONLINE_PROBE", probe, sizeof(probe)) > 0 && probe[0] == '1';
@@ -126,6 +128,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(module);
         // Before the game is resumed, so the hooks see graphics.big open (test-only, env-gated).
         fo::herolook::install();
+        // Byte patches only (no locks, no allocation), so safe here and done before the game
+        // thread is resumed and builds its scoreboard client.
+        fo::scoreboard_patch();
         g_running = true;
         g_self = module;
         // The game is still suspended here, so patch its Direct3D and DirectInput imports

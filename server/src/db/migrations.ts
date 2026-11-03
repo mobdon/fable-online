@@ -199,4 +199,46 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX law_steals_hero ON law_steals(hero_id, day);
   `,
+  /* 5: clans and the in-game online scoreboard */ `
+  -- Clans as Fable's own clan screen shows them (name, description, logo).
+  CREATE TABLE clans (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    description   TEXT,
+    logo_version  INTEGER NOT NULL DEFAULT 0,  -- bumped on every new logo; 0 = no logo
+    logo_jpeg     BLOB,                         -- 64x64 JPEG, guaranteed free of CR LF pairs
+    created_at    INTEGER NOT NULL
+  );
+
+  CREATE TABLE clan_members (
+    clan_id    INTEGER NOT NULL REFERENCES clans(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    joined_at  INTEGER NOT NULL,
+    PRIMARY KEY (clan_id, account_id)
+  );
+  CREATE INDEX clan_members_account ON clan_members(account_id);
+
+  -- The realm-wide clan every scoreboard user joins, so the records screen always has a board.
+  INSERT INTO clans (id, name, description, created_at)
+    VALUES (1, 'Chapters of the Lost', 'Every hero in the realm', 0);
+
+  -- The game hashes MD5(lower(username + password)). We never store a real password that
+  -- way: players type a random scoreboard code instead, and only its MD5 lives here.
+  CREATE TABLE scoreboard_logins (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    md5        TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  -- Best score per account per scoreboard activity (0-38).
+  CREATE TABLE scoreboard_scores (
+    account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    activity    INTEGER NOT NULL CHECK (activity BETWEEN 0 AND 38),
+    score       REAL NOT NULL,
+    low_is_best INTEGER NOT NULL DEFAULT 0,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (account_id, activity)
+  );
+  CREATE INDEX scoreboard_scores_activity ON scoreboard_scores(activity, score);
+  `,
 ];
