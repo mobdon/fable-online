@@ -9,6 +9,7 @@
 #include "../assets/fable_ui.h"
 #include "../config.h"
 #include "../log.h"
+#include "../menu/menu.h"
 #include "../net/chat_client.h"
 #include "../ui/chat_model.h"
 #include "../ui/json.h"
@@ -25,6 +26,7 @@ constexpr int kDev_Reset = 16, kDev_Present = 17, kDev_EndScene = 42, kDev_SetTr
 constexpr int kDI_CreateDevice = 3;
 constexpr int kDIDev_GetDeviceState = 9, kDIDev_GetDeviceData = 10;
 const GUID kSysKeyboard = {0x6F1D2B61, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
+const GUID kSysMouse = {0x6F1D2B60, 0xD5A0, 0x11CF, {0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00}};
 
 using Direct3DCreate9_t = IDirect3D9*(WINAPI*)(UINT);
 using CreateDevice_t = HRESULT(WINAPI*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
@@ -55,6 +57,8 @@ bool g_iat_d3d = false, g_iat_di = false;
 std::atomic<bool> g_device_hooked{false};
 std::atomic<bool> g_keyboard_hooked{false};
 std::atomic<void*> g_keyboards[4] = {};
+std::atomic<void*> g_mice[4] = {};
+std::atomic<bool> g_mouse_hooked{false};
 HWND g_hwnd = nullptr;
 
 // ---- shared state (game thread + mod thread) -----------------------------
@@ -85,7 +89,7 @@ double now_s() {
     return static_cast<double>(t.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
 }
 
-bool input_blocked() { return g_chat_open.load() || GetTickCount() < g_block_until.load(); }
+bool input_blocked() { return menu::active() || g_chat_open.load() || GetTickCount() < g_block_until.load(); }
 
 void flush_outbox() {  // caller holds g_mu
     for (auto& line : g_chat.take_outbox()) net::chat_send(line);
@@ -301,6 +305,17 @@ bool targets_backbuffer(IDirect3DDevice9* dev) {
 
 // ---- Direct3D hooks ------------------------------------------------------------
 HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
+    if (menu::active() && !g_drawn) {
+        // The start-up menu covers the whole screen; chat and tags wait until it closes.
+        if (g_no_backbuffer > 300 || targets_backbuffer(dev)) {
+            menu::draw(dev);
+            g_drawn = g_present_seen;
+            g_no_backbuffer = 0;
+        } else {
+            ++g_no_backbuffer;
+        }
+        return o_EndScene(dev);
+    }
     if (config().overlay_enabled && !g_drawn) {
         // Draw once a frame, into the scene that ends up on screen. If the game never
         // ends a scene on the back buffer (some post-processing paths), stop checking.
@@ -323,6 +338,7 @@ HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, H
 
 HRESULT WINAPI hk_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     g_r.on_lost();
+    menu::on_device_lost();
     return o_Reset(dev, pp);
 }
 
@@ -369,6 +385,7 @@ bool map_key(WPARAM vk, ui::Key& k) {
 
 LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     const Config& cfg = config();
+    if (menu::active() && menu::on_message(h, msg, w, l)) return 0;
     if (cfg.chat_enabled && cfg.overlay_enabled) {
         static wchar_t high_surrogate = 0;
         switch (msg) {
@@ -416,14 +433,27 @@ bool is_keyboard(void* dev) {
     return false;
 }
 
+bool is_mouse(void* dev) {
+    for (auto& m : g_mice) if (m.load() == dev) return true;
+    return false;
+}
+
 HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
     HRESULT hr = o_GetDeviceState(dev, size, data);
+    if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
+        menu::on_mouse_state(data, size);   // the menu reads the mouse, Fable's menu underneath doesn't
+        std::memset(data, 0, size);
+    }
     if (SUCCEEDED(hr) && data && is_keyboard(dev) && input_blocked()) std::memset(data, 0, size);
     return hr;
 }
 
 HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DWORD flags) {
     HRESULT hr = o_GetDeviceData(dev, cb, rg, inout, flags);
+    if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
+        if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) menu::on_mouse_data(rg, cb, *inout);
+        *inout = 0;
+    }
     if (SUCCEEDED(hr) && inout && is_keyboard(dev) && input_blocked()) *inout = 0;  // read and thrown away
     return hr;
 }
@@ -435,6 +465,13 @@ HRESULT WINAPI hk_DICreateDevice(void* di, REFGUID guid, void** out, LPUNKNOWN u
         if (auto o = patch::vtable(*out, kDIDev_GetDeviceState, reinterpret_cast<void*>(hk_GetDeviceState))) o_GetDeviceState = reinterpret_cast<GetDeviceState_t>(o);
         if (auto o = patch::vtable(*out, kDIDev_GetDeviceData, reinterpret_cast<void*>(hk_GetDeviceData))) o_GetDeviceData = reinterpret_cast<GetDeviceData_t>(o);
         g_keyboard_hooked = o_GetDeviceState && o_GetDeviceData;
+    }
+    if (SUCCEEDED(hr) && out && *out && IsEqualGUID(guid, kSysMouse)) {
+        // Keyboard and mouse devices share the same vtable, so these slots are the same hooks.
+        for (auto& m : g_mice) { void* e = nullptr; if (m.compare_exchange_strong(e, *out)) break; }
+        if (auto o = patch::vtable(*out, kDIDev_GetDeviceState, reinterpret_cast<void*>(hk_GetDeviceState))) o_GetDeviceState = reinterpret_cast<GetDeviceState_t>(o);
+        if (auto o = patch::vtable(*out, kDIDev_GetDeviceData, reinterpret_cast<void*>(hk_GetDeviceData))) o_GetDeviceData = reinterpret_cast<GetDeviceData_t>(o);
+        g_mouse_hooked = o_GetDeviceState && o_GetDeviceData;
     }
     return hr;
 }
@@ -548,6 +585,7 @@ void install_late() {
     }
     fo::log("overlay: device %s, window %s, keyboard %s", g_device_hooked ? "hooked" : "NOT hooked",
             g_hwnd ? "hooked" : "NOT hooked", g_keyboard_hooked ? "hooked" : "not hooked (typing may also move the hero)");
+    fo::log("overlay: DirectInput mouse %s", g_mouse_hooked ? "hooked" : "not hooked (the start-up menu uses window mouse messages only)");
 }
 
 void set_hero(const game::HeroPos& pos) {

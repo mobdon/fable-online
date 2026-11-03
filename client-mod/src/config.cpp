@@ -65,6 +65,7 @@ void config_load(HMODULE self) {
     c.up_axis = axis == L"x" ? 0 : axis == L"y" ? 1 : 2;
     c.tag_full = ini_float(f, L"tags", L"full_distance", c.tag_full);
     c.tag_hidden = ini_float(f, L"tags", L"max_distance", c.tag_hidden);
+    c.menu_enabled = ini_bool(f, L"menu", L"enabled", c.menu_enabled);
     c.overlay_enabled = ini_bool(f, L"overlay", L"enabled", c.overlay_enabled);
     c.font_px = static_cast<int>(ini_float(f, L"overlay", L"font_px", static_cast<float>(c.font_px)));
     c.chat_rows = static_cast<int>(ini_float(f, L"overlay", L"chat_rows", static_cast<float>(c.chat_rows)));

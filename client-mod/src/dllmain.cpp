@@ -17,6 +17,7 @@
 #include "game/hero.h"
 #include "log.h"
 #include "net/chat_client.h"
+#include "menu/menu.h"
 #include "overlay/overlay.h"
 #include "probe.h"
 #include "ui/json.h"
@@ -66,7 +67,7 @@ void online_thread() {
         }
         was_connected = connected;
         ++ticks;
-        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) fo::overlay::log_stats();  // 10 s, 30 s, then every 5 min
+        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); }  // 10 s, 30 s, then every 5 min
     }
     fo::net::chat_stop();
 }
@@ -124,6 +125,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         // The game is still suspended here, so patch its Direct3D and DirectInput imports
         // now, before it creates its device. Import-table writes only: safe under the loader lock.
         fo::config_load(module);
+        fo::menu::set_module(module);
         g_online = read_mode() == Mode::Client;
         if (g_online) fo::overlay::install_early();
         // Never do real work inside DllMain (loader lock): hand off to a thread.

@@ -13,3 +13,6 @@ c++ $flags -o "$out/fable_online_ui_test" \
 c++ $flags -o "$out/fable_online_assets_test" "$here/assets_test.cpp" \
   "$src/assets/fable_font.cpp" "$src/assets/fable_ui.cpp" "$art/big.cpp" "$art/lzo1x.cpp" "$art/dxt.cpp"
 "$out/fable_online_assets_test"
+c++ $flags -o "$out/fable_online_menu_test" \
+  "$here/menu_test.cpp" "$src/menu/menu_model.cpp" "$art/big.cpp" "$art/lzo1x.cpp"
+"$out/fable_online_menu_test"
