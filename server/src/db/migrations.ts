@@ -93,4 +93,28 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX item_history_item ON item_history(item_id);
   `,
+  /* 2: combat progress and quest reward claims */ `
+  -- What a hero has earned in combat. Experience only ever comes from server-seen kills.
+  CREATE TABLE hero_progress (
+    hero_id    INTEGER PRIMARY KEY REFERENCES heroes(id),
+    experience INTEGER NOT NULL DEFAULT 0 CHECK (experience >= 0),
+    kills      INTEGER NOT NULL DEFAULT 0,
+    deaths     INTEGER NOT NULL DEFAULT 0,
+    pvp_kills  INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- One row per quest reward paid. Quests run on the client, so the server pays each
+  -- known quest at most once per hero (or once per interval for repeatable ones) and never
+  -- more than that quest's cap.
+  CREATE TABLE quest_claims (
+    id         INTEGER PRIMARY KEY,
+    hero_id    INTEGER NOT NULL REFERENCES heroes(id),
+    quest      TEXT NOT NULL,
+    gold       INTEGER NOT NULL,
+    renown     INTEGER NOT NULL DEFAULT 0,
+    tx_id      INTEGER REFERENCES ledger_tx(id),
+    claimed_at INTEGER NOT NULL
+  );
+  CREATE INDEX quest_claims_hero ON quest_claims(hero_id, quest);
+  `,
 ];

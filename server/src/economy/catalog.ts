@@ -13,6 +13,8 @@ export interface ItemDef {
   sell: number | null;
   /** Can be traded between players. */
   tradeable: boolean;
+  /** Staff gear: only a GM action can create it, and it can never be sold, dropped or traded. */
+  staffOnly?: boolean;
 }
 
 /** A vendor never pays more than this share of its own price, so buy-then-sell always loses gold. */
@@ -27,6 +29,35 @@ export const STARTER_ITEMS: ItemDef[] = [
   { id: 'GuildSeal', maxStack: 1, buy: null, sell: null, tradeable: false },
 ];
 
+/** Vendors pay this share of an item's base value (armour balance design: flat 25%). */
+export const SELL_BACK = 0.25;
+
+/** Items that never come from shops or loot, whatever the game files say. */
+export const UNSHOPPABLE = new Set(['OBJECT_RESURRECTION_PHIAL']);
+
+/**
+ * Turn the extracted item table into catalog entries. Fable's base value is the shop
+ * price; vendors buy back at SELL_BACK. Resurrection Phials and staff gear are never sold.
+ */
+export function catalogFromGameData(items: Record<string, { value: number; weapon?: unknown; coverage?: number; armour?: string }>, staffArmour: string): ItemDef[] {
+  const out: ItemDef[] = [];
+  for (const [id, it] of Object.entries(items)) {
+    const staffOnly = it.armour === staffArmour;
+    const gear = !!it.weapon || it.coverage !== undefined;
+    const value = Math.max(0, Math.round(it.value));
+    const closed = staffOnly || UNSHOPPABLE.has(id) || value === 0;
+    out.push({
+      id,
+      maxStack: gear ? 1 : /POTION|FOOD|APPLE|BEER|MEAT|FISH|ARROW/.test(id) ? 20 : 1,
+      buy: closed ? null : value,
+      sell: closed ? null : Math.floor(value * SELL_BACK),
+      tradeable: !staffOnly && !UNSHOPPABLE.has(id),
+      ...(staffOnly ? { staffOnly } : {}),
+    });
+  }
+  return out;
+}
+
 export class ItemCatalog {
   private defs = new Map<string, ItemDef>();
 
@@ -40,6 +71,10 @@ export class ItemCatalog {
       if (this.defs.has(d.id)) throw new Error(`duplicate item def ${d.id}`);
       this.defs.set(d.id, d);
     }
+  }
+
+  has(id: string): boolean {
+    return this.defs.has(id);
   }
 
   get(id: string): ItemDef {

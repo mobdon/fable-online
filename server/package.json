@@ -3,15 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Authoritative Fable Online server: gateway, region channels, accounts, gold ledger, items.",
-  "engines": { "node": ">=22.13" },
+  "description": "Authoritative Fable Online server: gateway, region channels, accounts, gold ledger, items, combat, spawns, loot.",
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "dev": "tsx --disable-warning=ExperimentalWarning src/main.ts",
     "start": "node --disable-warning=ExperimentalWarning dist/main.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts"
+    "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts",
+    "extract": "tsx --disable-warning=ExperimentalWarning scripts/extract-defs.ts"
   },
   "dependencies": {
     "ws": "^8.18.0"
