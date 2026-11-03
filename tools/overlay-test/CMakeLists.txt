@@ -1,0 +1,3 @@
+add_executable(overlay_test_host host.cpp)
+target_compile_definitions(overlay_test_host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+target_link_libraries(overlay_test_host PRIVATE d3d9 dinput8 dxguid user32 gdi32)

@@ -22,3 +22,4 @@ shared/defs/*.json
 
 dist/
 tools/re-notes/rtti.json
+moderation.json

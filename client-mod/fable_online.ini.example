@@ -1,0 +1,28 @@
+; Fable Online settings. Copy to fable_online.ini next to fable_online.dll.
+; Every line is optional.
+
+[chat]
+; The chat server, host:port. Run your own with server/chat (npm start).
+server=127.0.0.1:7781
+; Your hero name on a dev server (production logs in through the launcher instead).
+; Empty = your Windows user name.
+name=
+; The key that opens the chat box, as a Windows virtual-key code. 13 = Enter.
+open_key=13
+enabled=1
+
+[tags]
+enabled=1
+; 1 = also put a name tag on your own hero, to check placement when playing alone.
+self=0
+; How far above a hero's feet the tag floats, and which world axis is up (x, y or z).
+height=2.1
+up_axis=z
+; Tags fade out between these distances.
+full_distance=25
+max_distance=55
+
+[overlay]
+enabled=1
+font_px=15
+chat_rows=8
