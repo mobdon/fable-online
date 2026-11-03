@@ -22,3 +22,7 @@ shared/defs/*.json
 
 dist/
 tools/re-notes/rtti.json
+
+# Analytics event logs
+events/
+ops/monitoring/.env
