@@ -114,15 +114,24 @@ lines, minutes until petty crimes are forgiven, sentence, kick-outs; the mod wri
 `CTCHeroRememberCrimes`), `law_prompt`, `law_bark`, `law_notice`, `law_wanted` (for name
 tags, `HUD_CRIME_CRIMINAL`), `law_steal`, `law_fenced`, `law_released`, `law_warden`.
 
-## Wiring still to do
+## How it runs in the combat sim
 
-- **Combat feed.** `ChannelLaw.onHarm(attacker, victim, damage, killed)` and
-  `onHeroDowned(hero, killer)` need calling from the combat module's hit and death events,
-  and guards need the AI's `isHostile` hook in that sim (done here for `NavSim`).
+- `CombatSim` takes the law in `WorldServices.law`. Every landed hit by a hero goes to
+  `ChannelLaw.onHarm` (through `CombatSystem.onHit`, before any death handling), and a hero
+  death goes to `onHeroDowned` first: when a guard was the killer it becomes an arrest, with
+  no phial, gold penalty or respawn.
+- Guards are combat creatures (faction `guard`) run by their own `AiDirector`, with
+  `isHostile` from `ChannelLaw.guardHostile`. The town layer (`TownSim`) posts
+  `guardsPerVillage` (2) at each village whose `CVillagePeopleDef` names a guard, and adds
+  its villagers and shopkeepers as witnesses.
+- Killing a guard pays no loot or experience; the post is filled again after 60 seconds.
+
+## Still to do
+
 - **Places from the level files.** Kick-out targets for Oakvale, Knothole Glade and Hook
-  Coast are placeholders, and moved heroes land at the region origin (snapped to ground)
-  until spawn points and private-property zones are read from the `.lev` files.
-- **Day and night** comes from the world clock once it exists; until then it counts as day.
+  Coast are placeholders, and moved heroes land at the region origin until spawn points and
+  private-property zones are read from the `.lev` files.
+- Guards in the combat sim walk in straight lines until that sim gets the navmesh.
 
 ## Open choices (switches in `rules.open`)
 

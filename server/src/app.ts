@@ -93,6 +93,7 @@ export function createApp(
   const lawServices: LawServices = {
     law,
     events,
+    isDay: () => !clock.isNight(),
     stealthPieces: (heroId) => economy.inventory(heroId).filter((i) => i.location === 'equipped' && /STEALTH/i.test(i.def_id)).length,
     out: {
       send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
@@ -116,6 +117,7 @@ export function createApp(
             staff: staffHero(heroId),
           }),
           ...(opts.ai ? { ai: opts.ai } : {}),
+          law: lawServices,
         })
       : cfg.navDir
         ? navSimFactory(new NavStore(cfg.navDir), lawServices)

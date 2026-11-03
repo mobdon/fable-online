@@ -25,6 +25,8 @@ export interface DeathInfo {
   damageBy: Map<number, number>;
 }
 export type DeathListener = (d: DeathInfo) => void;
+/** Every landed hit, after armour and shields. `killed` is true when it was the killing blow. */
+export type HitListener = (attacker: Combatant, target: Combatant, damage: number, killed: boolean) => void;
 
 /** Heroes only hurt heroes when both have PvP on. Creatures don't fight each other. */
 export const defaultHarmPolicy: HarmPolicy = (a, t) => {
@@ -46,6 +48,7 @@ export class CombatSystem implements CombatPort {
   private knockedDown = new Set<number>();
   private spellCooldown = new Map<string, number>();
   private deathListeners: DeathListener[] = [];
+  private hitListeners: HitListener[] = [];
   private healLevels: readonly number[];
 
   constructor(
@@ -55,6 +58,10 @@ export class CombatSystem implements CombatPort {
   ) {
     // Heal Life's per-level amounts come straight from game.bin when the extractor found them.
     this.healLevels = data.spells['SPECIAL_ABILITIES_HEAL_LIFE_DEF_INSTANCE']?.levels['2dda34f8'] ?? SPELLS.heal_life.heal;
+  }
+
+  onHit(fn: HitListener): void {
+    this.hitListeners.push(fn);
   }
 
   onDeath(fn: DeathListener): void {
@@ -256,7 +263,10 @@ export class CombatSystem implements CombatPort {
       if (o.stunMs > BALANCE.flinchMs) this.knockedDown.add(t.id);
     }
     if (t.kind === 'creature') this.hooks.onDamaged?.(t.id, a.id, dmg);
-    if (t.health <= 0) this.kill(t, a);
+    const killed = t.health <= 0;
+    // Listeners hear the hit before the death, so a crime is on the record before any death handling.
+    for (const fn of this.hitListeners) fn(a, t, dmg, killed);
+    if (killed) this.kill(t, a);
     return dmg;
   }
 
