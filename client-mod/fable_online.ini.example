@@ -22,6 +22,10 @@ up_axis=z
 full_distance=25
 max_distance=55
 
+[menu]
+; 1 = show the Chapters of the Lost start-up menu over Fable's title screen.
+enabled=1
+
 [overlay]
 enabled=1
 font_px=15

@@ -6,3 +6,6 @@ out=${TMPDIR:-/tmp}/fable_online_ui_test
 c++ -std=c++17 -Wall -Wextra -O1 -fsanitize=address,undefined -o "$out" \
   "$here/ui_test.cpp" "$here/../src/ui/json.cpp" "$here/../src/ui/chat_model.cpp" "$here/../src/ui/nametags.cpp"
 "$out"
+c++ -std=c++17 -Wall -Wextra -O1 -fsanitize=address,undefined -o "$out.menu" \
+  "$here/menu_test.cpp" "$here/../src/menu/menu_model.cpp" "$here/../../shared/art/big.cpp" "$here/../../shared/art/lzo1x.cpp"
+"$out.menu"
