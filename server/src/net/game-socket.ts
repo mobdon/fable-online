@@ -2,7 +2,10 @@ import type { WebSocket } from 'ws';
 import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 import type { PlayerLink } from '../world/channel.js';
-import { Bucket, decode, encode, ProtocolError, type LawRequest } from './protocol.js';
+import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage } from './protocol.js';
+import { SHOP_REACH } from '../economy/shops.js';
+import { townOf } from '../world/town/town-sim.js';
+import { shopIdOf } from '../world/town/townsfolk.js';
 
 const HELLO_TIMEOUT_MS = 10_000;
 /** Skip world ticks to a client whose socket is this far behind instead of buffering forever. */
@@ -21,6 +24,7 @@ export class GameSocket {
   private questClaims = new Bucket(0.2, 3);
   private interacts = new Bucket(4, 8);
   private lawReqs = new Bucket(5, 10);
+  private shopActions = new Bucket(4, 10);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -99,6 +103,11 @@ export class GameSocket {
       case 'law':
         if (!this.lawReqs.take()) return this.dropped('law flood');
         return this.law(this.heroId, msg);
+      case 'shop_open':
+      case 'shop_buy':
+      case 'shop_sell':
+        if (!this.shopActions.take()) return this.send({ t: 'shop_result', ok: false, error: 'rate', message: 'Slow down' });
+        return this.shop(this.heroId, msg);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
@@ -135,6 +144,57 @@ export class GameSocket {
     } catch (e) {
       if (!(e instanceof GameError)) throw e;
       this.send({ t: 'error', error: e.code, message: e.message });
+    }
+  }
+
+  /**
+   * The client's Fable opened a shop screen or pressed buy/sell. The server checks the hero is
+   * at that shop (its own copy of the position), that the keeper is minding it, and that the
+   * shop has the item, then moves gold and items in the ledger. The client only shows the result.
+   */
+  private shop(heroId: number, msg: Extract<ClientMessage, { t: 'shop_open' | 'shop_buy' | 'shop_sell' }>): void {
+    const { app } = this;
+    const ch = app.director.channelOf(heroId);
+    const pos = ch?.sim.position(heroId);
+    const shopId = ch ? shopIdOf(ch.region.name, msg.shop) : '';
+    const key = 'key' in msg ? `shop:${heroId}:${msg.key}` : '';
+    try {
+      if (!ch || !pos) throw new GameError('offline', 'Not in the world');
+      const at = { region: ch.region.name, pos };
+      const town = townOf(ch.sim);
+      if (town?.keeperOf(shopId) && !town.shopOpen(shopId)) throw new GameError('shop_closed', 'The shopkeeper is hiding');
+      switch (msg.t) {
+        case 'shop_open': {
+          const def = app.shops.get(shopId);
+          if (!def) throw new GameError('no_shop', 'No such shop', 404);
+          if (def.pos && Math.hypot(pos.x - def.pos.x, pos.y - def.pos.y) > (def.reach ?? SHOP_REACH)) throw new GameError('too_far', 'You are not at that shop');
+          return this.send({
+            t: 'shop',
+            shop: msg.shop,
+            keeper: town?.keeperOf(shopId)?.id ?? null,
+            gold: app.economy.balance(heroId),
+            items: app.shops.listing(shopId),
+            offers: app.economy
+              .inventory(heroId)
+              .filter((i) => i.location === 'inventory')
+              .map((i) => ({ item: i.id, def: i.def_id, qty: i.quantity, gold: app.shops.offer(i.def_id) }))
+              .filter((o) => o.gold !== null),
+          });
+        }
+        case 'shop_buy': {
+          const r = app.shops.buy(heroId, shopId, msg.def, msg.qty, key, at);
+          app.events.emit({ type: 'shop_buy', heroId, shopId, defId: msg.def, quantity: msg.qty, price: r.price, replayed: r.replayed });
+          return this.send({ t: 'shop_result', ok: true, key: msg.key, item_id: r.itemId, def: msg.def, qty: msg.qty, price: r.price, gold: app.economy.balance(heroId) });
+        }
+        case 'shop_sell': {
+          const r = app.shops.sell(heroId, shopId, msg.item, key, at);
+          app.events.emit({ type: 'shop_sell', heroId, shopId, itemId: msg.item, gold: r.gold, replayed: r.replayed });
+          return this.send({ t: 'shop_result', ok: true, key: msg.key, item_id: msg.item, earned: r.gold, gold: app.economy.balance(heroId) });
+        }
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      return this.send({ t: 'shop_result', ok: false, key: 'key' in msg ? msg.key : undefined, shop: msg.shop, error: e.code, message: e.message });
     }
   }
 

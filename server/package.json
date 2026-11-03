@@ -15,7 +15,8 @@
     "test": "tsx --disable-warning=ExperimentalWarning --test test/*.test.ts",
     "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts",
     "ai-bench": "tsx --disable-warning=ExperimentalWarning scripts/ai-bench.ts",
-    "extract": "tsx --disable-warning=ExperimentalWarning scripts/extract-defs.ts"
+    "extract": "tsx --disable-warning=ExperimentalWarning scripts/extract-defs.ts",
+    "extract-town": "tsx --disable-warning=ExperimentalWarning scripts/extract-town.ts"
   },
   "dependencies": {
     "ws": "^8.18.0"

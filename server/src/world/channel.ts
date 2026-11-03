@@ -29,6 +29,9 @@ export class Channel {
    * deadline passes), so nobody walks around blind on the server side.
    */
   readonly loading = new Map<number, number>();
+  /** Last sky state sent to this channel (Director.syncSky). */
+  skyKey = '';
+  skyAt = 0;
 
   constructor(
     readonly id: string,

@@ -18,14 +18,14 @@ export interface PlayerInput {
 export interface EntityState {
   id: number;
   def_id: number;
-  /** Creatures only: the Fable def name the mod spawns a stand-in from. */
-  def?: string;
   x: number;
   y: number;
   z: number;
   yaw: number;
   anim: number;
   health: number;
+  /** Fable def name for anything that isn't a hero; the client mod picks the puppet's mesh from it. */
+  def?: string;
 }
 
 /** An entity as it goes out on the wire: the sim's state plus who it belongs to. */

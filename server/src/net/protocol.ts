@@ -25,6 +25,14 @@ export type ClientMessage =
    * because a position from a client is a position a cheat can choose.
    */
   | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number }
+  /**
+   * Shops. `shop` is the shop building's UID from the level file, as the client's Fable knows it;
+   * the server adds the region from where it has the hero. `key` is the client's idempotency key
+   * for that purchase, so a resend after a dropped connection never buys twice.
+   */
+  | { t: 'shop_open'; shop: string }
+  | { t: 'shop_buy'; shop: string; def: string; qty: number; key: string }
+  | { t: 'shop_sell'; shop: string; item: string; key: string }
   | LawRequest;
 
 /**
@@ -118,6 +126,17 @@ export function decode(raw: string): ClientMessage {
     }
     case 'law':
       return decodeLaw(m);
+    case 'shop_open':
+      return { t: 'shop_open', shop: shopUid(m.shop) };
+    case 'shop_buy': {
+      if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');
+      const qty = isNum(m.qty) ? m.qty : 1;
+      if (!Number.isInteger(qty) || qty < 1 || qty > 99) throw new ProtocolError('bad qty');
+      return { t: 'shop_buy', shop: shopUid(m.shop), def: m.def, qty, key: clientKey(m.key) };
+    }
+    case 'shop_sell':
+      if (typeof m.item !== 'string' || m.item.length > 64) throw new ProtocolError('bad item');
+      return { t: 'shop_sell', shop: shopUid(m.shop), item: m.item, key: clientKey(m.key) };
     default:
       throw new ProtocolError('unknown message');
   }
@@ -159,6 +178,17 @@ function decodeLaw(m: Record<string, unknown>): LawRequest {
     default:
       throw new ProtocolError('unknown law request');
   }
+}
+
+/** Level-file UIDs are decimal u64s; keep them as strings. */
+function shopUid(v: unknown): string {
+  if (typeof v !== 'string' || !/^[0-9A-Za-z_-]{1,24}$/.test(v)) throw new ProtocolError('bad shop');
+  return v;
+}
+
+function clientKey(v: unknown): string {
+  if (typeof v !== 'string' || !/^[0-9A-Za-z_-]{8,64}$/.test(v)) throw new ProtocolError('bad key');
+  return v;
 }
 
 export function wrapAngle(a: number): number {

@@ -26,6 +26,10 @@ import fs from 'node:fs';
 import { Law, type LawHost } from './law/law.js';
 import { mergeRules } from './law/rules.js';
 import type { LawServices } from './law/guards.js';
+import { WorldClock } from './world/clock.js';
+import { loadTownData, type TownData } from './world/town/town-data.js';
+import { shopsFromTown } from './world/town/town-shops.js';
+import { withTown } from './world/town/town-sim.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -45,12 +49,14 @@ export interface App {
   director: Director;
   objects: WorldObjects;
   law: Law;
+  clock: WorldClock;
+  town: TownData;
   close(): void;
 }
 
 export function createApp(
   overrides: Partial<ServerConfig> = {},
-  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi; things?: WorldThings } = {},
+  opts: { events?: EventSink; sim?: SimFactory; data?: GameData; ai?: (ctx: AiContext) => ChannelAi; things?: WorldThings; town?: TownData; clock?: WorldClock } = {},
 ): App {
   const cfg = loadConfig(overrides);
   const db = new Database(cfg.dbPath);
@@ -64,7 +70,11 @@ export function createApp(
   const trades = new TradeSessions(economy);
   const progress = new Progress(db);
   const loot = new LootService(economy, data);
-  const shops = Shops.load(economy, cfg.contentDir && path.join(cfg.contentDir, 'shops.json'));
+  const clock = opts.clock ?? new WorldClock({ dayMs: cfg.dayMinutes * 60_000, weatherSlotMs: cfg.weatherMinutes * 60_000, seed: cfg.weatherSeed });
+  const town = opts.town ?? loadTownData(cfg.townDataPath);
+  const shops = Shops.load(economy, cfg.contentDir && path.join(cfg.contentDir, 'shops.json'), shopsFromTown(town, catalog), {
+    day: () => clock.day(),
+  });
   const quests = new QuestRewards(
     db,
     economy,
@@ -89,7 +99,7 @@ export function createApp(
   };
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
-  const sim =
+  const baseSim =
     opts.sim ??
     (cfg.combat
       ? combatSimFactory({
@@ -108,8 +118,14 @@ export function createApp(
       : cfg.navDir
         ? navSimFactory(new NavStore(cfg.navDir), lawServices)
         : stubSimFactory);
-  director = new Director(cfg, regions, sim, events, (id, region, p) =>
-    heroes.savePosition(id, region, p.x, p.y, p.z),
+  const sim = cfg.town ? withTown(baseSim, { data: town, clock }) : baseSim;
+  director = new Director(
+    cfg,
+    regions,
+    sim,
+    events,
+    (id, region, p) => heroes.savePosition(id, region, p.x, p.y, p.z),
+    clock,
   );
   const objects = new WorldObjects(opts.things ?? WorldThings.load(cfg.thingsPath), director, economy, db, events);
   law.attach(lawHost(director, regions));
@@ -136,6 +152,8 @@ export function createApp(
     director,
     objects,
     law,
+    clock,
+    town,
     close() {
       director.stop();
       law.flush();

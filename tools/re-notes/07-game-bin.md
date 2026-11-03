@@ -49,6 +49,10 @@ most aren't, so unnamed fields are referred to by hash.
 | CQuestCardDef | `GoldReward`, `RenownReward` | i32 | |
 | CQuestCardDef | `RewardObjects` | `u32 n` + n refs | |
 | SPECIAL_ABILITIES_* | many | `u32 4` + 4 x f32 | per-level spell tables (heal amounts are `0x2DDA34F8` in HEAL_LIFE) |
+| CShopDef (on BUILDING_*) | `Type` | ref | one stock row per item; the fields below follow it in the same row |
+| CShopDef | `Quantity`, `PriceMultiplier`, `MaxStock` | f32 | names hash to the ids in the file; a row with Quantity and MaxStock both 0 is an empty slot |
+| CShopDef | `RestockPeriod` | i32 | days (inferred from values 1..12) |
+| CVillagePeopleDef (on VILLAGE_*) | `MaleShopKeeper`, `MaleBarman`, `FemaleBarmaid`, `MaleWarehouseWorker`, `MaleUnemployed`, `FemaleUnemployed`, `Guard` | ref | creature def per role |
 
 Not found: a numeric armour or defence rating on hero clothing or on the ARMOUR_* defs
 (those hold hit effects and sounds only).

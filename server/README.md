@@ -21,7 +21,12 @@ npm run extract -- "C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost
 node ../tools/extractor/regions.mjs "<same folder>"   # shared/defs/regions.json
 node ../tools/extractor/spawns.mjs  "<same folder>"   # shared/defs/spawns.json
 node ../tools/extractor/quests.mjs  "<same folder>"   # shared/defs/quests.json
+npm run extract-town -- "<same folder>"               # data/town-data.json: shops, stock, villages
 ```
+
+`npm run extract-town` reads shop stock and village people from `game.bin` and where villages,
+shops and homes are from `FinalAlbion.wad`. See `docs/town-life.md` for villagers, shops and the
+day, night and weather clock.
 
 `npm run extract` decodes `data/CompiledDefs/game.bin` (format notes in
 `tools/re-notes/07-game-bin.md`) into `data/game-data.json`: weapon type, class and damage,
@@ -115,7 +120,8 @@ platinum set never drops.
 | `src/world/ai/` | Server-run monsters: wander, notice, chase, attack, flee, leash, threat ([docs/creature-sync.md](../docs/creature-sync.md) for the client side) |
 | `src/world/things/` | Doors, chests, containers, pickups, demon doors and region exits from the level files (`tools/extractor/things.mjs`, `FO_THINGS`) |
 | `src/world/nav-sim.ts` | `NavSim`: heroes held to the ground plus AI creatures, used when `FO_NAV_DIR` is set |
-| `src/world/` | Region table, channels, the director (placement and scaling), combat sim, spawns, shared entity model |
+| `src/world/` | Region table, channels, the director (placement and scaling), combat sim, spawns, shared entity model, world clock and weather |
+| `src/world/town/` | Villagers and shopkeepers, shops built from Fable's shop defs |
 | `src/combat/` | Combat rules and balance table, hero and creature loadouts |
 | `src/data/` | game.bin / names.bin reader and the extractor |
 | `src/law/` | Crime records, fines, bribes, kick-outs, jail and Bargate sentences, stealing rules, and the town watch that runs guards ([docs/law.md](../docs/law.md)) |

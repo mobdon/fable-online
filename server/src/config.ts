@@ -87,6 +87,17 @@ export interface ServerConfig {
   questDefaultMaxGold: number;
   /** Most quest gold one hero can be paid in 24 hours, across all quests. */
   questDailyGoldCap: number;
+
+  /** server/data/town-data.json from `npm run extract-town` ('' or missing = built-in test village). */
+  townDataPath: string;
+  /** Run villagers and shopkeepers in regions that have villages. */
+  town: boolean;
+  /** Real minutes in one game day. */
+  dayMinutes: number;
+  /** Real minutes each weather state lasts. */
+  weatherMinutes: number;
+  /** Changing it reshuffles the weather. */
+  weatherSeed: number;
 }
 
 export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
@@ -122,6 +133,11 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     combat: str('FO_COMBAT', '1') !== '0',
     questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
+    townDataPath: str('FO_TOWN_DATA', 'data/town-data.json'),
+    town: str('FO_TOWN', '1') !== '0',
+    dayMinutes: num('FO_DAY_MINUTES', 48),
+    weatherMinutes: num('FO_WEATHER_MINUTES', 12),
+    weatherSeed: num('FO_WEATHER_SEED', 1),
     ...overrides,
   };
 }
