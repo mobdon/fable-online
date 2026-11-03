@@ -52,7 +52,7 @@
   ],
   "panels": [
     {
-      "id": 64,
+      "id": 74,
       "type": "row",
       "title": "Arena",
       "collapsed": false,
@@ -65,7 +65,7 @@
       "panels": []
     },
     {
-      "id": 66,
+      "id": 76,
       "type": "stat",
       "title": "Matches (24h)",
       "datasource": {
@@ -86,7 +86,7 @@
           },
           "expr": "sum(increase(fable_arena_matches_total{mode=~\"$mode\"}[1d]))",
           "legendFormat": "",
-          "refId": "M",
+          "refId": "W",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -119,7 +119,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 78,
       "type": "stat",
       "title": "Median queue",
       "datasource": {
@@ -140,7 +140,7 @@
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(fable_arena_queue_wait_seconds_bucket{mode=~\"$mode\"}[1h])))",
           "legendFormat": "",
-          "refId": "O",
+          "refId": "Y",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -173,7 +173,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 80,
       "type": "stat",
       "title": "Median match",
       "datasource": {
@@ -194,7 +194,7 @@
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(fable_arena_match_duration_seconds_bucket{mode=~\"$mode\"}[1h])))",
           "legendFormat": "",
-          "refId": "Q",
+          "refId": "A",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -227,7 +227,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 82,
       "type": "stat",
       "title": "PvP-flagged heroes",
       "datasource": {
@@ -248,7 +248,7 @@
           },
           "expr": "fable_pvp_flagged_players",
           "legendFormat": "",
-          "refId": "S",
+          "refId": "C",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -281,7 +281,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 84,
       "type": "barchart",
       "title": "Arena win rate by school (24h)",
       "description": "Balanced is about 50% each. The alert fires above 58% with 200+ results.",
@@ -303,7 +303,7 @@
           },
           "expr": "sum by (school) (increase(fable_arena_results_total{result=\"win\",mode=~\"$mode\"}[1d])) / sum by (school) (increase(fable_arena_results_total{result=~\"win|loss\",mode=~\"$mode\"}[1d]))",
           "legendFormat": "{{school}}",
-          "refId": "U",
+          "refId": "E",
           "instant": true,
           "range": false,
           "format": "table"
@@ -348,7 +348,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 86,
       "type": "timeseries",
       "title": "Arena win rate by school over time",
       "datasource": {
@@ -369,7 +369,7 @@
           },
           "expr": "sum by (school) (increase(fable_arena_results_total{result=\"win\",mode=~\"$mode\"}[6h])) / sum by (school) (increase(fable_arena_results_total{result=~\"win|loss\",mode=~\"$mode\"}[6h]))",
           "legendFormat": "{{school}}",
-          "refId": "W"
+          "refId": "G"
         }
       ],
       "fieldConfig": {
@@ -410,7 +410,7 @@
       }
     },
     {
-      "id": 77,
+      "id": 87,
       "type": "row",
       "title": "Kills and abilities",
       "collapsed": false,
@@ -423,7 +423,7 @@
       "panels": []
     },
     {
-      "id": 79,
+      "id": 89,
       "type": "table",
       "title": "Kills (24h): killer school down, victim school across",
       "datasource": {
@@ -454,7 +454,7 @@
           },
           "expr": "sum by (killer_school, victim_school) (increase(fable_pvp_kills_total[1d]))",
           "legendFormat": "",
-          "refId": "Z",
+          "refId": "J",
           "instant": true,
           "range": false,
           "format": "table"
@@ -481,7 +481,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 91,
       "type": "timeseries",
       "title": "Time to kill p50 by school",
       "description": "Very short time-to-kill leaves no room for counterplay.",
@@ -503,7 +503,7 @@
           },
           "expr": "histogram_quantile(0.5, sum by (le, killer_school) (rate(fable_pvp_time_to_kill_seconds_bucket[1h])))",
           "legendFormat": "{{killer_school}}",
-          "refId": "B"
+          "refId": "L"
         }
       ],
       "fieldConfig": {
@@ -542,7 +542,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 93,
       "type": "barchart",
       "title": "Damage share by ability (24h)",
       "datasource": {
@@ -563,7 +563,7 @@
           },
           "expr": "sort_desc(sum by (ability) (increase(fable_pvp_damage_total[1d])) / ignoring(ability) group_left sum(increase(fable_pvp_damage_total[1d])))",
           "legendFormat": "{{ability}}",
-          "refId": "D",
+          "refId": "N",
           "instant": true,
           "range": false,
           "format": "table"
@@ -595,7 +595,7 @@
       }
     },
     {
-      "id": 85,
+      "id": 95,
       "type": "barchart",
       "title": "How often each ability is countered (24h)",
       "description": "Share of uses that were blocked, dodged, rolled or shielded. An ability near 0% has no counterplay.",
@@ -617,7 +617,7 @@
           },
           "expr": "sort(sum by (ability) (increase(fable_pvp_counters_total[1d])) / sum by (ability) (increase(fable_pvp_ability_uses_total[1d])))",
           "legendFormat": "{{ability}}",
-          "refId": "F",
+          "refId": "P",
           "instant": true,
           "range": false,
           "format": "table"
@@ -649,7 +649,7 @@
       }
     },
     {
-      "id": 87,
+      "id": 97,
       "type": "timeseries",
       "title": "Counters by type",
       "datasource": {
@@ -670,7 +670,7 @@
           },
           "expr": "sum by (counter) (rate(fable_pvp_counters_total[15m])) * 60",
           "legendFormat": "{{counter}}",
-          "refId": "H"
+          "refId": "R"
         }
       ],
       "fieldConfig": {
@@ -708,7 +708,7 @@
       }
     },
     {
-      "id": 89,
+      "id": 99,
       "type": "timeseries",
       "title": "PvP kills per hour by venue",
       "datasource": {
@@ -729,7 +729,7 @@
           },
           "expr": "sum by (venue) (increase(fable_pvp_kills_total[1h]))",
           "legendFormat": "{{venue}}",
-          "refId": "J"
+          "refId": "T"
         }
       ],
       "fieldConfig": {

@@ -122,6 +122,19 @@ const economy = dashboard("fable-economy", "Fable Online: Economy", [
     target("sum(increase(fable_resurrection_phials_created_total[1d]))", "created"),
     target("sum(increase(fable_resurrection_phials_used_total[1d]))", "used"),
   ], { description: "Phials should stay scarce: created should track used, not run away from it." }),
+  row("What normal play looks like (the watchdog learns this)", 41),
+  ts("Gold earned per hero per hour", g(0, 42, 16, 9), [
+    target("histogram_quantile(0.5, sum by (le) (rate(fable_gold_earned_per_hero_hour_bucket[6h])))", "typical hero (p50)"),
+    target("histogram_quantile(0.9, sum by (le) (rate(fable_gold_earned_per_hero_hour_bucket[6h])))", "top 10% (p90)"),
+    target("fable_gold_earn_baseline_p99", "top 1% (learned p99)"),
+    target("fable_gold_earn_outlier_limit > 0", "earn_outlier fires above"),
+  ], {
+    unit: "short", description: "Each finished hour, every hero's gold earned that hour is recorded. The watchdog flags a hero who earns 5x what the top 1% normally earn. Use this to set fixed limits once real players are on.",
+  }),
+  stat("Learned limit (gold / hour)", g(16, 42, 8, 4), [instant("fable_gold_earn_outlier_limit")], {
+    unit: "short", description: "0 means the watchdog is still learning (needs 200 finished hero-hours).", options: { graphMode: "none" },
+  }),
+  stat("Hero-hours learned from", g(16, 46, 8, 5), [instant("sum(fable_gold_earned_per_hero_hour_count)")], { decimals: 0, options: { graphMode: "none" } }),
 ], { vars: [regionVar] });
 
 // ---------------------------------------------------------------------------

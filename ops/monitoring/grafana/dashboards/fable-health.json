@@ -52,7 +52,7 @@
   ],
   "panels": [
     {
-      "id": 91,
+      "id": 101,
       "type": "stat",
       "title": "Scrape targets up",
       "datasource": {
@@ -73,7 +73,7 @@
           },
           "expr": "sum(up{job=\"fable-server\"})",
           "legendFormat": "",
-          "refId": "L",
+          "refId": "V",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -106,7 +106,7 @@
       }
     },
     {
-      "id": 93,
+      "id": 103,
       "type": "stat",
       "title": "Regions down",
       "datasource": {
@@ -127,7 +127,7 @@
           },
           "expr": "count(fable_region_process_up == 0) or vector(0)",
           "legendFormat": "",
-          "refId": "N",
+          "refId": "X",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -167,7 +167,7 @@
       }
     },
     {
-      "id": 95,
+      "id": 105,
       "type": "stat",
       "title": "Restarts (24h)",
       "datasource": {
@@ -188,7 +188,7 @@
           },
           "expr": "sum(increase(fable_region_process_restarts_total[1d])) or vector(0)",
           "legendFormat": "",
-          "refId": "P",
+          "refId": "Z",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -232,7 +232,7 @@
       }
     },
     {
-      "id": 97,
+      "id": 107,
       "type": "stat",
       "title": "Open connections",
       "datasource": {
@@ -253,7 +253,7 @@
           },
           "expr": "sum(fable_connections_open)",
           "legendFormat": "",
-          "refId": "R",
+          "refId": "B",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -286,7 +286,7 @@
       }
     },
     {
-      "id": 99,
+      "id": 109,
       "type": "stat",
       "title": "Errors / min",
       "datasource": {
@@ -307,7 +307,7 @@
           },
           "expr": "sum(rate(fable_errors_total[5m])) * 60 or vector(0)",
           "legendFormat": "",
-          "refId": "T",
+          "refId": "D",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -340,7 +340,7 @@
       }
     },
     {
-      "id": 101,
+      "id": 111,
       "type": "stat",
       "title": "Event loop lag p99",
       "datasource": {
@@ -361,7 +361,7 @@
           },
           "expr": "max(fable_nodejs_eventloop_lag_p99_seconds)",
           "legendFormat": "",
-          "refId": "V",
+          "refId": "F",
           "instant": true,
           "range": false,
           "format": "time_series"
@@ -394,7 +394,7 @@
       }
     },
     {
-      "id": 103,
+      "id": 113,
       "type": "timeseries",
       "title": "Tick time p95 by region (budget 33 ms)",
       "datasource": {
@@ -415,7 +415,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le, region) (rate(fable_tick_duration_seconds_bucket{region=~\"$region\"}[5m])))",
           "legendFormat": "{{region}}",
-          "refId": "X"
+          "refId": "H"
         }
       ],
       "fieldConfig": {
@@ -461,7 +461,7 @@
       }
     },
     {
-      "id": 105,
+      "id": 115,
       "type": "state-timeline",
       "title": "Region Fable.exe up",
       "datasource": {
@@ -482,7 +482,7 @@
           },
           "expr": "fable_region_process_up{region=~\"$region\"}",
           "legendFormat": "{{region}}",
-          "refId": "Z"
+          "refId": "J"
         }
       ],
       "fieldConfig": {
@@ -525,7 +525,7 @@
       }
     },
     {
-      "id": 108,
+      "id": 118,
       "type": "timeseries",
       "title": "Client round-trip p50 / p95",
       "datasource": {
@@ -546,7 +546,7 @@
           },
           "expr": "histogram_quantile(0.5, sum by (le) (rate(fable_client_rtt_seconds_bucket{region=~\"$region\"}[5m])))",
           "legendFormat": "p50",
-          "refId": "B"
+          "refId": "L"
         },
         {
           "datasource": {
@@ -555,7 +555,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(fable_client_rtt_seconds_bucket{region=~\"$region\"}[5m])))",
           "legendFormat": "p95",
-          "refId": "C"
+          "refId": "M"
         }
       ],
       "fieldConfig": {
@@ -594,7 +594,7 @@
       }
     },
     {
-      "id": 110,
+      "id": 120,
       "type": "timeseries",
       "title": "Network",
       "datasource": {
@@ -615,7 +615,7 @@
           },
           "expr": "sum by (direction) (rate(fable_net_bytes_total[5m]))",
           "legendFormat": "{{direction}}",
-          "refId": "E"
+          "refId": "O"
         }
       ],
       "fieldConfig": {
@@ -654,7 +654,7 @@
       }
     },
     {
-      "id": 112,
+      "id": 122,
       "type": "timeseries",
       "title": "Messages / s by type",
       "datasource": {
@@ -675,7 +675,7 @@
           },
           "expr": "sum by (type, direction) (rate(fable_net_messages_total[5m]))",
           "legendFormat": "{{direction}} {{type}}",
-          "refId": "G"
+          "refId": "Q"
         }
       ],
       "fieldConfig": {
@@ -713,7 +713,7 @@
       }
     },
     {
-      "id": 114,
+      "id": 124,
       "type": "timeseries",
       "title": "DB query p95 by op",
       "datasource": {
@@ -734,7 +734,7 @@
           },
           "expr": "histogram_quantile(0.95, sum by (le, op) (rate(fable_db_query_duration_seconds_bucket[5m])))",
           "legendFormat": "{{op}}",
-          "refId": "I"
+          "refId": "S"
         }
       ],
       "fieldConfig": {
@@ -773,7 +773,7 @@
       }
     },
     {
-      "id": 116,
+      "id": 126,
       "type": "timeseries",
       "title": "Process memory",
       "datasource": {
@@ -794,7 +794,7 @@
           },
           "expr": "sum by (instance) (fable_process_resident_memory_bytes)",
           "legendFormat": "RSS {{instance}}",
-          "refId": "K"
+          "refId": "U"
         }
       ],
       "fieldConfig": {
@@ -833,7 +833,7 @@
       }
     },
     {
-      "id": 118,
+      "id": 128,
       "type": "timeseries",
       "title": "CPU",
       "datasource": {
@@ -854,7 +854,7 @@
           },
           "expr": "sum by (instance) (rate(fable_process_cpu_seconds_total[5m]))",
           "legendFormat": "{{instance}}",
-          "refId": "M"
+          "refId": "W"
         }
       ],
       "fieldConfig": {
@@ -893,7 +893,7 @@
       }
     },
     {
-      "id": 120,
+      "id": 130,
       "type": "timeseries",
       "title": "Errors by kind",
       "datasource": {
@@ -914,7 +914,7 @@
           },
           "expr": "sum by (service, kind) (rate(fable_errors_total[5m])) * 60",
           "legendFormat": "{{service}} {{kind}}",
-          "refId": "O"
+          "refId": "Y"
         }
       ],
       "fieldConfig": {

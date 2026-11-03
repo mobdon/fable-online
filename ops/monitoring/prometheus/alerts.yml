@@ -16,7 +16,7 @@ groups:
           summary: "Gold exists that the ledger didn't create"
           description: "DB total minus ledger total = {{ $value }}. Something changed balances without going through the ledger."
       - alert: GoldFarmingSuspected
-        expr: increase(fable_economy_anomalies_total{rule=~"earn_rate|large_delta|unknown_source"}[15m]) > 0
+        expr: increase(fable_economy_anomalies_total{rule=~"earn_rate|earn_outlier|large_delta|unknown_source"}[15m]) > 0
         labels: { severity: warning }
         annotations:
           summary: "Hero earning gold abnormally fast ({{ $labels.rule }})"
