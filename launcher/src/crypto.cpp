@@ -58,7 +58,7 @@ std::string sha256_file(const std::wstring& path) {
 std::string protect(const std::string& plain) {
     if (plain.empty()) return "";
     DATA_BLOB in{DWORD(plain.size()), (BYTE*)plain.data()}, out{};
-    if (!CryptProtectData(&in, L"Fable Online", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
+    if (!CryptProtectData(&in, L"Chapters of the Lost", nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &out))
         return "";
     std::string s = to_hex(out.pbData, out.cbData);
     LocalFree(out.pbData);

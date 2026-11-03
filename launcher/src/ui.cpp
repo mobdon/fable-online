@@ -230,7 +230,7 @@ void pick_game_dir() {
     SHGetPathFromIDListW(pidl, path);
     CoTaskMemFree(pidl);
     if (!file_exists(std::wstring(path) + L"\\Fable.exe")) {
-        MessageBoxW(app.wnd, L"That folder has no Fable.exe in it.", L"Fable Online", MB_ICONWARNING);
+        MessageBoxW(app.wnd, L"That folder has no Fable.exe in it.", L"Chapters of the Lost", MB_ICONWARNING);
         return;
     }
     app.game_dir = path;
@@ -362,7 +362,7 @@ void on_launched(std::unique_ptr<Launched> r) {
 
 void build() {
     // 880 x 560 logical pixels.
-    HWND t = add(L"STATIC", L"FABLE ONLINE", SS_LEFT, ID_TITLE, 16, 12, 400, 36);
+    HWND t = add(L"STATIC", L"CHAPTERS OF THE LOST", SS_LEFT, ID_TITLE, 16, 12, 400, 36);
     SendMessageW(t, WM_SETFONT, reinterpret_cast<WPARAM>(app.title_font), TRUE);
     add(L"STATIC", L"Servers: checking...", SS_LEFT | SS_ENDELLIPSIS, ID_SERVER, 16, 50, 848, 20);
 
@@ -496,7 +496,7 @@ int run_ui(Config& cfg) {
     DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
     RECT r = {0, 0, app.S(880), app.S(544)};
     AdjustWindowRect(&r, style, FALSE);
-    HWND h = CreateWindowExW(0, wc.lpszClassName, L"Fable Online", style, CW_USEDEFAULT, CW_USEDEFAULT,
+    HWND h = CreateWindowExW(0, wc.lpszClassName, L"Chapters of the Lost Online", style, CW_USEDEFAULT, CW_USEDEFAULT,
                              r.right - r.left, r.bottom - r.top, nullptr, nullptr, inst, nullptr);
     if (!h) return 1;
     ShowWindow(h, SW_SHOW);

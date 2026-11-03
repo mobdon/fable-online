@@ -76,7 +76,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             while (!g.empty() && g.back() == '/') g.pop_back();
             if (!http::url_allowed(g)) {
                 MessageBoxW(nullptr, L"The gateway must be an https:// URL (plain http only for localhost).",
-                            L"Fable Online", MB_ICONERROR);
+                            L"Chapters of the Lost", MB_ICONERROR);
                 return 1;
             }
             cfg.gateway = g;

@@ -1,4 +1,6 @@
-# Fable Online
+# Chapters of the Lost Online
+
+(Repo and file names still say `fable-online` / `fable_online`.)
 
 A multiplayer (MMO) mod for **Fable: The Lost Chapters (PC, Steam app 204030)**.
 Every player needs their own copy of the game. This repo never contains any of
