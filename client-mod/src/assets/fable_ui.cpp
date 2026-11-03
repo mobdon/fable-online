@@ -35,6 +35,21 @@ UiArt load(const Path& fonts_path, const Path& frontend_path) {
                 break;
             }
         }
+        // Scroll bars: rows 16..49 of the 64px textures hold the bar and its ornate ends.
+        const char* bars[2][3] = {{"FE_BUTTON_OFF_L", "FE_BUTTON_OFF_M", "FE_BUTTON_OFF_R"},
+                                  {"FE_BUTTON_ON_L", "FE_BUTTON_ON_M", "FE_BUTTON_ON_R"}};
+        ui.bar_ok = true;
+        for (int on = 0; on < 2 && ui.bar_ok; ++on)
+            for (int i = 0; i < 3; ++i) {
+                art::Texture bt;
+                art::Image full;
+                art::Image& dst = on ? ui.bar_on[i] : ui.bar_off[i];
+                if (!fe.load(bars[on][i], bt) || !art::decode(bt, full) || full.h < 50) { ui.bar_ok = false; break; }
+                dst.w = full.w;
+                dst.h = 33;
+                dst.px.assign(full.px.begin() + 16 * full.w, full.px.begin() + 49 * full.w);
+            }
+        if (!ui.bar_ok) ui.report += "menu bar art missing; ";
         art::Texture t;
         art::Image back;
         if (fe.load("UI_TABLE_BACK_SPRITE_FE", t) && art::decode(t, back) && !back.empty())

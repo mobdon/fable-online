@@ -10,12 +10,17 @@
 
 namespace fo::ui {
 
-enum class Key { Enter, Escape, Backspace, Delete, Left, Right, Home, End, Up, Down, PageUp, PageDown, Tab };
+enum class Key { Enter, Escape, Backspace, Delete, Left, Right, Home, End, Up, Down, PageUp, PageDown, Tab, BackTab };
+
+// Chat tabs. Each line belongs to All plus at most one other tab; system lines show everywhere.
+enum class ChatTab : uint8_t { All = 0, Region, World, Guild, Whispers, Count };
+const char* tab_name(ChatTab t);
 
 struct ChatLine {
     std::string text;   // UTF-8
     uint32_t color;     // 0xAARRGGBB
     double at;          // seconds, from the clock passed in
+    uint8_t tabs;       // bit per ChatTab
 };
 
 struct VisibleLine {
@@ -50,6 +55,12 @@ public:
     size_t cursor() const { return cursor_; }  // in characters
     std::string channel_label() const;         // "Say", "World", "To Hal", ...
 
+    // Tab / Shift+Tab while typing switch tabs. Picking Region, World, Guild or Whispers also
+    // makes that the channel you type into.
+    ChatTab tab() const { return tab_; }
+    void set_tab(ChatTab t);
+    bool unread(ChatTab t) const { return (unread_ >> static_cast<int>(t)) & 1; }
+
     bool tags_enabled() const { return tags_enabled_; }
     const std::string& me() const { return me_; }
 
@@ -66,7 +77,7 @@ public:
 
 private:
     void submit(double now);
-    void push(std::string text, uint32_t color, double now);
+    void push(std::string text, uint32_t color, double now, uint8_t tabs = 0xFF);
     void send_say(const std::string& ch, const std::string& text);
     void send_whisper(const std::string& to, const std::string& text);
 
@@ -83,6 +94,8 @@ private:
     size_t history_pos_ = 0;
     std::vector<std::string> outbox_;
     bool tags_enabled_ = true;
+    ChatTab tab_ = ChatTab::All;
+    uint8_t unread_ = 0;
 };
 
 // UTF-8 <-> UTF-32 helpers (also used by the renderer).

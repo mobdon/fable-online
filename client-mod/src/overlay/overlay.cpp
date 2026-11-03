@@ -122,13 +122,18 @@ void draw_tags(const Config& cfg) {
     s.full_until = cfg.tag_full;
     s.hidden_from = cfg.tag_hidden;
     const float name_h = g_r.line_height(Face::Title), info_h = g_r.line_height(Face::Small);
-    s.line_height = (name_h + info_h) / 2;
-    // Name in Fable's caption face (Arial 21), title and renown underneath in its small Tahoma,
-    // both outlined in black like the game's own floating text.
+    s.line_height = (name_h + 8 + info_h + 6) / 2;  // a plate and its info line: keeps stacked tags apart
+    // Each name sits on Fable's pewter scroll bar (warm when flagged for PvP), with the title
+    // and renown underneath in its small Tahoma, outlined like the game's floating text.
     for (const auto& l : g_tags.layout(vp, g_r.screen_w(), g_r.screen_h(), s)) {
-        float top = l.y - name_h - info_h;
-        g_r.text(l.x - g_r.measure(l.name_line, Face::Title) / 2, top, l.name_line, l.name_color, Face::Title, true);
-        g_r.text(l.x - g_r.measure(l.info_line, Face::Small) / 2, top + name_h, l.info_line, l.info_color, Face::Small, true);
+        const float alpha = static_cast<float>(l.name_color >> 24) / 255.0f;
+        const float plate_h = name_h + 8, end_w = 64 * plate_h / 33;   // bar()'s end width at this height
+        const float name_w = g_r.measure(l.name_line, Face::Title);
+        const float plate_w = name_w + end_w * 2 + 10;                 // the name sits on the plain middle of the bar
+        const float top = l.y - plate_h - info_h - 2;
+        g_r.bar(l.x - plate_w / 2, top, plate_w, plate_h, alpha * 0.95f, l.pvp, true);
+        g_r.text(l.x - name_w / 2, top + (plate_h - name_h) / 2, l.name_line, l.name_color, Face::Title, true);
+        g_r.text(l.x - g_r.measure(l.info_line, Face::Small) / 2, top + plate_h + 1, l.info_line, l.info_color, Face::Small, true);
     }
 }
 
@@ -153,6 +158,20 @@ void draw_chat(const Config& cfg, double now) {
     }
     size_t first = phys.size() > static_cast<size_t>(rows) ? phys.size() - rows : 0;
     if (g_chat.is_open()) {
+        // Tabs on Fable's pewter bars along the top of the box: the open one warm, a tab
+        // with new lines in bright parchment. Tab / Shift+Tab switch.
+        const float tab_h = lh + 8;
+        float tx = box_x + 8;
+        for (int t = 0; t < static_cast<int>(ui::ChatTab::Count); ++t) {
+            auto tab = static_cast<ui::ChatTab>(t);
+            std::string name = ui::tab_name(tab);
+            bool active = g_chat.tab() == tab, fresh = g_chat.unread(tab);
+            float tw = g_r.measure(name) + 22;
+            g_r.bar(tx, box_y - tab_h + 3, tw, tab_h, active ? 1.0f : 0.75f, active, false);
+            g_r.text(tx + 11, box_y - tab_h + 3 + (tab_h - lh) / 2, name,
+                     active ? 0xFFFFF6DC : fresh ? 0xFFF4E3A8 : 0xFFC9C0A8);
+            tx += tw + 4;
+        }
         g_r.panel(box_x, box_y, w, box_h, 1.0f);
         g_r.rule(box_x + 10, input_y - 9, w - 20, 0.9f);
         std::string label = g_chat.channel_label() + ": ";
@@ -170,7 +189,7 @@ void draw_chat(const Config& cfg, double now) {
             g_r.rect(cx, input_y + 1, 1, lh - 2, 0xE0FFF6DC);
         }
         if (!net::chat_connected())
-            g_r.text(box_x + 4, box_y - lh - 4, "The chat server can't be reached. Trying again...", ui::ChatModel::kColorError);
+            g_r.text(box_x + 4, box_y - lh * 2 - 14, "The chat server can't be reached. Trying again...", ui::ChatModel::kColorError);
     }
     float y = log_bottom - lh * static_cast<float>(phys.size() - first);
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(x, y, phys[i].first, phys[i].second);
@@ -269,7 +288,7 @@ bool map_key(WPARAM vk, ui::Key& k) {
     case VK_DOWN: k = ui::Key::Down; return true;
     case VK_PRIOR: k = ui::Key::PageUp; return true;
     case VK_NEXT: k = ui::Key::PageDown; return true;
-    case VK_TAB: k = ui::Key::Tab; return true;
+    case VK_TAB: k = (GetKeyState(VK_SHIFT) & 0x8000) ? ui::Key::BackTab : ui::Key::Tab; return true;
     }
     return false;
 }

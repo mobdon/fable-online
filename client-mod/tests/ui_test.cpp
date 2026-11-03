@@ -128,6 +128,38 @@ static void test_chat_editing_and_log() {
     CHECK(c.visible(8, 30).size() == 3);      // all back when open
 }
 
+static void test_tabs() {
+    ui::ChatModel c;
+    c.on_server(parse(R"({"t":"welcome","name":"Hal"})"), 0);
+    c.on_server(parse(R"({"t":"msg","ch":"region","from":"Bob","text":"in Oakvale"})"), 1);
+    c.on_server(parse(R"({"t":"msg","ch":"world","from":"Ann","text":"anyone?"})"), 1);
+    c.on_server(parse(R"({"t":"msg","ch":"guild","from":"Ann","text":"muster"})"), 1);
+    c.on_server(parse(R"({"t":"msg","ch":"whisper","from":"Ann","to":"Hal","text":"psst"})"), 1);
+    c.on_server(parse(R"({"t":"sys","text":"Server restarts soon"})"), 1);
+    c.key(ui::Key::Enter, 1);
+    CHECK(c.tab() == ui::ChatTab::All && c.visible(20, 1).size() == 5);
+    CHECK(c.unread(ui::ChatTab::Guild) && c.unread(ui::ChatTab::World) && !c.unread(ui::ChatTab::All));
+    c.key(ui::Key::Tab, 1);
+    CHECK(c.tab() == ui::ChatTab::Region);
+    auto v = c.visible(20, 1);
+    CHECK(v.size() == 2);                                   // the region line and the system line
+    EQ(v[0].line->text, "[Region] Bob: in Oakvale");
+    type(c, U"hello region");
+    auto out = c.take_outbox();
+    EQ(out[0], R"({"t":"say","ch":"region","text":"hello region"})");  // the tab picks the channel
+    c.key(ui::Key::Enter, 1);
+    c.key(ui::Key::Tab, 1);
+    c.key(ui::Key::Tab, 1);
+    CHECK(c.tab() == ui::ChatTab::Guild && !c.unread(ui::ChatTab::Guild));
+    EQ(c.channel_label(), "Guild");
+    c.key(ui::Key::Tab, 1);
+    EQ(c.channel_label(), "To Ann");                        // Whispers answers whoever whispered last
+    c.key(ui::Key::Tab, 1);
+    CHECK(c.tab() == ui::ChatTab::All);
+    c.key(ui::Key::BackTab, 1);
+    CHECK(c.tab() == ui::ChatTab::Whispers);
+}
+
 static void test_tags() {
     ui::TagStore s;
     s.apply(parse(R"({"t":"tags","region":7,"add":[{"id":2,"name":"Maze","renown":12500,"title":"Hero","guild":"GLD","pvp":true,"x":0,"y":10,"z":0}],"upd":[],"move":[],"del":[]})"));
@@ -171,6 +203,7 @@ int main() {
     test_json();
     test_chat_commands();
     test_chat_editing_and_log();
+    test_tabs();
     test_tags();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

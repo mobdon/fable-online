@@ -78,13 +78,50 @@ uint32_t channel_color(const std::string& ch) {
     return ChatModel::kColorSay;
 }
 
+uint8_t bit(ChatTab t) { return static_cast<uint8_t>(1u << static_cast<int>(t)); }
+
+uint8_t tabs_for(const std::string& ch) {
+    uint8_t all = bit(ChatTab::All);
+    if (ch == "say" || ch == "region") return all | bit(ChatTab::Region);
+    if (ch == "world" || ch == "trade") return all | bit(ChatTab::World);
+    if (ch == "guild") return all | bit(ChatTab::Guild);
+    if (ch == "whisper") return all | bit(ChatTab::Whispers);
+    return all;  // party
+}
+
 const char* kHelp[] = {
-    "Enter: chat.  Esc: close.  Up/Down: history.  PgUp/PgDn: scroll.",
+    "Enter: chat.  Esc: close.  Tab: next tab.  Up/Down: history.  PgUp/PgDn: scroll.",
     "/s say (nearby)  /re region  /1 world  /2 trade  /p party  /g guild",
     "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
     "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
 };
 }  // namespace
+
+const char* tab_name(ChatTab t) {
+    switch (t) {
+    case ChatTab::All: return "All";
+    case ChatTab::Region: return "Region";
+    case ChatTab::World: return "World";
+    case ChatTab::Guild: return "Guild";
+    case ChatTab::Whispers: return "Whispers";
+    default: return "";
+    }
+}
+
+void ChatModel::set_tab(ChatTab t) {
+    tab_ = t;
+    scroll_ = 0;
+    unread_ &= static_cast<uint8_t>(~bit(t));
+    switch (t) {
+    case ChatTab::Region: channel_ = "region"; whisper_to_.clear(); break;
+    case ChatTab::World: channel_ = "world"; whisper_to_.clear(); break;
+    case ChatTab::Guild: channel_ = "guild"; whisper_to_.clear(); break;
+    case ChatTab::Whispers:
+        if (!reply_to_.empty()) { channel_ = "whisper"; whisper_to_ = reply_to_; }
+        break;
+    default: break;
+    }
+}
 
 void ChatModel::open(char32_t first) {
     open_ = true;
@@ -129,9 +166,12 @@ bool ChatModel::key(Key k, double now) {
     case Key::PageUp: scroll_ = std::min(scroll_ + 5, log_.size() > 1 ? log_.size() - 1 : 0); break;
     case Key::PageDown: scroll_ = scroll_ > 5 ? scroll_ - 5 : 0; break;
     case Key::Tab:
-        // Tab after "/w " fills in whoever last whispered you.
-        if (!reply_to_.empty()) { input_ = U"/w \"" + utf8_to_u32(reply_to_) + U"\" "; cursor_ = input_.size(); }
+    case Key::BackTab: {
+        int n = static_cast<int>(ChatTab::Count);
+        int next = (static_cast<int>(tab_) + (k == Key::Tab ? 1 : n - 1)) % n;
+        set_tab(static_cast<ChatTab>(next));
         break;
+    }
     }
     return true;  // everything is ours while the box is open
 }
@@ -225,8 +265,11 @@ void ChatModel::submit(double now) {
     system("Unknown command /" + cmd + ". Type /help.", now, kColorError);
 }
 
-void ChatModel::push(std::string text, uint32_t color, double now) {
-    log_.push_back({std::move(text), color, now});
+void ChatModel::push(std::string text, uint32_t color, double now, uint8_t tabs) {
+    // A line for a tab you aren't looking at lights that tab up (All never does).
+    uint8_t others = static_cast<uint8_t>(tabs & ~bit(ChatTab::All) & ~bit(tab_));
+    if (tabs != 0xFF) unread_ |= others;
+    log_.push_back({std::move(text), color, now, tabs});
     while (log_.size() > kMaxLog) log_.pop_front();
     if (scroll_ > 0 && scroll_ + 1 < log_.size()) ++scroll_;  // keep the view still while reading back
 }
@@ -257,7 +300,7 @@ void ChatModel::on_server(const json::Value& m, double now) {
             if (!label.empty()) label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
             line = "[" + label + "] " + from + ": " + text;
         }
-        push(line, channel_color(ch), now);
+        push(line, channel_color(ch), now, tabs_for(ch));
     } else if (t == "sys") {
         system(m.str("text"), now, m.str("level") == "warn" ? kColorError : kColorSystem);
     } else if (t == "err") {
@@ -274,16 +317,20 @@ std::vector<std::string> ChatModel::take_outbox() {
 std::vector<VisibleLine> ChatModel::visible(size_t rows, double now) const {
     std::vector<VisibleLine> out;
     if (log_.empty() || rows == 0) return out;
-    size_t end = log_.size() - std::min(scroll_, log_.size() - 1);
+    const uint8_t want = bit(tab_);
+    std::vector<const ChatLine*> lines;
+    for (const auto& l : log_) if (l.tabs & want) lines.push_back(&l);
+    if (lines.empty()) return out;
+    size_t end = lines.size() - std::min(scroll_, lines.size() - 1);
     size_t begin = end > rows ? end - rows : 0;
     for (size_t i = begin; i < end; ++i) {
         float a = 1.0f;
         if (!open_) {
-            double age = now - log_[i].at;
+            double age = now - lines[i]->at;
             if (age > kFadeAfter + kFadeTime) continue;
             if (age > kFadeAfter) a = static_cast<float>(1.0 - (age - kFadeAfter) / kFadeTime);
         }
-        out.push_back({&log_[i], a});
+        out.push_back({lines[i], a});
     }
     return out;
 }
