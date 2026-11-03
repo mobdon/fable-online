@@ -9,6 +9,7 @@
 #include "../assets/fable_ui.h"
 #include "../config.h"
 #include "../display/frame_probe.h"
+#include "../display/hud_scale.h"
 #include "../display/present.h"
 #include "../display/widescreen.h"
 #include "../log.h"
@@ -447,7 +448,7 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         }
         }
     }
-    return CallWindowProcW(o_WndProc, h, msg, w, l);
+    return CallWindowProcW(o_WndProc, h, msg, w, display::hud::map_mouse(msg, l));
 }
 
 bool is_keyboard(void* dev) {
@@ -517,6 +518,7 @@ void hook_device(IDirect3DDevice9* dev, HWND w) {
     if (auto o = patch::vtable(dev, kDev_EndScene, reinterpret_cast<void*>(hk_EndScene))) o_EndScene = reinterpret_cast<EndScene_t>(o);
     if (auto o = patch::vtable(dev, kDev_SetTransform, reinterpret_cast<void*>(hk_SetTransform))) o_SetTransform = reinterpret_cast<SetTransform_t>(o);
     hook_window(w);
+    display::hud::hook_device(dev);
     if (config().frame_probe) display::probe::hook(dev);
     g_device_hooked = o_EndScene && o_Present && o_Reset && o_SetTransform;
 }

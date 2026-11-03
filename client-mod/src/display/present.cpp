@@ -2,6 +2,7 @@
 #include <atomic>
 #include "../config.h"
 #include "../log.h"
+#include "hud_scale.h"
 
 namespace fo::display {
 namespace {
@@ -104,6 +105,7 @@ void adjust_present(IDirect3D9* d3d, UINT adapter, D3DPRESENT_PARAMETERS* pp, HW
     }
     if (cfg.vsync == 1) pp->PresentationInterval = D3DPRESENT_INTERVAL_ONE;
     if (cfg.vsync == 0) pp->PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
+    hud::set_screen(pp->BackBufferWidth, pp->BackBufferHeight, window ? window : pp->hDeviceWindow);
     fo::log("display: %s: using %ux%u, %u Hz, %s", when, pp->BackBufferWidth, pp->BackBufferHeight,
             pp->FullScreen_RefreshRateInHz, interval_name(pp->PresentationInterval));
 }

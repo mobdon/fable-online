@@ -18,3 +18,5 @@ c++ $flags -o "$out/fable_online_menu_test" \
 "$out/fable_online_menu_test"
 c++ $flags -o "$out/fable_online_display_test" "$here/display_test.cpp" "$src/display/camera_patch.cpp"
 "$out/fable_online_display_test"
+c++ $flags -o "$out/fable_online_hud_test" "$here/hud_test.cpp" "$src/display/hud_patch.cpp"
+"$out/fable_online_hud_test"

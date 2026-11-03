@@ -15,6 +15,7 @@
 #include "game/hero.h"
 #include "log.h"
 #include "net/chat_client.h"
+#include "display/hud_scale.h"
 #include "display/present.h"
 #include "display/widescreen.h"
 #include "menu/menu.h"
@@ -125,6 +126,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         g_online = read_mode() == Mode::Client;
         if (g_online) fo::overlay::install_early();
         if (g_online) fo::display::install();   // a few code bytes and a VirtualAlloc: fine here
+        if (g_online) fo::display::hud::install();
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);
         break;

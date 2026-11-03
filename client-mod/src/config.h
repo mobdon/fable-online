@@ -36,7 +36,8 @@ struct Config {
     int res_w = -1, res_h = -1;  // -1 = the desktop's resolution, 0 = the game's, else pixels
     int refresh_hz = -1;         // -1 = the monitor's highest at that resolution, 0 = the game's, else Hz
     int vsync = -1;              // -1 = the game's setting, 0 = off, 1 = on
-    bool low_latency = true;     // keep the CPU at most one frame ahead of the GPU (less mouse lag)
+    bool low_latency = true;
+    float hud_scale = 0;         // 0 = automatic (as on a 900-pixel-tall screen), -1 = off, else the factor     // keep the CPU at most one frame ahead of the GPU (less mouse lag)
 };
 
 void config_load(HMODULE self);
