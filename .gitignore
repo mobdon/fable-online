@@ -1,0 +1,24 @@
+# Never commit anything from the game
+Data/
+*.big
+*.lev
+*.tng
+*.bin
+Fable.exe
+*.xbe
+*.7z
+# Build output
+build/
+*.dll
+*.exe
+*.obj
+*.pdb
+node_modules/
+dist/
+*.log
+
+# Generated from your own game files
+shared/defs/*.json
+
+dist/
+tools/re-notes/rtti.json
