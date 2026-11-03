@@ -68,7 +68,7 @@ std::string trim(const std::string& s) {
 }
 
 uint32_t channel_color(const std::string& ch) {
-    if (ch == "shout") return ChatModel::kColorShout;
+    if (ch == "region") return ChatModel::kColorRegion;
     if (ch == "world") return ChatModel::kColorWorld;
     if (ch == "trade") return ChatModel::kColorTrade;
     if (ch == "party") return ChatModel::kColorParty;
@@ -80,7 +80,7 @@ uint32_t channel_color(const std::string& ch) {
 
 const char* kHelp[] = {
     "Enter: chat.  Esc: close.  Up/Down: history.  PgUp/PgDn: scroll.",
-    "/s say (nearby)  /y shout (this region)  /1 world  /2 trade  /p party  /g guild",
+    "/s say (nearby)  /re region  /1 world  /2 trade  /p party  /g guild",
     "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
     "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
 };
@@ -168,7 +168,7 @@ void ChatModel::submit(double now) {
     rest = trim(rest);
     struct Alias { const char* name; const char* ch; };
     static const Alias talk[] = {
-        {"s", "say"}, {"say", "say"}, {"y", "shout"}, {"sh", "shout"}, {"shout", "shout"},
+        {"s", "say"}, {"say", "say"}, {"re", "region"}, {"region", "region"}, {"y", "region"}, {"sh", "region"}, {"shout", "region"},
         {"1", "world"}, {"world", "world"}, {"2", "trade"}, {"trade", "trade"},
         {"p", "party"}, {"party", "party"}, {"g", "guild"}, {"guild", "guild"},
     };
@@ -250,8 +250,6 @@ void ChatModel::on_server(const json::Value& m, double now) {
         if (ch == "whisper") {
             if (from == me_) line = "To " + m.str("to") + ": " + text;
             else { line = from + " whispers: " + text; reply_to_ = from; }
-        } else if (ch == "shout") {
-            line = from + " shouts: " + text;
         } else if (ch == "say") {
             line = from + ": " + text;
         } else {

@@ -55,7 +55,7 @@ public:
 
     // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
     static constexpr uint32_t kColorSay = 0xFFE9E4D6;
-    static constexpr uint32_t kColorShout = 0xFFE8B46A;
+    static constexpr uint32_t kColorRegion = 0xFFE8B46A;
     static constexpr uint32_t kColorWorld = 0xFFF4E3A8;
     static constexpr uint32_t kColorTrade = 0xFFD2A878;
     static constexpr uint32_t kColorParty = 0xFF9AA3F4;

@@ -68,7 +68,7 @@ Production sets `CHAT_TOKEN_SECRET` (shared with the gateway) so only launcher l
 
 Copy `client-mod/fable_online.ini.example` to `fable_online.ini` next to the DLL and set
 `server=` and `name=`. Enter opens the chat box, Enter sends, Esc closes, `/help` lists
-commands (`/s`, `/y`, `/1` world, `/2` trade, `/p`, `/g`, `/w Name`, `/r`, `/ignore`, `/tags`).
+commands (`/s`, `/re` region, `/1` world, `/2` trade, `/p`, `/g`, `/w Name`, `/r`, `/ignore`, `/tags`).
 While the box is open the game doesn't see your keys. `fable_online.log` reports what got
 hooked and whether a camera matrix was found for the name tags.
 

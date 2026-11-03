@@ -47,6 +47,8 @@ export interface Conn {
 export interface HeroState {
   region: number; x: number; y: number; z: number;
   renown: number; title: string; guild: string; pvp: boolean;
+  /** Guild chat goes to heroes with the same guildId. Each guild, sub guilds included, has its own. */
+  guildId: string;
 }
 
 interface Session extends HeroState {
@@ -126,17 +128,17 @@ export class ChatHub {
       return conn.close("version");
     }
     let account: string, name: string, role: Role = "player";
-    let renown = 0, title = "", guild = "";
+    let renown = 0, title = "", guild = "", guildId = "";
     if (this.cfg.tokenSecret) {
       const c = m.token ? verifyToken(m.token, this.cfg.tokenSecret) : null;
       if (!c) { this.err(conn, "auth_failed", "Login expired. Restart from the launcher."); return conn.close("auth"); }
       ({ sub: account, name, role } = c);
-      renown = c.renown ?? 0; title = c.title ?? ""; guild = c.guild ?? "";
+      renown = c.renown ?? 0; title = c.title ?? ""; guild = c.guild ?? ""; guildId = c.guildId ?? guild;
     } else {
       name = (m.name ?? "").trim();
       account = "dev:" + nameKey(name);
       if (/^(mod|admin)[ -]/i.test(name)) role = "mod";  // dev mode only: test moderation by name
-      renown = m.dev?.renown ?? 0; title = m.dev?.title ?? ""; guild = m.dev?.guild ?? "";
+      renown = m.dev?.renown ?? 0; title = m.dev?.title ?? ""; guild = m.dev?.guild ?? ""; guildId = guild;
     }
     if (!isValidName(name)) { this.err(conn, "bad_name", "Names are 3-16 letters, digits, spaces, ' or -."); return conn.close("name"); }
     const ban = this.moderation.banned(account, this.now());
@@ -151,7 +153,7 @@ export class ChatHub {
     this.pending.delete(conn);
     const s: Session = {
       id: this.nextId++, conn, account, name, key, role,
-      region: 0, x: 0, y: 0, z: 0, hasPos: false, renown, title, guild, pvp: false,
+      region: 0, x: 0, y: 0, z: 0, hasPos: false, renown, title, guild, guildId, pvp: false,
       party: null, ignore: new Set(), replyTo: null,
       rate: new PlayerRate(this.cfg.rate, this.now()), seen: new Map(), tagsDirty: false,
     };
@@ -193,14 +195,14 @@ export class ChatHub {
         if (!s.hasPos) targets = [s];
         break;
       }
-      case "shout": targets = this.all().filter((o) => o.region === s.region); break;
+      case "region": targets = this.all().filter((o) => o.region === s.region); break;
       case "world": case "trade": targets = this.all(); break;
       case "party":
         if (!s.party) return this.err(s.conn, "not_in_party", "You are not in a party.");
         targets = this.all().filter((o) => o.party === s.party); break;
       case "guild":
-        if (!s.guild) return this.err(s.conn, "not_in_guild", "You are not in a guild.");
-        targets = this.all().filter((o) => o.guild === s.guild); break;
+        if (!s.guildId) return this.err(s.conn, "not_in_guild", "You are not in a guild.");
+        targets = this.all().filter((o) => o.guildId === s.guildId); break;
     }
     const text = this.gate(s, ch, raw);
     if (text === null) return;
@@ -268,6 +270,7 @@ export class ChatHub {
       s.seen.clear();  // client drops tags on region change; resend everything
     }
     if (st.x !== undefined) { s.x = st.x; s.y = st.y ?? s.y; s.z = st.z ?? s.z; s.hasPos = true; }
+    if (st.guildId !== undefined) s.guildId = st.guildId;  // joining or leaving a guild: chat follows at once
     for (const k of ["renown", "title", "guild", "pvp"] as const) {
       if (st[k] !== undefined && st[k] !== s[k]) { (s as any)[k] = st[k]; s.tagsDirty = true; }
     }

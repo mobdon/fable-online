@@ -63,8 +63,8 @@ test("say reaches only nearby players in the same region", () => {
   assert.deepEqual(near.texts(), ["say:Alpha:hello"]);
   assert.deepEqual(far.texts(), []);
   assert.deepEqual(other.texts(), []);
-  send(a, { t: "say", ch: "shout", text: "HEY" });
-  assert.deepEqual(far.texts(), ["shout:Alpha:HEY"]);
+  send(a, { t: "say", ch: "region", text: "HEY" });
+  assert.deepEqual(far.texts(), ["region:Alpha:HEY"]);
   assert.deepEqual(other.texts(), []);
   send(a, { t: "say", ch: "world", text: "anyone?" });
   assert.deepEqual(other.texts(), ["world:Alpha:anyone?"]);
@@ -120,7 +120,7 @@ test("text is cleaned and filtered", () => {
   const a = join("Alpha");
   send(a, { t: "say", ch: "world", text: "  oh‮  d4rn\u0007 it  " });
   assert.deepEqual(a.texts(), ["world:Alpha:oh **** it"]);
-  send(a, { t: "say", ch: "shout", text: "x".repeat(201) });
+  send(a, { t: "say", ch: "region", text: "x".repeat(201) });
   assert.deepEqual(a.errs(), ["too_long"]);
 });
 
@@ -197,4 +197,18 @@ test("dev hello can set tag fields; token login ignores them", () => {
   const token = signToken({ sub: "a", name: "Real", role: "player", exp: Date.now() / 1000 + 60 }, "k");
   prod.handle(p, { t: "hello", v: 1, token, dev: { renown: 99999 } });
   assert.equal(p.of("welcome")[0].renown, 0);
+});
+
+test("each guild, sub guilds included, has its own guild chat", () => {
+  const { hub, join, send } = setup();
+  const a = join("Alpha"), b = join("Bravo"), c = join("Charlie");
+  hub.updateHero("Alpha", { guild: "OAK", guildId: "g:oak" });
+  hub.updateHero("Bravo", { guild: "OAK", guildId: "g:oak" });
+  hub.updateHero("Charlie", { guild: "OAK2", guildId: "g:oak/archers" });   // a sub guild
+  send(a, { t: "say", ch: "guild", text: "muster at the gate" });
+  assert.deepEqual(b.texts(), ["guild:Alpha:muster at the gate"]);
+  assert.deepEqual(c.texts(), []);
+  hub.updateHero("Charlie", { guildId: "" });                                 // left the guild
+  send(c, { t: "say", ch: "guild", text: "hello?" });
+  assert.deepEqual(c.errs(), ["not_in_guild"]);
 });

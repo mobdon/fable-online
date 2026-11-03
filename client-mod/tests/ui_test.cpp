@@ -113,12 +113,12 @@ static void test_chat_editing_and_log() {
     c.key(ui::Key::Escape, 0);
 
     c.on_server(parse(R"({"t":"welcome","name":"Hal"})"), 0);
-    c.on_server(parse(R"({"t":"msg","ch":"shout","from":"Bob","text":"HEY"})"), 10);
+    c.on_server(parse(R"({"t":"msg","ch":"region","from":"Bob","text":"HEY"})"), 10);
     c.on_server(parse(R"({"t":"msg","ch":"trade","from":"Bob","text":"WTS sword"})"), 10);
     c.on_server(parse(R"({"t":"msg","ch":"whisper","from":"Hal","to":"Bob","text":"how much"})"), 10);
     auto v = c.visible(8, 10);
     CHECK(v.size() == 3);
-    EQ(v[0].line->text, "Bob shouts: HEY");
+    EQ(v[0].line->text, "[Region] Bob: HEY");
     EQ(v[1].line->text, "[Trade] Bob: WTS sword");
     EQ(v[2].line->text, "To Bob: how much");
     CHECK(v[1].line->color == ui::ChatModel::kColorTrade);
