@@ -1,0 +1,169 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { App } from '../app.js';
+import { GameError } from '../errors.js';
+
+const BODY_LIMIT = 8 * 1024;
+const NO_CONTENT = Symbol('204');
+
+type Handler = (req: IncomingMessage, body: Record<string, unknown>, url: URL) => unknown;
+
+/**
+ * HTTP API. /launcher/v1/* is the contract the launcher speaks (shared/protocol/launcher-api.md).
+ * /admin/v1/* needs an admin account.
+ */
+export function createHttpHandler(app: App) {
+  const { cfg, accounts, heroes, director, economy } = app;
+  const bearer = (req: IncomingMessage) => req.headers.authorization?.replace(/^Bearer\s+/i, '');
+  const routes = new Map<string, Handler>();
+  const route = (method: string, p: string, h: Handler) => routes.set(`${method} ${p}`, h);
+
+  route('GET', '/launcher/v1/status', () => {
+    const online = director.online;
+    const capacity = director.capacity;
+    return {
+      online: true,
+      motd: cfg.motd,
+      protocol: cfg.protocolVersion,
+      server_time: new Date().toISOString(),
+      regions: [
+        {
+          id: cfg.realmId,
+          name: cfg.realmName,
+          status: online >= capacity ? 'full' : online >= capacity * 0.8 ? 'busy' : 'online',
+          players: online,
+          capacity,
+          ping_host: cfg.publicHost,
+          ping_port: cfg.publicPort,
+        },
+      ],
+    };
+  });
+
+  route('GET', '/launcher/v1/news', () => readContent(cfg.contentDir, 'news.json', { items: [] }));
+
+  route('GET', '/launcher/v1/manifest', (_req, _b, url) => {
+    const channel = url.searchParams.get('channel') ?? 'live';
+    if (!/^[a-z0-9-]{1,32}$/.test(channel)) throw new GameError('bad_channel', 'Bad channel');
+    const m = readContent(cfg.contentDir, `manifest-${channel}.json`, null);
+    if (!m) throw new GameError('no_manifest', `No manifest for ${channel}`, 404);
+    return m;
+  });
+
+  route('POST', '/launcher/v1/register', (req, b) =>
+    accounts.registerAndLogin(String(b.username ?? ''), String(b.password ?? ''), req.socket.remoteAddress),
+  );
+
+  route('POST', '/launcher/v1/login', (req, b) => accounts.login(String(b.username ?? ''), String(b.password ?? ''), req.socket.remoteAddress));
+  route('POST', '/launcher/v1/refresh', (_req, b) => accounts.refresh(String(b.refresh_token ?? '')));
+  route('POST', '/launcher/v1/logout', (req) => {
+    accounts.logout(bearer(req) ?? '');
+    return NO_CONTENT;
+  });
+
+  route('GET', '/launcher/v1/heroes', (req) => {
+    const acct = accounts.authenticate(bearer(req));
+    return { heroes: heroes.listForAccount(acct.id).map(publicHero) };
+  });
+  route('POST', '/launcher/v1/heroes', (req, b) => {
+    const acct = accounts.authenticate(bearer(req));
+    return { hero: publicHero(heroes.create(acct.id, String(b.name ?? ''))) };
+  });
+
+  route('POST', '/launcher/v1/join', (req, b) => {
+    const acct = accounts.authenticate(bearer(req));
+    if (b.region !== undefined && b.region !== cfg.realmId) throw new GameError('bad_region', `Unknown region ${String(b.region)}`, 404);
+    if (versionLess(String(b.client_version ?? '0'), cfg.minClientVersion))
+      throw new GameError('outdated', `Please update: client ${cfg.minClientVersion} or newer is required`, 409);
+    const hero = heroes.pick(acct.id, b.hero_id === undefined ? undefined : Number(b.hero_id));
+    if (director.online >= director.capacity) throw new GameError('region_full', 'The server is full', 503);
+    return {
+      ticket: accounts.issueJoinTicket(acct.id, hero.id, cfg.realmId),
+      host: cfg.publicHost,
+      port: cfg.publicPort,
+      hero: publicHero(hero),
+      protocol: cfg.protocolVersion,
+    };
+  });
+
+  const admin = (req: IncomingMessage) => {
+    const acct = accounts.authenticate(bearer(req));
+    if (acct.role !== 'admin') throw new GameError('forbidden', 'Admins only', 403);
+  };
+  route('GET', '/admin/v1/stats', (req) => (admin(req), director.stats()));
+  route('GET', '/admin/v1/economy/audit', (req) => (admin(req), economy.audit()));
+
+  return async (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url ?? '/', 'http://x');
+    const h = routes.get(`${req.method} ${url.pathname}`);
+    try {
+      if (!h) throw new GameError('not_found', 'Not found', 404);
+      const body = req.method === 'POST' ? await readJson(req) : {};
+      const out = await h(req, body, url);
+      if (out === NO_CONTENT) {
+        res.writeHead(204);
+        res.end();
+      } else send(res, 200, out);
+    } catch (err) {
+      if (err instanceof GameError) send(res, err.status, { error: err.code, message: err.message });
+      else {
+        console.error(err);
+        send(res, 500, { error: 'internal', message: 'Something went wrong' });
+      }
+    }
+  };
+}
+
+export function publicHero(h: { id: number; name: string; phase: string; renown: number; region: string; pvp_unlocked: number }) {
+  return { id: h.id, name: h.name, phase: h.phase, renown: h.renown, region: h.region, pvp_unlocked: !!h.pvp_unlocked };
+}
+
+function send(res: ServerResponse, status: number, body: unknown) {
+  const s = JSON.stringify(body);
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s), 'cache-control': 'no-store' });
+  res.end(s);
+}
+
+function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > BODY_LIMIT) {
+        reject(new GameError('too_large', 'Body too large', 413));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => {
+      if (chunks.length === 0) return resolve({});
+      try {
+        const v = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+      } catch {
+        reject(new GameError('bad_json', 'Body must be JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function readContent<T>(dir: string, file: string, fallback: T): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+/** "0.2.10" < "0.10.0" compares numerically per part. */
+export function versionLess(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d < 0;
+  }
+  return false;
+}

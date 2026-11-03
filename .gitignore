@@ -22,3 +22,6 @@ shared/defs/*.json
 
 dist/
 tools/re-notes/rtti.json
+
+# Server runtime data
+server/data/
