@@ -56,9 +56,27 @@ const char* interval_name(UINT i) {
 void adjust_present(IDirect3D9* d3d, UINT adapter, D3DPRESENT_PARAMETERS* pp, HWND window, const char* when) {
     if (!pp) return;
     const Config& cfg = config();
-    fo::log("display: %s: game asked for %ux%u, %s, %u Hz, %s, %u back buffer(s)", when, pp->BackBufferWidth,
-            pp->BackBufferHeight, pp->Windowed ? "windowed" : "full screen", pp->FullScreen_RefreshRateInHz,
+    fo::log("display: %s: game asked for %ux%u (format %d), %s, %u Hz, %s, %u back buffer(s)", when, pp->BackBufferWidth,
+            pp->BackBufferHeight, static_cast<int>(pp->BackBufferFormat), pp->Windowed ? "windowed" : "full screen", pp->FullScreen_RefreshRateInHz,
             interval_name(pp->PresentationInterval), pp->BackBufferCount);
+    if (cfg.res_w != 0) {
+        // Fable starts at the size in userst.ini (1024x768, 16-bit colour) whatever its Options
+        // say. Use the desktop's size (or the ini's) and 32-bit colour instead. pp is the game's
+        // own copy, so it sees the new size too.
+        UINT w = static_cast<UINT>(cfg.res_w), h = static_cast<UINT>(cfg.res_h);
+        if (cfg.res_w < 0) {
+            HMONITOR mon = MonitorFromWindow(window ? window : pp->hDeviceWindow, MONITOR_DEFAULTTOPRIMARY);
+            MONITORINFO mi = {sizeof mi};
+            GetMonitorInfoW(mon, &mi);
+            w = static_cast<UINT>(mi.rcMonitor.right - mi.rcMonitor.left);
+            h = static_cast<UINT>(mi.rcMonitor.bottom - mi.rcMonitor.top);
+        }
+        if (w && h) { pp->BackBufferWidth = w; pp->BackBufferHeight = h; }
+        if (pp->BackBufferFormat == D3DFMT_R5G6B5 || pp->BackBufferFormat == D3DFMT_X1R5G5B5 ||
+            pp->BackBufferFormat == D3DFMT_A1R5G5B5 || pp->BackBufferFormat == D3DFMT_UNKNOWN)
+            pp->BackBufferFormat = D3DFMT_X8R8G8B8;
+        if (pp->EnableAutoDepthStencil && pp->AutoDepthStencilFormat == D3DFMT_D16) pp->AutoDepthStencilFormat = D3DFMT_D24S8;
+    }
     if (cfg.window_mode != WindowMode::Fullscreen) {
         // A window instead of exclusive full screen: same back buffer, no display mode change.
         pp->Windowed = TRUE;

@@ -33,6 +33,7 @@ struct Config {
     float fov_scale = 1.0f;      // 1 = Fable's own view; 1.1 = 10% more in every direction
     bool frame_probe = false;    // F10 logs one frame's Direct3D calls (for HUD work)
     WindowMode window_mode = WindowMode::Fullscreen;
+    int res_w = -1, res_h = -1;  // -1 = the desktop's resolution, 0 = the game's, else pixels
     int refresh_hz = -1;         // -1 = the monitor's highest at that resolution, 0 = the game's, else Hz
     int vsync = -1;              // -1 = the game's setting, 0 = off, 1 = on
     bool low_latency = true;     // keep the CPU at most one frame ahead of the GPU (less mouse lag)

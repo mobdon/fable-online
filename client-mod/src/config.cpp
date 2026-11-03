@@ -1,4 +1,5 @@
 #include "config.h"
+#include <cstdio>
 #include <cstdlib>
 #include <cwctype>
 
@@ -77,6 +78,12 @@ void config_load(HMODULE self) {
     c.frame_probe = ini_bool(f, L"display", L"frame_probe", c.frame_probe);
     std::wstring win = ini_str(f, L"display", L"window", L"fullscreen");
     c.window_mode = win == L"windowed" ? WindowMode::Windowed : win == L"borderless" ? WindowMode::Borderless : WindowMode::Fullscreen;
+    std::wstring res = ini_str(f, L"display", L"resolution", L"desktop");
+    if (res == L"game") { c.res_w = c.res_h = 0; }
+    else if (res != L"desktop") {
+        int w = 0, h = 0;
+        if (swscanf(res.c_str(), L"%dx%d", &w, &h) == 2 && w >= 640 && h >= 480 && w <= 16384 && h <= 16384) { c.res_w = w; c.res_h = h; }
+    }
     std::wstring hz = ini_str(f, L"display", L"refresh", L"max");
     c.refresh_hz = hz == L"max" ? -1 : hz == L"game" ? 0 : _wtoi(hz.c_str());
     if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = -1;
