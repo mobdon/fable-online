@@ -1,0 +1,76 @@
+# Alert rules. Thresholds are first drafts; tune them once real players are on.
+groups:
+  - name: fable-economy
+    rules:
+      - alert: GoldDupeSuspected
+        expr: increase(fable_economy_anomalies_total{rule=~"duplicate_txn|balance_mismatch|supply_drift"}[5m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Possible gold dupe: {{ $labels.rule }}"
+          description: "The economy watchdog saw {{ $value }} {{ $labels.rule }} events in 5 minutes. Check economy.anomaly in the event log for the hero."
+      - alert: GoldSupplyDrift
+        expr: abs(fable_gold_supply_db - fable_gold_supply_ledger) > 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Gold exists that the ledger didn't create"
+          description: "DB total minus ledger total = {{ $value }}. Something changed balances without going through the ledger."
+      - alert: GoldFarmingSuspected
+        expr: increase(fable_economy_anomalies_total{rule=~"earn_rate|large_delta|unknown_source"}[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Hero earning gold abnormally fast ({{ $labels.rule }})"
+      - alert: InflationSpike
+        expr: (sum(rate(fable_gold_minted_total[1h])) - sum(rate(fable_gold_burned_total[1h]))) > 3 * (sum(rate(fable_gold_minted_total[1d] offset 1d)) - sum(rate(fable_gold_burned_total[1d] offset 1d)) + 1)
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Net gold growth is 3x yesterday's rate"
+      - alert: PhialFarming
+        expr: increase(fable_economy_anomalies_total{rule="phial_rate"}[1h]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "A hero is collecting Resurrection Phials too fast"
+
+  - name: fable-pvp
+    rules:
+      - alert: ArenaSchoolImbalance
+        expr: |
+          (sum by (school) (increase(fable_arena_results_total{result="win"}[1d]))
+            / sum by (school) (increase(fable_arena_results_total{result=~"win|loss"}[1d]))) > 0.58
+          and sum by (school) (increase(fable_arena_results_total{result=~"win|loss"}[1d])) > 200
+        labels: { severity: info }
+        annotations:
+          summary: "{{ $labels.school }} heroes win {{ $value | humanizePercentage }} of Arena matches"
+
+  - name: fable-health
+    rules:
+      - alert: RegionDown
+        expr: fable_region_process_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Region {{ $labels.region }} Fable.exe is not running"
+      - alert: RegionCrashLoop
+        expr: increase(fable_region_process_restarts_total[15m]) >= 3
+        labels: { severity: critical }
+        annotations:
+          summary: "Region {{ $labels.region }} restarted {{ $value }} times in 15 minutes"
+      - alert: SlowTicks
+        expr: histogram_quantile(0.95, sum by (region, le) (rate(fable_tick_duration_seconds_bucket[5m]))) > 0.033
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Region {{ $labels.region }} p95 tick is {{ $value | humanizeDuration }} (budget 33ms)"
+      - alert: ServerScrapeDown
+        expr: up{job="fable-server"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Prometheus can't reach {{ $labels.instance }}"
+      - alert: LoginFailures
+        expr: sum(rate(fable_logins_total{result!="ok"}[5m])) / sum(rate(fable_logins_total[5m])) > 0.3
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "More than 30% of logins failing"
