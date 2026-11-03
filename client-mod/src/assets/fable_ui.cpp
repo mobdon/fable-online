@@ -1,0 +1,58 @@
+#include "fable_ui.h"
+#include "../../../shared/art/big.h"
+
+namespace fo::assets {
+namespace {
+template <class Path>
+UiArt load(const Path& fonts_path, const Path& frontend_path) {
+    UiArt ui;
+    std::string err;
+    art::Bank fonts;
+    if (fonts.open(fonts_path)) {
+        std::vector<uint8_t> raw;
+        auto one = [&](const char* name, Font& f) {
+            return fonts.load_raw(name, raw) && parse_font(raw, f, &err);
+        };
+        ui.fonts_ok = one(kFontChat, ui.chat) && one(kFontSmall, ui.small) && one(kFontTitle, ui.title);
+        if (!ui.fonts_ok) ui.report += "fonts.big unreadable (" + (err.empty() ? fonts.error() : err) + "); ";
+    } else {
+        ui.report += "fonts.big not found; ";
+    }
+    art::Bank fe;
+    if (fe.open(frontend_path)) {
+        struct Piece { const char* name; art::Image* img; } pieces[] = {
+            {"UI_TABLE_TEST_TL_FE", &ui.tl}, {"UI_TABLE_TEST_TR_FE", &ui.tr},
+            {"UI_TABLE_TEST_BL_FE", &ui.bl}, {"UI_TABLE_TEST_BR_FE", &ui.br},
+            {"UI_TABLE_TEST_H_T_FE", &ui.top}, {"UI_TABLE_TEST_H_B_FE", &ui.bottom},
+            {"UI_TABLE_TEST_V_L_FE", &ui.left}, {"UI_TABLE_TEST_V_R_FE", &ui.right},
+        };
+        ui.frame_ok = true;
+        for (auto& pc : pieces) {
+            art::Texture t;
+            if (!fe.load(pc.name, t) || !art::decode(t, *pc.img) || pc.img->empty()) {
+                ui.frame_ok = false;
+                ui.report += std::string(pc.name) + " missing; ";
+                break;
+            }
+        }
+        art::Texture t;
+        art::Image back;
+        if (fe.load("UI_TABLE_BACK_SPRITE_FE", t) && art::decode(t, back) && !back.empty())
+            ui.fill = back.px[back.px.size() / 2] | 0xFF000000;
+    } else {
+        ui.report += "frontend.big not found; ";
+    }
+    if (ui.report.empty()) ui.report = "Fable fonts and frame loaded";
+    return ui;
+}
+}  // namespace
+
+UiArt load_ui(const std::wstring& dir) {
+    return load(dir + L"\\data\\lang\\English\\fonts.big", dir + L"\\data\\graphics\\pc\\frontend.big");
+}
+
+UiArt load_ui_utf8(const std::string& dir) {
+    return load(dir + "/data/lang/English/fonts.big", dir + "/data/graphics/pc/frontend.big");
+}
+
+}  // namespace fo::assets

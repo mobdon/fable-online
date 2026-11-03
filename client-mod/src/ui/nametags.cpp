@@ -5,11 +5,12 @@
 namespace fo::ui {
 
 uint32_t renown_color(double r) {
-    if (r >= 50000) return 0xFFFFC94A;  // legendary: gold
-    if (r >= 20000) return 0xFFD08CFF;  // famous: purple
-    if (r >= 5000) return 0xFF7FB6FF;   // known: blue
-    if (r >= 1000) return 0xFF8CE08C;   // rising: green
-    return 0xFFE8E8E8;                  // unknown: white
+    // Pewter, bronze, silver, gold, then the chrome blue of Fable's logo for legends.
+    if (r >= 50000) return 0xFF9AA3F4;
+    if (r >= 20000) return 0xFFE8C15A;
+    if (r >= 5000) return 0xFFD9DEE6;
+    if (r >= 1000) return 0xFFC8955A;
+    return 0xFFC9C0A8;
 }
 
 std::string format_renown(double r) {
@@ -107,8 +108,8 @@ std::vector<Label> TagStore::layout(const float m[16], float w, float h, const T
         l.x = (nx + 1.0f) * 0.5f * w;
         l.y = (1.0f - ny) * 0.5f * h;
         l.name_line = t.guild.empty() ? t.name : t.name + " <" + t.guild + ">";
-        l.info_line = (t.title.empty() ? "" : t.title + " \xC2\xB7 ") + format_renown(t.renown);
-        l.name_color = with_alpha(t.pvp ? 0xFFFF5A4A : 0xFFFFFFFF, a);
+        l.info_line = (t.title.empty() ? "" : t.title + " - ") + format_renown(t.renown);
+        l.name_color = with_alpha(t.pvp ? 0xFFE0503C : 0xFFFFF6DC, a);
         l.info_color = with_alpha(renown_color(t.renown), a);
         l.depth = dist;
         out.push_back(std::move(l));

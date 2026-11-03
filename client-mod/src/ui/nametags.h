@@ -22,7 +22,7 @@ struct Tag {
 struct Label {
     float x, y;                        // screen pixels: centre of the name line
     std::string name_line;             // "Hal <GLD>"
-    std::string info_line;             // "Arrow Master · 1,250 renown"
+    std::string info_line;             // "Arrow Master - 1,250 renown"
     uint32_t name_color, info_color;   // 0xAARRGGBB, alpha already applied
     float depth;                       // view distance, for sorting
 };
@@ -36,6 +36,7 @@ struct TagSettings {
 };
 
 // Colour by renown, so famous heroes stand out. Thresholds are a first pass; balance later.
+// Fable's fonts only cover ASCII, so tags stick to it.
 uint32_t renown_color(double renown);
 std::string format_renown(double renown);   // 12500 -> "12,500 renown"
 
