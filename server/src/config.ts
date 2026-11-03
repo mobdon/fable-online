@@ -15,6 +15,11 @@ export interface ServerConfig {
   dbPath: string;
   /** shared/defs/regions.json, generated from the player's own game files. */
   regionsPath: string;
+  /**
+   * shared/defs/nav, made by tools/extractor/navmesh.mjs from the player's own game files.
+   * '' (the default for now) keeps every region on the kinematic StubSim.
+   */
+  navDir: string;
   /** JSON lines file for analytics events ('' disables). */
   eventsPath: string;
   /** Wire protocol version the client mod must speak. */
@@ -58,6 +63,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     port: num('FO_PORT', 7777),
     dbPath: str('FO_DB', 'data/fable-online.sqlite'),
     regionsPath: str('FO_REGIONS', '../shared/defs/regions.json'),
+    navDir: str('FO_NAV_DIR', ''),
     eventsPath: str('FO_EVENTS', 'data/events.jsonl'),
     protocolVersion: 1,
     minClientVersion: str('FO_MIN_CLIENT', '0.1.0'),

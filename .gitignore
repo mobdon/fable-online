@@ -25,3 +25,4 @@ tools/re-notes/rtti.json
 
 # Server runtime data
 server/data/
+shared/defs/nav/
