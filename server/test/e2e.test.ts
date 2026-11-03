@@ -43,7 +43,11 @@ test('launcher login -> join ticket -> game socket -> server-simulated movement'
   app.director.start();
   try {
     assert.equal((await api(base, 'GET', '/launcher/v1/status')).body.regions[0].id, 'albion-1');
-    assert.equal((await api(base, 'POST', '/launcher/v1/register', { username: 'Reaver', password: 'password123' })).status, 200);
+    const reg = await api(base, 'POST', '/launcher/v1/register', { username: 'Reaver', password: 'password123' });
+    assert.equal(reg.status, 200);
+    assert.ok(reg.body.access_token && reg.body.refresh_token);
+    assert.equal(reg.body.account.name, 'Reaver');
+    assert.equal((await api(base, 'POST', '/launcher/v1/register', { username: 'reaver', password: 'password123' })).body.error, 'name_taken');
     const login = await api(base, 'POST', '/launcher/v1/login', { username: 'Reaver', password: 'password123' });
     assert.equal(login.status, 200);
     const tok = login.body.access_token;
@@ -51,7 +55,8 @@ test('launcher login -> join ticket -> game socket -> server-simulated movement'
     const hero = (await api(base, 'POST', '/launcher/v1/heroes', { name: 'Reaver' }, tok)).body.hero;
     app.heroes.advancePhase(hero.id, 'guild_training');
     app.heroes.advancePhase(hero.id, 'world');
-    assert.equal((await api(base, 'POST', '/launcher/v1/join', { client_version: '0.0.9' }, tok)).status, 426);
+    const old = await api(base, 'POST', '/launcher/v1/join', { client_version: '0.0.9' }, tok);
+    assert.deepEqual([old.status, old.body.error], [409, 'outdated']);
     const join = await api(base, 'POST', '/launcher/v1/join', { region: 'albion-1', client_version: '0.1.0' }, tok);
     assert.equal(join.status, 200);
     assert.ok(join.body.ticket);
@@ -85,6 +90,12 @@ test('launcher login -> join ticket -> game socket -> server-simulated movement'
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(app.director.online, 0);
     assert.ok(app.heroes.get(hero.id)!.y > 1, 'position saved on disconnect');
+
+    const st = (await api(base, 'GET', '/launcher/v1/status')).body;
+    assert.deepEqual([st.online, st.protocol, st.regions[0].status], [true, 1, 'online']);
+    const out = await fetch(base + '/launcher/v1/logout', { method: 'POST', headers: { authorization: `Bearer ${tok}` } });
+    assert.equal(out.status, 204);
+    assert.equal((await api(base, 'POST', '/launcher/v1/refresh', { refresh_token: login.body.refresh_token })).status, 401);
   } finally {
     server.close();
     app.close();

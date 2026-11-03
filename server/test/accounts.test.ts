@@ -8,7 +8,7 @@ const code = (c: string) => (e: unknown) => e instanceof GameError && e.code ===
 test('register, login, rotating refresh, logout', () => {
   const app = testApp();
   app.accounts.register('Sparrow_1', 'correct horse');
-  assert.throws(() => app.accounts.register('sparrow_1', 'whatever12'), code('username_taken'));
+  assert.throws(() => app.accounts.register('sparrow_1', 'whatever12'), code('name_taken'));
   assert.throws(() => app.accounts.register('x', 'whatever12'), code('bad_username'));
   assert.throws(() => app.accounts.login('Sparrow_1', 'wrong pass'), code('bad_credentials'));
   const t = app.accounts.login('sparrow_1', 'correct horse');

@@ -64,7 +64,7 @@ exit (checked against the region graph) or a Cullis Gate, never on client reques
 ## HTTP API
 
 Launcher contract (`/launcher/v1`): `GET status`, `GET news`, `GET manifest?channel=live`,
-`POST register`, `POST login`, `POST refresh`, `POST logout`, `GET heroes`, `POST heroes`,
+`POST register` (logs straight in, same reply as login), `POST login`, `POST refresh`, `POST logout`, `GET heroes`, `POST heroes`,
 `POST join {region, client_version, hero_id?}` which returns `{ticket, host, port}`. The mod
 sends the ticket as `Hello.token`; it works once, for 60 seconds. News and manifests are read
 from `content/news.json` and `content/manifest-<channel>.json`.

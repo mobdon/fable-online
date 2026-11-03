@@ -24,6 +24,8 @@ export interface ServerConfig {
   /** This world server ("region" in the launcher API), e.g. albion-1. */
   realmId: string;
   realmName: string;
+  /** Message of the day shown in the launcher. */
+  motd: string;
   /** Host and port the launcher hands the mod in /join. */
   publicHost: string;
   publicPort: number;
@@ -61,6 +63,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     minClientVersion: str('FO_MIN_CLIENT', '0.1.0'),
     realmId: str('FO_REALM_ID', 'albion-1'),
     realmName: str('FO_REALM_NAME', 'Albion'),
+    motd: str('FO_MOTD', 'Welcome to Albion'),
     publicHost: str('FO_PUBLIC_HOST', '127.0.0.1'),
     publicPort: num('FO_PUBLIC_PORT', num('FO_PORT', 7777)),
     contentDir: str('FO_CONTENT', 'content'),

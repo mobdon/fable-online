@@ -17,7 +17,7 @@ export interface TokenPair {
   access_token: string;
   refresh_token: string;
   expires_in: number; // seconds
-  account: { id: number; username: string; role: string };
+  account: { id: string; name: string; role: string };
 }
 
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
@@ -67,9 +67,9 @@ export class Accounts {
   register(username: string, password: string): Account {
     if (!USERNAME_RE.test(username)) throw new GameError('bad_username', 'Username must be 3-20 letters, digits or _');
     if (typeof password !== 'string' || password.length < 8 || password.length > 128)
-      throw new GameError('bad_password', 'Password must be 8-128 characters');
+      throw new GameError('weak_password', 'Password must be 8-128 characters');
     if (this.db.get('SELECT 1 FROM accounts WHERE username = ?', username))
-      throw new GameError('username_taken', 'That username is taken', 409);
+      throw new GameError('name_taken', 'That username is taken', 409);
     const { lastInsertRowid: id } = this.db.run(
       'INSERT INTO accounts (username, password_hash, created_at) VALUES (?, ?, ?)',
       username,
@@ -82,6 +82,14 @@ export class Accounts {
 
   byId(id: number): Account | undefined {
     return this.db.get<Account>('SELECT id, username, role, banned_until FROM accounts WHERE id = ?', id);
+  }
+
+  /** Register and log straight in (the launcher's /register returns the same shape as /login). */
+  registerAndLogin(username: string, password: string, ip = 'unknown'): TokenPair {
+    const acct = this.register(username, password);
+    this.events.emit({ type: 'login', accountId: acct.id, ok: true });
+    void ip;
+    return this.issuePair(acct);
   }
 
   login(username: string, password: string, ip = 'unknown'): TokenPair {
@@ -178,7 +186,7 @@ export class Accounts {
       access_token: access,
       refresh_token: refresh,
       expires_in: ACCESS_TTL_MS / 1000,
-      account: { id: acct.id, username: acct.username, role: acct.role },
+      account: { id: String(acct.id), name: acct.username, role: acct.role },
     };
   }
 }

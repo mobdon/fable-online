@@ -5,6 +5,7 @@ import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 
 const BODY_LIMIT = 8 * 1024;
+const NO_CONTENT = Symbol('204');
 
 type Handler = (req: IncomingMessage, body: Record<string, unknown>, url: URL) => unknown;
 
@@ -22,14 +23,19 @@ export function createHttpHandler(app: App) {
     const online = director.online;
     const capacity = director.capacity;
     return {
+      online: true,
+      motd: cfg.motd,
+      protocol: cfg.protocolVersion,
       server_time: new Date().toISOString(),
       regions: [
         {
           id: cfg.realmId,
           name: cfg.realmName,
-          status: online >= capacity ? 'full' : 'online',
+          status: online >= capacity ? 'full' : online >= capacity * 0.8 ? 'busy' : 'online',
           players: online,
           capacity,
+          ping_host: cfg.publicHost,
+          ping_port: cfg.publicPort,
         },
       ],
     };
@@ -45,16 +51,15 @@ export function createHttpHandler(app: App) {
     return m;
   });
 
-  route('POST', '/launcher/v1/register', (_req, b) => {
-    const a = accounts.register(String(b.username ?? ''), String(b.password ?? ''));
-    return { account: { id: a.id, username: a.username, role: a.role } };
-  });
+  route('POST', '/launcher/v1/register', (req, b) =>
+    accounts.registerAndLogin(String(b.username ?? ''), String(b.password ?? ''), req.socket.remoteAddress),
+  );
 
   route('POST', '/launcher/v1/login', (req, b) => accounts.login(String(b.username ?? ''), String(b.password ?? ''), req.socket.remoteAddress));
   route('POST', '/launcher/v1/refresh', (_req, b) => accounts.refresh(String(b.refresh_token ?? '')));
   route('POST', '/launcher/v1/logout', (req) => {
     accounts.logout(bearer(req) ?? '');
-    return { ok: true };
+    return NO_CONTENT;
   });
 
   route('GET', '/launcher/v1/heroes', (req) => {
@@ -70,7 +75,7 @@ export function createHttpHandler(app: App) {
     const acct = accounts.authenticate(bearer(req));
     if (b.region !== undefined && b.region !== cfg.realmId) throw new GameError('bad_region', `Unknown region ${String(b.region)}`, 404);
     if (versionLess(String(b.client_version ?? '0'), cfg.minClientVersion))
-      throw new GameError('update_required', `Client ${cfg.minClientVersion} or newer is required`, 426);
+      throw new GameError('outdated', `Please update: client ${cfg.minClientVersion} or newer is required`, 409);
     const hero = heroes.pick(acct.id, b.hero_id === undefined ? undefined : Number(b.hero_id));
     if (director.online >= director.capacity) throw new GameError('region_full', 'The server is full', 503);
     return {
@@ -95,7 +100,11 @@ export function createHttpHandler(app: App) {
     try {
       if (!h) throw new GameError('not_found', 'Not found', 404);
       const body = req.method === 'POST' ? await readJson(req) : {};
-      send(res, 200, await h(req, body, url));
+      const out = await h(req, body, url);
+      if (out === NO_CONTENT) {
+        res.writeHead(204);
+        res.end();
+      } else send(res, 200, out);
     } catch (err) {
       if (err instanceof GameError) send(res, err.status, { error: err.code, message: err.message });
       else {
