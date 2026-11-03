@@ -1,0 +1,302 @@
+#include "chat_model.h"
+#include <algorithm>
+#include <cctype>
+
+namespace fo::ui {
+
+std::u32string utf8_to_u32(const std::string& s) {
+    std::u32string o;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char c = s[i];
+        char32_t cp;
+        int extra;
+        if (c < 0x80) { cp = c; extra = 0; }
+        else if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; extra = 1; }
+        else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
+        else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
+        else { o += U'?'; ++i; continue; }
+        bool bad = false;
+        for (int k = 1; k <= extra; ++k) {
+            if (i + k >= s.size() || (static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) { bad = true; break; }
+            cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3F);
+        }
+        if (bad) { o += U'?'; ++i; continue; }
+        o += cp;
+        i += extra + 1;
+    }
+    return o;
+}
+
+std::string u32_to_utf8(const std::u32string& s) {
+    std::string o;
+    for (char32_t cp : s) {
+        if (cp < 0x80) o += char(cp);
+        else if (cp < 0x800) { o += char(0xC0 | (cp >> 6)); o += char(0x80 | (cp & 0x3F)); }
+        else if (cp < 0x10000) { o += char(0xE0 | (cp >> 12)); o += char(0x80 | ((cp >> 6) & 0x3F)); o += char(0x80 | (cp & 0x3F)); }
+        else { o += char(0xF0 | (cp >> 18)); o += char(0x80 | ((cp >> 12) & 0x3F)); o += char(0x80 | ((cp >> 6) & 0x3F)); o += char(0x80 | (cp & 0x3F)); }
+    }
+    return o;
+}
+
+namespace {
+std::string lower(std::string s) {
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// Splits off the first word, or a "quoted name" (hero names can have spaces).
+std::string take_word(std::string& rest) {
+    size_t i = rest.find_first_not_of(' ');
+    if (i == std::string::npos) { rest.clear(); return ""; }
+    std::string w;
+    if (rest[i] == '"') {
+        size_t end = rest.find('"', i + 1);
+        if (end == std::string::npos) { w = rest.substr(i + 1); rest.clear(); return w; }
+        w = rest.substr(i + 1, end - i - 1);
+        rest = rest.substr(end + 1);
+    } else {
+        size_t end = rest.find(' ', i);
+        w = rest.substr(i, end == std::string::npos ? std::string::npos : end - i);
+        rest = end == std::string::npos ? "" : rest.substr(end + 1);
+    }
+    return w;
+}
+
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(' '), b = s.find_last_not_of(' ');
+    return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+}
+
+uint32_t channel_color(const std::string& ch) {
+    if (ch == "shout") return ChatModel::kColorShout;
+    if (ch == "world") return ChatModel::kColorWorld;
+    if (ch == "trade") return ChatModel::kColorTrade;
+    if (ch == "party") return ChatModel::kColorParty;
+    if (ch == "guild") return ChatModel::kColorGuild;
+    if (ch == "whisper") return ChatModel::kColorWhisper;
+    if (ch == "system") return ChatModel::kColorSystem;
+    return ChatModel::kColorSay;
+}
+
+const char* kHelp[] = {
+    "Enter: chat.  Esc: close.  Up/Down: history.  PgUp/PgDn: scroll.",
+    "/s say (nearby)  /y shout (this region)  /1 world  /2 trade  /p party  /g guild",
+    "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
+    "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
+};
+}  // namespace
+
+void ChatModel::open(char32_t first) {
+    open_ = true;
+    input_.clear();
+    cursor_ = 0;
+    scroll_ = 0;
+    history_pos_ = history_.size();
+    if (first) { input_ += first; cursor_ = 1; }
+}
+
+void ChatModel::close() {
+    open_ = false;
+    input_.clear();
+    cursor_ = 0;
+    scroll_ = 0;
+}
+
+bool ChatModel::key(Key k, double now) {
+    if (!open_) {
+        if (k == Key::Enter) { open(); return true; }
+        return false;
+    }
+    switch (k) {
+    case Key::Enter: submit(now); close(); break;
+    case Key::Escape: close(); break;
+    case Key::Backspace: if (cursor_ > 0) input_.erase(--cursor_, 1); break;
+    case Key::Delete: if (cursor_ < input_.size()) input_.erase(cursor_, 1); break;
+    case Key::Left: if (cursor_ > 0) --cursor_; break;
+    case Key::Right: if (cursor_ < input_.size()) ++cursor_; break;
+    case Key::Home: cursor_ = 0; break;
+    case Key::End: cursor_ = input_.size(); break;
+    case Key::Up:
+        if (history_pos_ > 0) { input_ = history_[--history_pos_]; cursor_ = input_.size(); }
+        break;
+    case Key::Down:
+        if (history_pos_ < history_.size()) {
+            ++history_pos_;
+            input_ = history_pos_ < history_.size() ? history_[history_pos_] : U"";
+            cursor_ = input_.size();
+        }
+        break;
+    case Key::PageUp: scroll_ = std::min(scroll_ + 5, log_.size() > 1 ? log_.size() - 1 : 0); break;
+    case Key::PageDown: scroll_ = scroll_ > 5 ? scroll_ - 5 : 0; break;
+    case Key::Tab:
+        // Tab after "/w " fills in whoever last whispered you.
+        if (!reply_to_.empty()) { input_ = U"/w \"" + utf8_to_u32(reply_to_) + U"\" "; cursor_ = input_.size(); }
+        break;
+    }
+    return true;  // everything is ours while the box is open
+}
+
+bool ChatModel::character(char32_t c, double) {
+    if (!open_) return false;
+    if (c < 0x20 || c == 0x7F || (c >= 0xD800 && c < 0xE000)) return true;
+    if (input_.size() >= kMaxInput) return true;
+    input_.insert(cursor_++, 1, c);
+    return true;
+}
+
+void ChatModel::send_say(const std::string& ch, const std::string& text) {
+    outbox_.push_back("{\"t\":\"say\",\"ch\":" + json::quote(ch) + ",\"text\":" + json::quote(text) + "}");
+}
+
+void ChatModel::send_whisper(const std::string& to, const std::string& text) {
+    outbox_.push_back("{\"t\":\"whisper\",\"to\":" + json::quote(to) + ",\"text\":" + json::quote(text) + "}");
+}
+
+void ChatModel::submit(double now) {
+    std::string line = trim(u32_to_utf8(input_));
+    if (line.empty()) return;
+    if (history_.empty() || history_.back() != input_) history_.push_back(input_);
+    if (history_.size() > 50) history_.erase(history_.begin());
+
+    if (line[0] != '/') {
+        if (channel_ == "whisper") send_whisper(whisper_to_, line);
+        else send_say(channel_, line);
+        return;
+    }
+    std::string rest = line.substr(1);
+    std::string cmd = lower(take_word(rest));
+    rest = trim(rest);
+    struct Alias { const char* name; const char* ch; };
+    static const Alias talk[] = {
+        {"s", "say"}, {"say", "say"}, {"y", "shout"}, {"sh", "shout"}, {"shout", "shout"},
+        {"1", "world"}, {"world", "world"}, {"2", "trade"}, {"trade", "trade"},
+        {"p", "party"}, {"party", "party"}, {"g", "guild"}, {"guild", "guild"},
+    };
+    for (const auto& a : talk) {
+        if (cmd != a.name) continue;
+        channel_ = a.ch;  // typing "/1" alone switches the box to world chat
+        whisper_to_.clear();
+        if (!rest.empty()) send_say(channel_, rest);
+        return;
+    }
+    if (cmd == "w" || cmd == "whisper" || cmd == "t" || cmd == "tell" || cmd == "r" || cmd == "reply") {
+        std::string to = (cmd == "r" || cmd == "reply") ? reply_to_ : take_word(rest);
+        rest = trim(rest);
+        if (to.empty()) { system(cmd[0] == 'r' ? "Nobody to reply to yet." : "Usage: /w Name message", now, kColorError); return; }
+        channel_ = "whisper";
+        whisper_to_ = to;
+        if (!rest.empty()) send_whisper(to, rest);
+        return;
+    }
+    if (cmd == "ignore" || cmd == "unignore") {
+        std::string who = take_word(rest);
+        if (who.empty()) { system("Usage: /" + cmd + " Name", now, kColorError); return; }
+        outbox_.push_back("{\"t\":\"ignore\",\"name\":" + json::quote(who) + ",\"on\":" + (cmd == "ignore" ? "true" : "false") + "}");
+        return;
+    }
+    if (cmd == "report") {
+        std::string who = take_word(rest);
+        if (who.empty()) { system("Usage: /report Name reason", now, kColorError); return; }
+        outbox_.push_back("{\"t\":\"report\",\"name\":" + json::quote(who) + ",\"reason\":" + json::quote(trim(rest)) + "}");
+        return;
+    }
+    if (cmd == "mute" || cmd == "unmute" || cmd == "kick" || cmd == "ban") {
+        std::string who = take_word(rest);
+        if (who.empty()) { system("Usage: /" + cmd + " Name [minutes] [reason]", now, kColorError); return; }
+        std::string msg = "{\"t\":\"mod\",\"action\":" + json::quote(cmd) + ",\"name\":" + json::quote(who);
+        std::string r = trim(rest);
+        size_t sp = r.find(' ');
+        std::string first = r.substr(0, sp);
+        if (!first.empty() && std::all_of(first.begin(), first.end(), [](char c) { return c >= '0' && c <= '9'; })) {
+            msg += ",\"minutes\":" + first.substr(0, 6);
+            r = sp == std::string::npos ? "" : trim(r.substr(sp + 1));
+        }
+        if (!r.empty()) msg += ",\"reason\":" + json::quote(r);
+        outbox_.push_back(msg + "}");
+        return;
+    }
+    if (cmd == "tags") {
+        tags_enabled_ = !tags_enabled_;
+        system(tags_enabled_ ? "Name tags on." : "Name tags off.", now);
+        return;
+    }
+    if (cmd == "clear") { log_.clear(); scroll_ = 0; return; }
+    if (cmd == "help" || cmd == "?") { for (const char* h : kHelp) system(h, now); return; }
+    system("Unknown command /" + cmd + ". Type /help.", now, kColorError);
+}
+
+void ChatModel::push(std::string text, uint32_t color, double now) {
+    log_.push_back({std::move(text), color, now});
+    while (log_.size() > kMaxLog) log_.pop_front();
+    if (scroll_ > 0 && scroll_ + 1 < log_.size()) ++scroll_;  // keep the view still while reading back
+}
+
+void ChatModel::system(const std::string& text, double now, uint32_t color) { push(text, color, now); }
+
+void ChatModel::on_connection(bool up, const std::string& why, double now) {
+    if (up) system("Connected to chat.", now);
+    else system("Chat disconnected" + (why.empty() ? std::string(".") : ": " + why) + " Reconnecting...", now, kColorError);
+}
+
+void ChatModel::on_server(const json::Value& m, double now) {
+    std::string t = m.str("t");
+    if (t == "welcome") {
+        me_ = m.str("name");
+        std::string motd = m.str("motd");
+        if (!motd.empty()) system(motd, now);
+    } else if (t == "msg") {
+        std::string ch = m.str("ch"), from = m.str("from"), text = m.str("text");
+        std::string line;
+        if (ch == "whisper") {
+            if (from == me_) line = "To " + m.str("to") + ": " + text;
+            else { line = from + " whispers: " + text; reply_to_ = from; }
+        } else if (ch == "shout") {
+            line = from + " shouts: " + text;
+        } else if (ch == "say") {
+            line = from + ": " + text;
+        } else {
+            std::string label = ch;
+            if (!label.empty()) label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+            line = "[" + label + "] " + from + ": " + text;
+        }
+        push(line, channel_color(ch), now);
+    } else if (t == "sys") {
+        system(m.str("text"), now, m.str("level") == "warn" ? kColorError : kColorSystem);
+    } else if (t == "err") {
+        system(m.str("text"), now, kColorError);
+    }
+}
+
+std::vector<std::string> ChatModel::take_outbox() {
+    std::vector<std::string> o;
+    o.swap(outbox_);
+    return o;
+}
+
+std::vector<VisibleLine> ChatModel::visible(size_t rows, double now) const {
+    std::vector<VisibleLine> out;
+    if (log_.empty() || rows == 0) return out;
+    size_t end = log_.size() - std::min(scroll_, log_.size() - 1);
+    size_t begin = end > rows ? end - rows : 0;
+    for (size_t i = begin; i < end; ++i) {
+        float a = 1.0f;
+        if (!open_) {
+            double age = now - log_[i].at;
+            if (age > kFadeAfter + kFadeTime) continue;
+            if (age > kFadeAfter) a = static_cast<float>(1.0 - (age - kFadeAfter) / kFadeTime);
+        }
+        out.push_back({&log_[i], a});
+    }
+    return out;
+}
+
+std::string ChatModel::input_utf8() const { return u32_to_utf8(input_); }
+
+std::string ChatModel::channel_label() const {
+    if (channel_ == "whisper") return "To " + whisper_to_;
+    std::string l = channel_;
+    if (!l.empty()) l[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(l[0])));
+    return l;
+}
+
+}  // namespace fo::ui
