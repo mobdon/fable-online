@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  # Every server process (gateway, region orchestrators) exposes /metrics on 9464.
+  # Add one target per process. For local testing, `npm run demo` in server/analytics
+  # serves fake data on the host's port 9464.
+  - job_name: fable-server
+    static_configs:
+      - targets: ["host.docker.internal:9464"]
+        labels: { env: dev }
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

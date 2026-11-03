@@ -28,3 +28,6 @@ server/data/
 # Game files copied for local tests (never commit)
 private-test/
 moderation.json
+# Analytics event logs
+events/
+ops/monitoring/.env
