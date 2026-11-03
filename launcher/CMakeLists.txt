@@ -1,0 +1,5 @@
+add_executable(fable_online_launcher src/main.cpp)
+target_compile_definitions(fable_online_launcher PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+if(MINGW)
+  target_link_options(fable_online_launcher PRIVATE -municode)
+endif()
