@@ -53,15 +53,16 @@ public:
     bool tags_enabled() const { return tags_enabled_; }
     const std::string& me() const { return me_; }
 
-    static constexpr uint32_t kColorSay = 0xFFFFFFFF;
-    static constexpr uint32_t kColorShout = 0xFFFF9A3C;
-    static constexpr uint32_t kColorWorld = 0xFFFFE08A;
-    static constexpr uint32_t kColorTrade = 0xFFE0B97A;
-    static constexpr uint32_t kColorParty = 0xFF8AB8FF;
-    static constexpr uint32_t kColorGuild = 0xFF6FE38A;
-    static constexpr uint32_t kColorWhisper = 0xFFF08CF0;
-    static constexpr uint32_t kColorSystem = 0xFFFFE65C;
-    static constexpr uint32_t kColorError = 0xFFFF6B6B;
+    // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
+    static constexpr uint32_t kColorSay = 0xFFE9E4D6;
+    static constexpr uint32_t kColorShout = 0xFFE8B46A;
+    static constexpr uint32_t kColorWorld = 0xFFF4E3A8;
+    static constexpr uint32_t kColorTrade = 0xFFD2A878;
+    static constexpr uint32_t kColorParty = 0xFF9AA3F4;
+    static constexpr uint32_t kColorGuild = 0xFFA8CF8E;
+    static constexpr uint32_t kColorWhisper = 0xFFD9A6E0;
+    static constexpr uint32_t kColorSystem = 0xFFFFF6DC;
+    static constexpr uint32_t kColorError = 0xFFE0705C;
 
 private:
     void submit(double now);

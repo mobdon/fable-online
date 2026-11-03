@@ -145,4 +145,13 @@ bool Bank::load(const std::string& name, Texture& out) {
     return true;
 }
 
+bool Bank::load_raw(const std::string& name, std::vector<uint8_t>& out) {
+    auto it = index_.find(name);
+    if (it == index_.end() || !f_) { error_ = "no entry " + name; return false; }
+    if (it->second.size > (64u << 20)) { error_ = name + ": bad size"; return false; }
+    out.resize(it->second.size);
+    if (!read_at(it->second.offset, out.data(), out.size())) { error_ = name + ": read failed"; return false; }
+    return true;
+}
+
 }  // namespace fo::art

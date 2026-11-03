@@ -30,6 +30,8 @@ public:
     bool has(const std::string& name) const { return index_.count(name) != 0; }
     // Reads and inflates one texture's top mip. False if unknown or corrupt.
     bool load(const std::string& name, Texture& out);
+    // Reads an entry's bytes as stored (for non-texture banks such as fonts.big).
+    bool load_raw(const std::string& name, std::vector<uint8_t>& out);
     std::vector<std::string> names() const;
     const std::string& error() const { return error_; }
 

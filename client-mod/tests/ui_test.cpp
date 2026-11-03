@@ -146,8 +146,8 @@ static void test_tags() {
     CHECK(l.size() == 1);
     CHECK(std::fabs(l[0].x - 400) < 0.01f && std::fabs(l[0].y - 300) < 0.01f);
     EQ(l[0].name_line, "Maze <GLD>");
-    EQ(l[0].info_line, "Hero \xC2\xB7 12,500 renown");
-    CHECK((l[0].name_color & 0xFFFFFF) == 0xFF5A4A);   // PvP flagged: red name
+    EQ(l[0].info_line, "Hero - 12,500 renown");
+    CHECK((l[0].name_color & 0xFFFFFF) == 0xE0503C);   // PvP flagged: red name
     CHECK(l[0].info_color == ui::renown_color(12500));
 
     s.apply(parse(R"({"t":"tags","region":7,"add":[],"upd":[],"move":[{"id":2,"x":0,"y":-10,"z":0}],"del":[]})"));

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include "../assets/fable_ui.h"
 #include "../config.h"
 #include "../log.h"
 #include "../menu/menu.h"
@@ -67,6 +68,9 @@ game::HeroPos g_hero;
 std::atomic<bool> g_chat_open{false};
 std::atomic<DWORD> g_block_until{0};   // swallow keys briefly after the box closes
 
+// Fable's fonts and frame art, read once by the mod thread; the render thread waits for it.
+std::atomic<const assets::UiArt*> g_art{nullptr};
+
 // Render-thread-only state.
 Renderer g_r;
 D3DMATRIX g_view = {}, g_proj = {}, g_pending_view = {};
@@ -121,53 +125,65 @@ void draw_tags(const Config& cfg) {
     s.up_axis = cfg.up_axis;
     s.full_until = cfg.tag_full;
     s.hidden_from = cfg.tag_hidden;
-    s.line_height = g_r.line_height();
+    const float name_h = g_r.line_height(Face::Title), info_h = g_r.line_height(Face::Small);
+    s.line_height = (name_h + info_h) / 2;
+    // Name in Fable's caption face (Arial 21), title and renown underneath in its small Tahoma,
+    // both outlined in black like the game's own floating text.
     for (const auto& l : g_tags.layout(vp, g_r.screen_w(), g_r.screen_h(), s)) {
-        float lh = g_r.line_height();
-        g_r.text(l.x - g_r.measure(l.name_line) / 2, l.y - lh * 1.6f, l.name_line, l.name_color);
-        g_r.text(l.x - g_r.measure(l.info_line) / 2, l.y - lh * 0.6f, l.info_line, l.info_color);
+        float top = l.y - name_h - info_h;
+        g_r.text(l.x - g_r.measure(l.name_line, Face::Title) / 2, top, l.name_line, l.name_color, Face::Title, true);
+        g_r.text(l.x - g_r.measure(l.info_line, Face::Small) / 2, top + name_h, l.info_line, l.info_color, Face::Small, true);
     }
 }
 
 void draw_chat(const Config& cfg, double now) {
-    const float lh = g_r.line_height();
-    const float x = 14, w = g_r.screen_w() * 0.42f > 620 ? 620 : g_r.screen_w() * 0.42f;
+    const float lh = g_r.line_height(Face::Chat);
+    const float pad = 14;
+    const float w = g_r.screen_w() * 0.42f > 620 ? 620 : g_r.screen_w() * 0.42f;
     const int rows = cfg.chat_rows;
-    const float input_y = g_r.screen_h() - 48 - lh;
-    const float bottom = input_y - 4;
+    const float box_x = 16, box_bottom = g_r.screen_h() - 40;
+    const float input_h = lh + 10;
+    const float box_h = lh * rows + input_h + pad * 2 + 4;
+    const float box_y = box_bottom - box_h;
+    const float x = box_x + pad;
+    const float input_y = box_bottom - pad - lh - 2;
+    const float log_bottom = input_y - 10;
 
     std::vector<std::pair<std::string, uint32_t>> phys;
     for (const auto& v : g_chat.visible(static_cast<size_t>(rows), now)) {
         uint32_t a = static_cast<uint32_t>(v.alpha * ((v.line->color >> 24) & 0xFF));
         uint32_t c = (a << 24) | (v.line->color & 0x00FFFFFF);
-        for (auto& part : g_r.wrap(v.line->text, w - 12)) phys.emplace_back(std::move(part), c);
+        for (auto& part : g_r.wrap(v.line->text, w - pad * 2)) phys.emplace_back(std::move(part), c);
     }
     size_t first = phys.size() > static_cast<size_t>(rows) ? phys.size() - rows : 0;
     if (g_chat.is_open()) {
-        g_r.rect(x - 6, bottom - lh * rows - 4, w, lh * rows + 8, 0x70000000);
-        g_r.rect(x - 6, input_y - 2, w, lh + 4, 0xB0000000);
-        std::string label = "[" + g_chat.channel_label() + "] ";
-        float lx = x + g_r.text(x, input_y, label, net::chat_connected() ? 0xFFFFE08A : 0xFF9A9A9A);
+        g_r.panel(box_x, box_y, w, box_h, 1.0f);
+        g_r.rule(box_x + 10, input_y - 9, w - 20, 0.9f);
+        std::string label = g_chat.channel_label() + ": ";
+        float lx = x + g_r.text(x, input_y, label, net::chat_connected() ? 0xFFC9C0A8 : 0xFF7E786C);
         // Long input scrolls sideways so the cursor stays in the box.
         std::u32string u = ui::utf8_to_u32(g_chat.input_utf8());
-        const float room = x + w - 16 - lx;
+        const float room = box_x + w - pad - 4 - lx;
         size_t from = 0;
         while (from < g_chat.cursor() && g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from))) > room) ++from;
         size_t to = from;
         while (to < u.size() && g_r.measure(ui::u32_to_utf8(u.substr(from, to + 1 - from))) <= room) ++to;
-        g_r.text(lx, input_y, ui::u32_to_utf8(u.substr(from, to - from)), 0xFFFFFFFF);
+        g_r.text(lx, input_y, ui::u32_to_utf8(u.substr(from, to - from)), 0xFFFFF6DC);
         if (static_cast<int>(now * 2) % 2 == 0) {
             float cx = lx + g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from)));
-            g_r.rect(cx, input_y + 1, 2, lh - 3, 0xE0FFFFFF);
+            g_r.rect(cx, input_y + 1, 1, lh - 2, 0xE0FFF6DC);
         }
-        if (!net::chat_connected()) g_r.text(x, bottom - lh * rows - lh - 2, "Chat is offline, reconnecting...", 0xFFFF6B6B);
+        if (!net::chat_connected())
+            g_r.text(box_x + 4, box_y - lh - 4, "The chat server can't be reached. Trying again...", ui::ChatModel::kColorError);
     }
-    float y = bottom - lh * static_cast<float>(phys.size() - first);
+    float y = log_bottom - lh * static_cast<float>(phys.size() - first);
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(x, y, phys[i].first, phys[i].second);
 }
 
 void draw(IDirect3DDevice9* dev) {
     const Config& cfg = config();
+    const assets::UiArt* art = g_art.load();
+    if (!art) return;  // still reading the game's fonts (a fraction of a second at start-up)
     std::lock_guard<std::mutex> lock(g_mu);
     double now = now_s();
     float dt = g_last_frame > 0 ? static_cast<float>(now - g_last_frame) : 0.0f;
@@ -178,7 +194,7 @@ void draw(IDirect3DDevice9* dev) {
     g_tags.step(dt > 0.25f ? 0.25f : dt);
     if (g_hero.valid)
         g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, g_hero.x, g_hero.y, g_hero.z);
-    if (!g_r.begin(dev, cfg.font_px)) return;
+    if (!g_r.begin(dev, art, cfg.font_px)) return;
     draw_tags(cfg);
     if (cfg.chat_enabled) draw_chat(cfg, now);
     g_r.end();
@@ -458,6 +474,15 @@ void install_early() {
 }
 
 void install_late() {
+    {
+        wchar_t exe[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring dir(exe);
+        dir = dir.substr(0, dir.find_last_of(L"\\/"));
+        auto* art = new assets::UiArt(assets::load_ui(dir));  // lives for the whole process
+        fo::log("overlay: game art: %s", art->report.c_str());
+        g_art = art;
+    }
     fo::log("overlay: import hooks: Direct3DCreate9 %s, DirectInput8Create %s",
             g_iat_d3d ? "yes" : "NOT IMPORTED", g_iat_di ? "yes" : "NOT IMPORTED");
     for (int i = 0; i < 300 && !g_device_hooked; ++i) Sleep(100);  // wait up to 30 s for the game's device
