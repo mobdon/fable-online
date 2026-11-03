@@ -22,6 +22,7 @@
 #include "overlay/overlay.h"
 #include "probe.h"
 #include "ui/json.h"
+#include "sync.h"
 
 namespace {
 std::atomic<bool> g_running{false};
@@ -96,6 +97,9 @@ DWORD WINAPI main_thread(LPVOID) {
 
     std::thread online;
     if (g_online) online = std::thread(online_thread);
+    // Entity sync: other players and the server's creatures. Off while probing, which
+    // walks the whole address space and must not have puppets appearing underneath it.
+    if (!probing) fo::sync::start();
 
     unsigned beat = 0;
     while (g_running.load()) {
@@ -109,6 +113,7 @@ DWORD WINAPI main_thread(LPVOID) {
         }
     }
     if (online.joinable()) online.join();
+    fo::sync::stop();
     fo::log("mod shutting down");
     fo::log_close();
     return 0;

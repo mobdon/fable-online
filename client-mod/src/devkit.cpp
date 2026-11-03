@@ -6,6 +6,8 @@
 #include "devkit.h"
 
 #include <windows.h>
+
+#include "game/hook.h"
 #include "log.h"
 
 namespace {
@@ -84,39 +86,17 @@ void give_test_kit() {
     fo::log("devkit: test kit done");
 }
 
-WNDPROC g_prev = nullptr;
-
-LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
-    if (msg == WM_KEYDOWN && !(lp & (1 << 30))) {  // first press only, not auto-repeat
-        if (wp == VK_F9) give_test_kit();
-        else if (wp == VK_F10 && iface()) log_health(iface());
-    }
-    return CallWindowProcW(g_prev, w, msg, wp, lp);
-}
-
-BOOL CALLBACK find_window(HWND w, LPARAM out) {
-    DWORD pid = 0;
-    GetWindowThreadProcessId(w, &pid);
-    if (pid == GetCurrentProcessId() && IsWindowVisible(w) && !GetWindow(w, GW_OWNER)) {
-        *reinterpret_cast<HWND*>(out) = w;
-        return FALSE;
-    }
-    return TRUE;
-}
-
 }  // namespace
 
 namespace fo::devkit {
 
 void install() {
-    HWND w = nullptr;
-    for (int i = 0; i < 120 && !w; ++i) {  // the window appears a few seconds after launch
-        EnumWindows(find_window, reinterpret_cast<LPARAM>(&w));
-        if (!w) Sleep(1000);
-    }
-    if (!w) { fo::log("devkit: game window not found, hotkeys off"); return; }
-    g_prev = reinterpret_cast<WNDPROC>(
-        SetWindowLongPtrW(w, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(wndproc)));
+    // The hotkeys run on the game thread, which is where engine calls are safe.
+    if (!fo::game::hook::install()) return;
+    fo::game::hook::on_key([](int vk) {
+        if (vk == VK_F9) give_test_kit();
+        else if (vk == VK_F10 && iface()) log_health(iface());
+    });
     fo::log("devkit: on. F9 = test gear, gold and full health. F10 = log health.");
 }
 

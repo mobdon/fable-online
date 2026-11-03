@@ -15,6 +15,9 @@ message InputFrame   { uint32 seq = 1; float move_x = 2; float move_y = 3; uint3
 // bits 8-11 spell slot 1-7 (fireball, lightning, drain_life, force_push, enflame, heal_life, physical_shield).
 // The server picks the target in front of the hero; a client never names a target or a damage number.
 message Chat         { string text = 1; } // max 200 chars, 1/s burst 5
+// Dev only: where the local game put this player's hero. The server ignores it unless it
+// is started with FO_TRUST_CLIENT_POS, since a client-chosen position is a cheat.
+message HeroPos      { float x = 1; float y = 2; float z = 3; float yaw = 4; uint32 area = 5; }
 message Ping         { uint32 n = 1; }
 // The player's own Fable finished a quest. quest = OBJECT_QUEST_CARD_* or a quest script name.
 // The server pays only what that quest can pay, once (see server/src/economy/quests.ts). 1 per 5 s, burst 3.
@@ -23,7 +26,14 @@ message QuestComplete { string quest = 1; uint32 gold = 2; uint32 renown = 3; re
 // ---- server -> client --------------------------------------------------
 message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6; }
 message EnterRegion  { uint32 region_uid = 1; float x = 2; float y = 3; float z = 4; string region = 5; string channel = 6; }
-message EntityState  { uint32 id = 1; uint32 def_id = 2; float x = 3; float y = 4; float z = 5; float yaw = 6; uint32 anim = 7; float health = 8; }
+// One entity in a region. `kind` is "hero" or "creature"; a creature carries the Fable def
+// name the mod spawns a stand-in from, a hero carries the name and renown for its tag.
+// Entities an entity-sync client stops being sent are gone: there is no removal list.
+message EntityState  {
+  uint32 id = 1; uint32 def_id = 2; float x = 3; float y = 4; float z = 5; float yaw = 6;
+  uint32 anim = 7; float health = 8; string kind = 9; string def = 10; string name = 11; uint32 renown = 12;
+}
+// Only the entities within the server's interest radius of the receiving player.
 message WorldTick    { uint32 tick = 1; uint32 last_input_seq = 2; repeated EntityState entities = 3; uint32 removed = 4; }
 message ChatOut      { uint32 from = 1; string text = 2; string name = 3; }
 message Pong         { uint32 n = 1; }

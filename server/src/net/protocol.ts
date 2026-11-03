@@ -14,7 +14,13 @@ export type ClientMessage =
   | { t: 'chat'; text: string }
   | { t: 'ping'; n: number }
   /** The client's Fable finished a quest. The server checks the reward before paying anything. */
-  | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] };
+  | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] }
+  /**
+   * Dev only. The mod reporting where the local game put its hero, used until Fable's
+   * own input is mapped. The server throws it away unless trustClientPositions is on,
+   * because a position from a client is a position a cheat can choose.
+   */
+  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number };
 
 export class ProtocolError extends Error {}
 
@@ -57,6 +63,19 @@ export function decode(raw: string): ClientMessage {
       // eslint-disable-next-line no-control-regex
       const text = m.text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, CHAT_MAX);
       return { t: 'chat', text };
+    }
+    case 'hero_pos': {
+      if (!isNum(m.x) || !isNum(m.y) || !isNum(m.z)) throw new ProtocolError('bad hero_pos');
+      const big = (v: number) => Math.abs(v) > 1e6;
+      if (big(m.x) || big(m.y) || big(m.z)) throw new ProtocolError('hero_pos out of range');
+      return {
+        t: 'hero_pos',
+        x: m.x,
+        y: m.y,
+        z: m.z,
+        yaw: isNum(m.yaw) ? wrapAngle(m.yaw) : undefined,
+        area: isNum(m.area) ? m.area >>> 0 : 0,
+      };
     }
     case 'ping':
       return { t: 'ping', n: isNum(m.n) ? m.n : 0 };

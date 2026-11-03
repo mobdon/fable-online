@@ -7,6 +7,11 @@ const num = (name: string, fallback: number): number => {
   return n;
 };
 const str = (name: string, fallback: string): string => process.env[name] || fallback;
+const flag = (name: string, fallback: boolean): boolean => {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  return v !== '0' && v.toLowerCase() !== 'false' && v.toLowerCase() !== 'off';
+};
 
 export interface ServerConfig {
   /** HTTP + WebSocket port. */
@@ -51,6 +56,17 @@ export interface ServerConfig {
   channelIdleMs: number;
   /** Write live hero positions back to the database this often. */
   persistEveryMs: number;
+  /**
+   * Metres around a player whose entities are sent to them. 0 sends the whole channel.
+   * Keeps a busy region's frames small, since the mod can only show what is near enough.
+   */
+  interestRadius: number;
+  /**
+   * Dev only: accept the mod's own hero position instead of deriving it from inputs.
+   * Needed until Fable's input is mapped. With this on, a client can put its hero
+   * anywhere in the region, so it must never be on for a server players can reach.
+   */
+  trustClientPositions: boolean;
 
   /** Max heroes per account. */
   maxHeroesPerAccount: number;
@@ -93,6 +109,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     maxPrivateInstances: num('FO_MAX_PRIVATE', 400),
     channelIdleMs: num('FO_CHANNEL_IDLE_MS', 120_000),
     persistEveryMs: num('FO_PERSIST_MS', 30_000),
+    interestRadius: num('FO_INTEREST_RADIUS', 80),
+    trustClientPositions: flag('FO_TRUST_CLIENT_POS', false),
     maxHeroesPerAccount: num('FO_MAX_HEROES', 3),
     sessionTtlMs: num('FO_SESSION_TTL_MS', 7 * 24 * 3600_000),
     gameDataPath: str('FO_GAME_DATA', 'data/game-data.json'),

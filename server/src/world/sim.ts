@@ -18,6 +18,8 @@ export interface PlayerInput {
 export interface EntityState {
   id: number;
   def_id: number;
+  /** Creatures only: the Fable def name the mod spawns a stand-in from. */
+  def?: string;
   x: number;
   y: number;
   z: number;
@@ -26,6 +28,14 @@ export interface EntityState {
   health: number;
   /** Creatures only: Fable def name, so the client knows which local creature to drive. */
   def?: string;
+}
+
+/** An entity as it goes out on the wire: the sim's state plus who it belongs to. */
+export interface WireEntity extends EntityState {
+  kind: 'hero' | 'creature';
+  /** Heroes only: for the name tag above the stand-in. */
+  name?: string;
+  renown?: number;
 }
 
 /**
@@ -39,6 +49,11 @@ export interface RegionSim {
   addHero(heroId: number, at: Vec3): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
+  /**
+   * Dev only: put a hero where the client says it is. The mod needs this until Fable's
+   * own input is mapped, and the server only calls it when trustClientPositions is on.
+   */
+  placeHero?(heroId: number, at: Vec3, yaw?: number): void;
   step(dtMs: number): void;
   snapshot(): EntityState[];
   position(heroId: number): Vec3 | undefined;
@@ -66,6 +81,14 @@ export class StubSim implements RegionSim {
     if (!h) return;
     h.yaw = input.cameraYaw;
     h.move = [input.moveX, input.moveY];
+  }
+  placeHero(heroId: number, at: Vec3, yaw?: number): void {
+    const h = this.heroes.get(heroId);
+    if (!h) return;
+    const b = StubSim.BOUNDS;
+    h.pos = { x: Math.max(-b, Math.min(b, at.x)), y: Math.max(-b, Math.min(b, at.y)), z: at.z };
+    if (yaw !== undefined) h.yaw = yaw;
+    h.move = [0, 0];
   }
   step(dtMs: number): void {
     const d = (StubSim.RUN_SPEED * dtMs) / 1000;
