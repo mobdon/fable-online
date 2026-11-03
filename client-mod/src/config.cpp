@@ -71,10 +71,15 @@ void config_load(HMODULE self) {
     c.chat_rows = static_cast<int>(ini_float(f, L"overlay", L"chat_rows", static_cast<float>(c.chat_rows)));
     if (c.font_px < 10 || c.font_px > 32) c.font_px = 15;
     if (c.chat_rows < 3 || c.chat_rows > 30) c.chat_rows = 8;
+    c.widescreen = ini_bool(f, L"display", L"widescreen", c.widescreen);
+    c.fov_scale = ini_float(f, L"display", L"fov_scale", c.fov_scale);
+    if (!(c.fov_scale >= 0.7f && c.fov_scale <= 1.6f)) c.fov_scale = 1.0f;
+    c.frame_probe = ini_bool(f, L"display", L"frame_probe", c.frame_probe);
 
     set_server(c, env("FABLE_ONLINE_CHAT_SERVER"));
     if (auto n = env("FABLE_ONLINE_NAME"); !n.empty()) c.name = n;
     c.token = env("FABLE_ONLINE_TOKEN");
+    if (auto w = env("FABLE_ONLINE_WIDESCREEN"); !w.empty()) c.widescreen = w != "0";
 
     if (c.name.empty()) {  // dev fallback: the Windows user name
         wchar_t user[64] = {};

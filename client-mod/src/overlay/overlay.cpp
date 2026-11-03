@@ -8,6 +8,8 @@
 #include <string>
 #include "../assets/fable_ui.h"
 #include "../config.h"
+#include "../display/frame_probe.h"
+#include "../display/widescreen.h"
 #include "../log.h"
 #include "../menu/menu.h"
 #include "../net/chat_client.h"
@@ -317,6 +319,7 @@ HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
         return o_EndScene(dev);
     }
     if (config().overlay_enabled && !g_drawn) {
+        display::probe::note("EndScene (overlay draws after this if the target is the back buffer)");
         // Draw once a frame, into the scene that ends up on screen. If the game never
         // ends a scene on the back buffer (some post-processing paths), stop checking.
         if (g_no_backbuffer > 300 || targets_backbuffer(dev)) {
@@ -331,6 +334,7 @@ HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
 }
 
 HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, HWND w, const RGNDATA* r) {
+    if (config().frame_probe) display::probe::on_present(dev);
     g_present_seen = true;
     g_drawn = false;
     return o_Present(dev, a, b, w, r);
@@ -339,7 +343,9 @@ HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, H
 HRESULT WINAPI hk_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     g_r.on_lost();
     menu::on_device_lost();
-    return o_Reset(dev, pp);
+    HRESULT hr = o_Reset(dev, pp);
+    if (SUCCEEDED(hr) && pp) display::on_backbuffer(pp->BackBufferWidth, pp->BackBufferHeight, pp->hDeviceWindow ? pp->hDeviceWindow : g_hwnd);
+    return hr;
 }
 
 HRESULT WINAPI hk_SetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE st, const D3DMATRIX* m) {
@@ -348,6 +354,7 @@ HRESULT WINAPI hk_SetTransform(IDirect3DDevice9* dev, D3DTRANSFORMSTATETYPE st, 
     // Games set view and projection in either order, so pair a perspective projection with
     // the latest view whichever comes first.
     if (m) {
+        display::probe::on_transform(st, m);
         if (st == D3DTS_PROJECTION) {
             g_proj_is_persp = m->_34 != 0.0f && m->_44 == 0.0f;
             if (g_proj_is_persp) {
@@ -495,6 +502,7 @@ void hook_device(IDirect3DDevice9* dev, HWND w) {
     if (auto o = patch::vtable(dev, kDev_EndScene, reinterpret_cast<void*>(hk_EndScene))) o_EndScene = reinterpret_cast<EndScene_t>(o);
     if (auto o = patch::vtable(dev, kDev_SetTransform, reinterpret_cast<void*>(hk_SetTransform))) o_SetTransform = reinterpret_cast<SetTransform_t>(o);
     hook_window(w);
+    if (config().frame_probe) display::probe::hook(dev);
     g_device_hooked = o_EndScene && o_Present && o_Reset && o_SetTransform;
 }
 
@@ -502,6 +510,7 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, H
                                D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
     HRESULT hr = o_CreateDevice(d3d, adapter, type, focus, flags, pp, out);
     if (SUCCEEDED(hr) && out && *out) hook_device(*out, focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
+    if (SUCCEEDED(hr) && pp) display::on_backbuffer(pp->BackBufferWidth, pp->BackBufferHeight, pp->hDeviceWindow ? pp->hDeviceWindow : focus);
     return hr;
 }
 

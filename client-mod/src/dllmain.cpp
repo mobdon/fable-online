@@ -17,6 +17,7 @@
 #include "game/hero.h"
 #include "log.h"
 #include "net/chat_client.h"
+#include "display/widescreen.h"
 #include "menu/menu.h"
 #include "overlay/overlay.h"
 #include "probe.h"
@@ -67,7 +68,7 @@ void online_thread() {
         }
         was_connected = connected;
         ++ticks;
-        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); }  // 10 s, 30 s, then every 5 min
+        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); if (ticks < 200) fo::display::log_status(); }  // 10 s, 30 s, then every 5 min
     }
     fo::net::chat_stop();
 }
@@ -128,6 +129,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         fo::menu::set_module(module);
         g_online = read_mode() == Mode::Client;
         if (g_online) fo::overlay::install_early();
+        if (g_online) fo::display::install();   // a few code bytes and a VirtualAlloc: fine here
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);
         break;
