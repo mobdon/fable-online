@@ -9,6 +9,7 @@
 #include <cstring>
 #include "log.h"
 #include "probe.h"
+#include "scoreboard.h"
 
 namespace {
 std::atomic<bool> g_running{false};
@@ -36,6 +37,7 @@ DWORD WINAPI main_thread(LPVOID) {
     fo::log("  exe: %s", narrow);
     fo::log("  image base: 0x%08X", static_cast<unsigned>(reinterpret_cast<uintptr_t>(exe)));
     fo::log("  mode: %s", mode == Mode::Server ? "server" : "client");
+    fo::scoreboard_report();
 
     char probe[4] = {};
     bool probing = GetEnvironmentVariableA("FABLE_ONLINE_PROBE", probe, sizeof(probe)) > 0 && probe[0] == '1';
@@ -62,6 +64,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(module);
+        // Byte patches only (no locks, no allocation), so safe here and done before the game
+        // thread is resumed and builds its scoreboard client.
+        fo::scoreboard_patch();
         g_running = true;
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);

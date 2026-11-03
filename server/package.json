@@ -11,9 +11,11 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts"
+    "bots": "tsx --disable-warning=ExperimentalWarning scripts/bots.ts",
+    "scoreboard-setup": "tsx --disable-warning=ExperimentalWarning scripts/scoreboard-setup.ts"
   },
   "dependencies": {
+    "jpeg-js": "^0.4.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {

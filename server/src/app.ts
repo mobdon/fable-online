@@ -9,6 +9,7 @@ import { TradeSessions } from './economy/trade.js';
 import { RegionTable } from './world/regions.js';
 import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
+import { Scoreboard } from './scoreboard/scoreboard.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -21,6 +22,7 @@ export interface App {
   trades: TradeSessions;
   regions: RegionTable;
   director: Director;
+  scoreboard: Scoreboard;
   close(): void;
 }
 
@@ -36,6 +38,7 @@ export function createApp(overrides: Partial<ServerConfig> = {}, opts: { events?
   const director = new Director(cfg, regions, opts.sim ?? stubSimFactory, events, (id, region, p) =>
     heroes.savePosition(id, region, p.x, p.y, p.z),
   );
+  const scoreboard = new Scoreboard(db);
   return {
     cfg,
     db,
@@ -46,6 +49,7 @@ export function createApp(overrides: Partial<ServerConfig> = {}, opts: { events?
     trades,
     regions,
     director,
+    scoreboard,
     close() {
       director.stop();
       if (events instanceof JsonlSink) events.close();

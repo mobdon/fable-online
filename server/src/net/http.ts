@@ -5,6 +5,8 @@ import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 
 const BODY_LIMIT = 8 * 1024;
+const LOGO_BODY_LIMIT = 768 * 1024;
+const SCOREBOARD_BODY_LIMIT = 64 * 1024;
 const NO_CONTENT = Symbol('204');
 
 type Handler = (req: IncomingMessage, body: Record<string, unknown>, url: URL) => unknown;
@@ -14,7 +16,7 @@ type Handler = (req: IncomingMessage, body: Record<string, unknown>, url: URL) =
  * /admin/v1/* needs an admin account.
  */
 export function createHttpHandler(app: App) {
-  const { cfg, accounts, heroes, director, economy } = app;
+  const { cfg, accounts, heroes, director, economy, scoreboard } = app;
   const bearer = (req: IncomingMessage) => req.headers.authorization?.replace(/^Bearer\s+/i, '');
   const routes = new Map<string, Handler>();
   const route = (method: string, p: string, h: Handler) => routes.set(`${method} ${p}`, h);
@@ -91,15 +93,62 @@ export function createHttpHandler(app: App) {
     const acct = accounts.authenticate(bearer(req));
     if (acct.role !== 'admin') throw new GameError('forbidden', 'Admins only', 403);
   };
+  // Fable's own scoreboard login: the player types their account name and this code.
+  route('POST', '/launcher/v1/scoreboard-code', (req) => scoreboard.rotateCode(accounts.authenticate(bearer(req)).id));
+
+  const clanArg = (b: Record<string, unknown>) => {
+    const c = typeof b.clan_id === 'number' ? scoreboard.clan(b.clan_id) : scoreboard.clanByName(String(b.clan ?? ''));
+    if (!c) throw new GameError('no_clan', 'No such clan', 404);
+    return c;
+  };
+  const accountArg = (b: Record<string, unknown>) => {
+    const a = app.db.get<{ id: number }>('SELECT id FROM accounts WHERE username = ?', String(b.username ?? ''));
+    if (!a) throw new GameError('no_account', 'No such account', 404);
+    return a.id;
+  };
+  route('POST', '/admin/v1/clans', (req, b) => {
+    admin(req);
+    const c = scoreboard.createClan(String(b.name ?? ''), String(b.description ?? ''));
+    return { id: c.id, name: c.name };
+  });
+  route('POST', '/admin/v1/clans/members', (req, b) => {
+    admin(req);
+    scoreboard.addMember(clanArg(b).id, accountArg(b));
+    return NO_CONTENT;
+  });
+  route('POST', '/admin/v1/clans/members/remove', (req, b) => {
+    admin(req);
+    scoreboard.removeMember(clanArg(b).id, accountArg(b));
+    return NO_CONTENT;
+  });
+  route('POST', '/admin/v1/clans/logo', (req, b) => {
+    admin(req);
+    return scoreboard.setLogo(clanArg(b).id, Buffer.from(String(b.jpeg_base64 ?? ''), 'base64'));
+  });
+  route('GET', '/admin/v1/scoreboard/recent', (req) => (admin(req), { requests: scoreboard.recent }));
+
   route('GET', '/admin/v1/stats', (req) => (admin(req), director.stats()));
   route('GET', '/admin/v1/economy/audit', (req) => (admin(req), economy.audit()));
 
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://x');
+    // Fable.exe's scoreboard client (binary body, not JSON).
+    if (req.method === 'POST' && url.pathname === '/index.php') {
+      try {
+        const raw = await readRaw(req, SCOREBOARD_BODY_LIMIT);
+        const out = scoreboard.handle(req.headers, raw);
+        res.writeHead(out.status, { 'content-type': 'application/octet-stream', 'content-length': out.body.length, connection: 'close' });
+        res.end(out.body);
+      } catch {
+        res.writeHead(413, { connection: 'close' });
+        res.end();
+      }
+      return;
+    }
     const h = routes.get(`${req.method} ${url.pathname}`);
     try {
       if (!h) throw new GameError('not_found', 'Not found', 404);
-      const body = req.method === 'POST' ? await readJson(req) : {};
+      const body = req.method === 'POST' ? await readJson(req, url.pathname === '/admin/v1/clans/logo' ? LOGO_BODY_LIMIT : BODY_LIMIT) : {};
       const out = await h(req, body, url);
       if (out === NO_CONTENT) {
         res.writeHead(204);
@@ -125,13 +174,29 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.end(s);
 }
 
-function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => {
       size += c.length;
-      if (size > BODY_LIMIT) {
+      if (size > limit) {
+        reject(new GameError('too_large', 'Body too large', 413));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function readJson(req: IncomingMessage, limit = BODY_LIMIT): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > limit) {
         reject(new GameError('too_large', 'Body too large', 413));
         req.destroy();
       } else chunks.push(c);
