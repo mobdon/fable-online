@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -103,13 +104,22 @@ struct State {
     int blockVk = 0;
     unsigned lastButtons = 0;
     uint32_t inputSeq = 0;
+    /** Renown: last read from Fable, last sent to the server, and when it was last read. */
+    int32_t fableRenown = -1;
+    int32_t sentRenown = -1;
+    uint32_t lastRenownMs = 0;
 };
 
 State* g_state = nullptr;
+/** The server's renown for this hero (-1 until it answers), and Fable's own, for the overlay. */
+std::atomic<int> g_serverRenown{-1};
+std::atomic<int> g_fableRenown{-1};
+constexpr uint32_t kRenownEveryMs = 2000;
 
 void on_connected() {
     if (!g_state) return;
     g_state->reporter.reset();
+    g_state->sentRenown = -1;  // a new connection hears the hero's renown again
     g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
@@ -287,6 +297,16 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
     }
     case world::FrameType::Unknown:
         if (json.rfind("{\"t\":\"party", 0) == 0) return on_party_frame(json);
+        if (json.rfind("{\"t\":\"renown\"", 0) == 0) {
+            json::Value v;
+            if (json::parse(json, v) && v.boolean("ok")) {
+                g_serverRenown = static_cast<int>(v.num("renown"));
+                if (v.num("gained") > 0 || v.boolean("capped"))
+                    fo::log("sync: renown %d in Fable, server took %.0f (now %.0f%s)", s.sentRenown, v.num("gained"),
+                            v.num("renown"), v.boolean("capped") ? ", capped" : "");
+            }
+            return;
+        }
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -297,6 +317,28 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         }
         return;
     }
+}
+
+/**
+ * Renown is earned in the player's own Fable (quests run there), so read the hero's total
+ * every couple of seconds and tell the server when it changes. The server decides what to
+ * keep (one capped import, then a daily cap) and answers with the number it shows.
+ */
+void report_renown(uint32_t nowMs) {
+    State& s = *g_state;
+    if (nowMs - s.lastRenownMs < kRenownEveryMs) return;
+    s.lastRenownMs = nowMs;
+    uintptr_t hero = game::local_hero();
+    int32_t total = 0;
+    if (!hero || !game::read_renown(hero, total)) return;
+    if (total != s.fableRenown) fo::log("sync: renown in Fable is %d", total);
+    s.fableRenown = total;
+    g_fableRenown = total;
+    if (!net::world_connected() || s.objects.loading() || total == s.sentRenown) return;
+    char frame[64];
+    std::snprintf(frame, sizeof(frame), "{\"t\":\"renown_report\",\"total\":%d}", total);
+    net::world_send(frame);
+    s.sentRenown = total;
 }
 
 void report_position(uint32_t nowMs) {
@@ -658,6 +700,7 @@ void tick() {
     sync_objects(now);
     apply_health(now);
     show_death(now);
+    report_renown(now);
     sync_trade(now);
 
     send_party_requests();
@@ -681,6 +724,11 @@ void tick() {
 }
 
 }  // namespace
+
+int own_renown() {
+    int v = g_serverRenown.load();
+    return v >= 0 ? v : g_fableRenown.load();
+}
 
 void start() {
     if (g_state) return;

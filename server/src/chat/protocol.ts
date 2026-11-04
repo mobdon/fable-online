@@ -30,12 +30,16 @@ export interface TagInfo {
   title: string;     // Fable title, e.g. "Hero", "Arrow Master". Empty when none.
   guild: string;     // short guild tag, empty when none
   pvp: boolean;      // open-world PvP flag (unlocked by the Oakvale Guild mission)
+  staff: StaffBadge; // from the account role the server signed into the login token; players can't set it
   x: number; y: number; z: number;
 }
+/** Shown above a staff member's name: "DEV" for admins, "GM" for game masters, "" for players. */
+export type StaffBadge = "" | "DEV" | "GM";
+export const staffBadge = (role: string): StaffBadge => (role === "admin" ? "DEV" : role === "mod" ? "GM" : "");
 export type TagMove = Pick<TagInfo, "id" | "x" | "y" | "z">;
 
 export type ServerMsg =
-  | { t: "welcome"; v: number; id: number; name: string; renown: number; motd: string; channels: TalkChannel[] }
+  | { t: "welcome"; v: number; id: number; name: string; renown: number; staff: StaffBadge; motd: string; channels: TalkChannel[] }
   | { t: "msg"; ch: Channel; from: string; fromId: number; text: string; ts: number; to?: string }
   | { t: "sys"; text: string; level: "info" | "warn" }
   | { t: "err"; code: ErrCode; text: string }

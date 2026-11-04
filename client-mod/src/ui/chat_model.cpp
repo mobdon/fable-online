@@ -362,6 +362,7 @@ void ChatModel::on_server(const json::Value& m, double now) {
     std::string t = m.str("t");
     if (t == "welcome") {
         me_ = m.str("name");
+        my_staff_ = m.str("staff");
         std::string motd = m.str("motd");
         if (!motd.empty()) system(motd, now);
     } else if (t == "msg") {

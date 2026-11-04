@@ -23,4 +23,10 @@ void dev_spawn(const char* def, int count);
  *  Staff accounts only; removed for every player. */
 void dev_despawn(bool all_near);
 
+/**
+ * The hero's renown for the own name tag: what the server keeps when it has answered a
+ * report, otherwise the number read from Fable itself; -1 before either is known.
+ */
+int own_renown();
+
 }  // namespace fo::sync

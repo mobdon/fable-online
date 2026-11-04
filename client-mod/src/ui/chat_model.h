@@ -85,6 +85,8 @@ public:
     /** True once after "/settings" (also /mod, /options): open the Mod settings screen. */
     bool take_settings_request() { bool r = settings_requested_; settings_requested_ = false; return r; }
     const std::string& me() const { return me_; }
+    // "DEV" or "GM" when the server says this account is staff, "" for players.
+    const std::string& my_staff() const { return my_staff_; }
 
     // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
     static constexpr uint32_t kColorSay = 0xFFE9E4D6;
@@ -112,7 +114,7 @@ private:
     std::string channel_ = "say";              // sticky: the last channel you typed in
     std::string whisper_to_;                    // set when the sticky channel is a whisper
     std::string reply_to_;                      // last person who whispered you
-    std::string me_;
+    std::string me_, my_staff_;
     std::deque<ChatLine> log_;
     size_t scroll_ = 0;                         // lines scrolled up from the bottom
     std::vector<std::u32string> history_;

@@ -31,6 +31,8 @@ void read_tag(const json::Value& v, Tag& t) {
     t.guild = v.str("guild");
     t.renown = v.num("renown");
     t.pvp = v.boolean("pvp");
+    t.staff = v.str("staff");
+    if (t.staff != "DEV" && t.staff != "GM") t.staff.clear();
     t.x = static_cast<float>(v.num("x"));
     t.y = static_cast<float>(v.num("y"));
     t.z = static_cast<float>(v.num("z"));
@@ -70,8 +72,10 @@ void TagStore::apply(const json::Value& m) {
     for (const auto& v : m["del"].arr) tags_.erase(static_cast<uint32_t>(v.n));
 }
 
-void TagStore::set_self(bool on, const std::string& name, double renown, float x, float y, float z) {
+void TagStore::set_self(bool on, const std::string& name, double renown, float x, float y, float z,
+                        const std::string& staff) {
     self_on_ = on;
+    self_.staff = staff == "DEV" || staff == "GM" ? staff : "";
     self_.id = 0;
     self_.name = name;
     self_.renown = renown;
@@ -115,6 +119,9 @@ std::vector<Label> TagStore::layout(const float m[16], float w, float h, const T
         l.info_color = with_alpha(renown_color(t.renown), a);
         l.depth = dist;
         l.pvp = t.pvp;
+        l.self = &t == &self_;
+        l.badge = t.staff;
+        if (l.self) l.name_color = with_alpha(0xFFFFE9A8, a);   // warm gold on the gold plate
         out.push_back(std::move(l));
     };
     for (const auto& [id, t] : tags_) place(t);

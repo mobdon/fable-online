@@ -12,6 +12,8 @@ export interface Hero {
   phase: HeroPhase;
   pvp_unlocked: number;
   renown: number;
+  /** When the hero's renown was first taken from their own Fable; null until then. */
+  renown_imported_at?: number | null;
   region: string;
   x: number;
   y: number;

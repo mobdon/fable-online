@@ -216,6 +216,25 @@ static void test_tags() {
     CHECK(ui::renown_color(100) != ui::renown_color(60000));
 }
 
+static void test_tag_staff_and_self() {
+    ui::TagStore s;
+    s.apply(parse(R"({"t":"tags","region":1,"add":[{"id":3,"name":"Mobdon","renown":1250,"title":"","guild":"","pvp":false,"staff":"DEV","x":-2,"y":10,"z":0},)"
+                  R"({"id":4,"name":"Sparrow","renown":5,"title":"","guild":"","pvp":false,"staff":"KING","x":2,"y":10,"z":0}]})"));
+    float vp[16] = {1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0};
+    ui::TagSettings set;
+    set.head_height = 0;
+    s.set_self(true, "Hal", 3400, 0, 5, 0, "GM");
+    auto l = s.layout(vp, 800, 600, set);
+    CHECK(l.size() == 3);
+    int staff = 0, self = 0;
+    for (const auto& t : l) {
+        if (t.name_line == "Mobdon") { EQ(t.badge, "DEV"); CHECK(!t.self); ++staff; }
+        if (t.name_line == "Sparrow") EQ(t.badge, "");                       // only DEV and GM are shown
+        if (t.name_line == "Hal") { CHECK(t.self); EQ(t.badge, "GM"); EQ(t.info_line, "(you) - 3,400 renown"); ++self; }
+    }
+    CHECK(staff == 1 && self == 1);
+}
+
 static void test_party() {
     ui::ChatModel c;
     // Party requests go to the world server, not the chat service.
@@ -336,6 +355,7 @@ int main() {
     test_chat_editing_and_log();
     test_tabs();
     test_tags();
+    test_tag_staff_and_self();
     test_party();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
