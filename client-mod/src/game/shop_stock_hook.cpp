@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <atomic>
 #include <cwctype>
 #include <map>
 #include <mutex>
@@ -26,6 +27,7 @@ HMODULE g_self = nullptr;
 std::mutex g_mu;
 bool g_tried = false;
 std::wstring g_filtered;  // path of the filtered copy; empty = serve the original
+bool g_load_patched = false;
 
 bool is_game_bin(std::wstring p) {
     for (auto& c : p) c = c == L'/' ? L'\\' : static_cast<wchar_t>(towlower(c));
@@ -135,6 +137,47 @@ HANDLE WINAPI hook_CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURI
     return next_CreateFileW(name, access, share, sa, disp, flags, tmpl);
 }
 
+// ---- shop stock restored from a save --------------------------------------------------------
+//
+// A shop's stock is also kept in the save (CTCShop persist at 0x775D..: StockItemDefsKeys,
+// StockItemDefsQuantity, StockItemDefsMaxStock). On load, for each saved item, Fable looks the
+// item up in the shop's def rows (0x772250, thiscall, 1 arg, returns the row's stock record:
+// +0 type, +4 Quantity, +8 PriceMultiplier, +0xC MaxStock) and, if found, puts the saved
+// quantity and max stock back on top of it. So a shop saved before the filter keeps selling
+// a banned item even though its def row is empty. The check at 0x776024 is redirected here:
+// a row the filter emptied (Quantity and MaxStock both 0) counts as "not stocked", which is
+// the same branch Fable takes for an item the shop no longer lists.
+constexpr uintptr_t kFindStockRow = 0x772250;
+constexpr uintptr_t kLoadCheckCall = 0x776024;
+using FindStockRow = const uint32_t*(__thiscall*)(void*, int);
+std::atomic<unsigned> g_dropped{0};
+
+const uint32_t* __fastcall find_stock_row_on_load(void* shop, void*, int def) {
+    const uint32_t* row = reinterpret_cast<FindStockRow>(kFindStockRow)(shop, def);
+    if (row && row[1] == 0 && row[3] == 0) {
+        unsigned n = ++g_dropped;
+        if (n <= 20) fo::log("shops: saved stock of item def %d dropped (the shop no longer sells it)", def);
+        return nullptr;
+    }
+    return row;
+}
+
+bool patch_load_check() {
+    auto at = reinterpret_cast<uint8_t*>(kLoadCheckCall);
+    // push esi; mov ecx, edi; call 0x772250
+    const uint8_t want[3] = {0x56, 0x8B, 0xCF};
+    int32_t rel;
+    std::memcpy(&rel, at + 1, 4);
+    if (std::memcmp(at - 3, want, 3) != 0 || at[0] != 0xE8 || reinterpret_cast<uintptr_t>(at + 5) + rel != kFindStockRow) return false;
+    int32_t to = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&find_stock_row_on_load) - reinterpret_cast<uintptr_t>(at + 5));
+    DWORD old;
+    if (!VirtualProtect(at + 1, 4, PAGE_EXECUTE_READWRITE, &old)) return false;
+    std::memcpy(at + 1, &to, 4);
+    VirtualProtect(at + 1, 4, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, 5);
+    return true;
+}
+
 // Swaps one kernel32 import slot of Fable.exe and returns what it held, so hooks chain.
 void* hook_import(const char* fn, void* hook) {
     auto base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
@@ -171,6 +214,12 @@ void install(HMODULE self) {
     next_CreateFileW = raw_CreateFileW;
     if (void* p = hook_import("CreateFileA", reinterpret_cast<void*>(hook_CreateFileA))) next_CreateFileA = reinterpret_cast<decltype(next_CreateFileA)>(p);
     if (void* p = hook_import("CreateFileW", reinterpret_cast<void*>(hook_CreateFileW))) next_CreateFileW = reinterpret_cast<decltype(next_CreateFileW)>(p);
+    g_load_patched = patch_load_check();
+}
+
+void log_status() {
+    fo::log("shops: filter %s; saved-stock check %s", g_tried ? (g_filtered.empty() ? "NOT applied (see above)" : "applied") : "not reached yet (game.bin not opened through CreateFile)",
+            g_load_patched ? "patched" : "NOT patched (code at 0x776024 differs)");
 }
 
 }  // namespace fo::game::shop_stock
