@@ -86,7 +86,8 @@ test('loot is checked against the server position, not the client', () => {
   const a = join(app);
   assert.equal(app.objects.interact(a.id, `${R}:33`).error, 'too_far');
   assert.equal(app.objects.interact(a.id, 'Nowhere:1').error, 'not_here');
-  assert.equal(app.objects.interact(a.id, `${R}:10`).error, 'walk_through');
+  // An exit report from 10 m away (radius 3) is refused.
+  assert.equal(app.objects.interact(a.id, `${R}:10`).error, 'too_far');
   assert.equal(app.economy.balance(a.id), 0);
   app.close();
 });
@@ -181,6 +182,25 @@ test('walking into a region exit hands the hero to the next region and holds the
   app.director.tick(1000);
   assert.equal(ch.sim.position(a.id)!.y, 56);
   assert.ok(app.sink.events.some((e) => e.type === 'region_exit' && e.heroId === a.id && e.to === 'LookoutPoint'));
+  app.close();
+});
+
+test("the hero's own game reporting an exit moves the hero, unless a demon door is shut", () => {
+  const app = setup();
+  const a = join(app, [0, 8, 0]); // inside the exit's radius, where Fable fires it
+  const r = app.objects.interact(a.id, `${R}:10`);
+  assert.deepEqual(r, { t: 'ok', thing: `${R}:10` });
+  const enter = a.inbox.find((m) => m.t === 'enter_region' && m.via === 'exit');
+  assert.equal(enter.region, 'LookoutPoint');
+  assert.equal(enter.thing, `${R}:10`);
+  assert.equal(enter.loading, true);
+  // Only "use" means walking through.
+  const b = join(app, [0, 8, 0]);
+  assert.equal(app.objects.interact(b.id, `${R}:10`, 'open').error, 'bad_action');
+  // The exit behind a demon door stays shut until the door opened for this hero.
+  const c = join(app, [100, 9, 0]);
+  assert.equal(app.objects.interact(c.id, `${R}:11`).error, 'demon_door_closed');
+  assert.equal(app.director.channelOf(c.id)?.region.name, R);
   app.close();
 });
 

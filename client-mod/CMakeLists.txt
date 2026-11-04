@@ -4,7 +4,7 @@ set(FO_MOD_SOURCES
   src/game/hero.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
-  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp
+  src/world/entities.cpp src/world/objects.cpp src/world/held.cpp src/world/snapshot.cpp src/world/reporter.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
@@ -26,6 +26,8 @@ if(FO_BUILD_TESTS)
   add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp)
   target_include_directories(world_tests PRIVATE src)
   add_executable(objects_tests tests/objects_test.cpp src/world/objects.cpp)
+  add_executable(held_tests tests/held_test.cpp src/world/held.cpp src/world/objects.cpp)
+  target_include_directories(held_tests PRIVATE src)
   target_include_directories(objects_tests PRIVATE src)
   # The game connection against a running server (server/scripts/link-test.ts).
   add_executable(link_test tests/link_test.cpp src/log.cpp src/net/world_client.cpp src/world/snapshot.cpp src/world/reporter.cpp)
