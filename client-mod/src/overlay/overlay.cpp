@@ -15,6 +15,7 @@
 #include "../display/mouse_look.h"
 #include "../display/present.h"
 #include "../display/widescreen.h"
+#include "../game/hook.h"
 #include "../log.h"
 #include "../menu/menu.h"
 #include "../modsettings/modsettings.h"
@@ -694,6 +695,7 @@ HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, H
     if (config().frame_probe) display::probe::on_present(dev);
     g_present_seen = true;
     g_drawn = false;
+    game::hook::run_frame();
     draw_settings_on_top(dev);
     display::before_present(dev);
     HRESULT hr = o_Present(dev, a, b, w, r);

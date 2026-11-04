@@ -194,6 +194,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.ownId = w.playerId;
         s.ownName = w.name;
         s.table.set_local_id(w.playerId);
+        s.table.set_tick_rate(w.tickRate);
         s.serverMove = w.clientMove;
         s.reporter.reset();
         // Kept for the next connection: a dropped link comes back without a new ticket.
@@ -602,11 +603,36 @@ void drive_test_puppet(uint32_t nowMs) {
     s.puppets->sync({}, {}, {pose}, nowMs);
 }
 
+// One millisecond clock for frames, poses and puppets. GetTickCount moves in ~16 ms steps,
+// which showed up as stutter once poses were sampled every frame.
+uint32_t clock_ms() {
+    static LARGE_INTEGER freq = [] {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        return f;
+    }();
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return static_cast<uint32_t>(static_cast<unsigned long long>(c.QuadPart) * 1000ull /
+                                 static_cast<unsigned long long>(freq.QuadPart));
+}
+
+// Once a frame: move the puppets to where they should be drawn now. The 30 Hz tick does
+// everything else (spawning, animations, commands); between its steps the frame rate is what
+// the eye sees, so positions are kept per frame.
+void frame() {
+    if (!g_state) return;
+    State& s = *g_state;
+    uint32_t now = clock_ms();
+    if (!s.lastHero || s.puppets->holding(now) || s.puppets->live_count() == 0) return;
+    s.puppets->place(s.table.poses(now));
+}
+
 void tick() {
     if (!g_state) return;
     State& s = *g_state;
-    uint32_t now = GetTickCount();
-    crash_exit::game_alive(now);
+    uint32_t now = clock_ms();
+    crash_exit::game_alive(GetTickCount());  // crash_exit compares with GetTickCount
     if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
         fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
         s.loadSeen = true;
@@ -681,6 +707,7 @@ void start() {
     if (s.suppressSpawns) game::spawns::install_level_hook();
     game::hook::install();
     game::hook::on_tick(tick, kTickMs);
+    if (env_flag("FABLE_ONLINE_FRAME_PLACE", true)) game::hook::on_frame(frame);
     if (s.dev) game::hook::on_key([](int vk) { if (config().dev_hotkeys) dev_key(vk); });
 
     net::WorldConfig cfg;
@@ -734,7 +761,7 @@ void dev_despawn(bool all_near) {
 void dev_key(int vk) {
     if (!g_state) return;
     State& s = *g_state;
-    uint32_t now = GetTickCount();
+    uint32_t now = clock_ms();
     switch (vk) {
     case VK_F6:
         if (game::spawns::suppressed()) game::spawns::restore();

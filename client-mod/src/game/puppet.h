@@ -54,6 +54,12 @@ class PuppetPool {
     void hold(uint32_t nowMs, uint32_t ms);
     bool holding(uint32_t nowMs) const { return static_cast<int32_t>(holdUntil_ - nowMs) > 0; }
 
+    /**
+     * Puts every live puppet where its pose says, with memory writes only (no engine
+     * calls), so it can run once a frame between the slower sync() steps.
+     */
+    void place(const std::vector<world::Pose>& poses);
+
     const PuppetStats& stats() const { return stats_; }
     size_t live_count() const { return live_.size(); }
 

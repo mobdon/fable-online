@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <exception>
 #include <mutex>
 #include <vector>
@@ -23,6 +24,8 @@ struct Tick {
 std::mutex g_mu;
 std::vector<Tick> g_ticks;
 std::vector<std::function<void(int)>> g_keys;
+std::vector<std::function<void()>> g_frames;
+std::atomic<DWORD> g_gameThread{0};
 HWND g_window = nullptr;
 WNDPROC g_prev = nullptr;
 
@@ -51,6 +54,7 @@ void run_ticks() {
 
 LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_TIMER && wp == kTimerId) {
+        g_gameThread.store(GetCurrentThreadId());
         run_ticks();
         return 0;
     }
@@ -112,11 +116,35 @@ void remove() {
     std::lock_guard<std::mutex> lock(g_mu);
     g_ticks.clear();
     g_keys.clear();
+    g_frames.clear();
 }
 
 void on_tick(std::function<void()> fn, unsigned everyMs) {
     std::lock_guard<std::mutex> lock(g_mu);
     g_ticks.push_back(Tick{std::move(fn), everyMs < kTimerMs ? kTimerMs : everyMs, 0});
+}
+
+void on_frame(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_frames.push_back(std::move(fn));
+}
+
+void run_frame() {
+    // Only where the timer steps run: the frame hooks write engine memory the game loop owns.
+    DWORD game = g_gameThread.load();
+    if (!game || GetCurrentThreadId() != game) return;
+    std::vector<std::function<void()>> frames;
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        frames = g_frames;
+    }
+    for (auto& fn : frames) {
+        try {
+            fn();
+        } catch (...) {
+            fo::log("hook: a frame step failed; carrying on");
+        }
+    }
 }
 
 void on_key(std::function<void(int)> fn) {

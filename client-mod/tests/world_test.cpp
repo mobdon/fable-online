@@ -371,6 +371,39 @@ void test_spawn_filter() {
     CHECK(!f.should_drop(true, "CREATURE_WOLF", ""));
 }
 
+void test_tick_stamps_absorb_jitter() {
+    // Frames every 50 ms of server time arrive up to 30 ms late, unevenly. Stamped by tick
+    // number, the drawn position still moves at a steady speed.
+    EntityTable table;
+    table.set_tick_rate(20);
+    const int jitter[] = {0, 25, 5, 30, 10, 0, 20, 15, 30, 5, 0, 25, 10, 30, 0, 15, 20, 5, 0, 30};
+    float lastX = -1;
+    int steady = 0, steps = 0;
+    for (uint32_t now = 1000; now < 2100; now += 10) {
+        for (int k = 0; k < 20; ++k) {
+            uint32_t arrive = 1000 + k * 50 + jitter[k];
+            if (arrive > now - 10 && arrive <= now) {
+                char e[96];
+                std::snprintf(e, sizeof e, R"({"id":2,"x":%d,"y":0,"z":0,"yaw":0})", k);
+                Tick t;
+                parse_tick(tick_frame(e, k + 1), t);
+                table.on_tick(t, now);
+            }
+        }
+        Pose p;
+        if (now >= 1300 && now <= 1900 && table.pose_of(2, now, p)) {
+            if (lastX >= 0) {
+                ++steps;
+                float d = p.x - lastX;  // 1 unit per 50 ms: 0.2 per 10 ms
+                if (d > 0.15f && d < 0.25f) ++steady;
+            }
+            lastX = p.x;
+        }
+    }
+    CHECK(steps > 50);
+    CHECK(steady == steps);
+}
+
 int main() {
     std::printf("world tests\n");
     test_welcome();
@@ -378,6 +411,7 @@ int main() {
     test_tick_tolerance();
     test_table_spawn_and_local();
     test_table_interpolation();
+    test_tick_stamps_absorb_jitter();
     test_table_removal_and_stale();
     test_death_and_angles();
     test_real_frame();

@@ -40,7 +40,15 @@ interface Brain {
   approachStop: number;
   /** Got there: hold the spot (just keep facing) until approach() is called again. */
   approachArrived: boolean;
+  /** A swing started and not landed yet: the hit resolves at `at` unless it is interrupted. */
+  swing: { at: number; targetId: number; kind: AttackKind } | null;
 }
+
+/**
+ * Time from the start of a monster's swing to the hit. The clients start the strike
+ * animation when the swing starts, so the damage lands with the blow instead of before it.
+ */
+export const SWING_WINDUP_MS = 300;
 
 /**
  * Runs every creature in one channel. Decides where creatures go and when they swing;
@@ -94,6 +102,7 @@ export class AiDirector implements AiHooks {
       approachId: null,
       approachStop: 2,
       approachArrived: false,
+      swing: null,
     };
     c.anim = Anim.Idle;
     this.brains.set(c.id, b);
@@ -202,7 +211,16 @@ export class AiDirector implements AiHooks {
         b.blockUntil = 0;
         this.world.combat.setBlocking(b.c.id, false);
       }
-      if (b.c.stunnedMs > 0) continue; // staggered: combat owns the animation
+      if (b.c.stunnedMs > 0) {
+        b.swing = null; // a stagger interrupts a swing in progress
+        continue; // staggered: combat owns the animation
+      }
+      if (b.swing) {
+        if (this.now < b.swing.at) continue; // mid-swing: hold still until the blow lands
+        const { targetId, kind } = b.swing;
+        b.swing = null;
+        this.world.combat.attack(b.c.id, targetId, kind);
+      }
       if (this.now >= b.nextThink) {
         b.nextThink = this.now + THINK_MS;
         this.think(b);
@@ -342,7 +360,7 @@ export class AiDirector implements AiHooks {
         }
         const kind = this.pickAttack(p);
         b.c.anim = Anim.Attack;
-        this.world.combat.attack(b.c.id, t.id, kind);
+        b.swing = { at: this.now + SWING_WINDUP_MS, targetId: t.id, kind };
         if (p.circles) {
           b.state = 'strafe';
           b.stateUntil = this.now + 800 + this.rng() * 700;
