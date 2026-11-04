@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "crash_exit.h"
 #include "game/hook.h"
 #include "game/puppet.h"
 #include "game/spawns.h"
@@ -274,6 +275,7 @@ void tick() {
     if (!g_state) return;
     State& s = *g_state;
     uint32_t now = GetTickCount();
+    crash_exit::game_alive(now);
     if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
         fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
         s.loadSeen = true;
@@ -329,6 +331,7 @@ void start() {
     fo::log("sync: stand-in heroes use %s, local spawning %s, position reports %s", heroDef.c_str(),
             s.suppressSpawns ? "suppressed in server regions" : "left alone", s.reportPos ? "on" : "off");
 
+    crash_exit::install();
     game::hook::install();
     game::hook::on_tick(tick, kTickMs);
     if (s.dev) game::hook::on_key(dev_key);

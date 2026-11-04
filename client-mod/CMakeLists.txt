@@ -1,6 +1,6 @@
 set(FO_MOD_SOURCES
   src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp
-  src/sync.cpp
+  src/sync.cpp src/crash_exit.cpp
   src/game/hero.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
   src/net/chat_client.cpp src/net/world_client.cpp

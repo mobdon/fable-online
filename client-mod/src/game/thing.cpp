@@ -58,6 +58,10 @@ uintptr_t physics_of(uintptr_t thing) {
     uint32_t phys = 0, pvt = 0;
     if (!read(thing + kPhysicsPtr, &phys, 4) || !phys) return 0;
     if (!read(phys, &pvt, 4)) return 0;
+    // Only a physics component has a position at +0x0C. Right after a creature is made, or
+    // for a def built another way, +0x60 can hold something else whose +0x0C is a pointer:
+    // writing coordinates there corrupted the engine and crashed its renderer.
+    if (pvt != kPhysicsVtable && pvt != kPhysicsStandardVtable) return 0;
     return phys;
 }
 

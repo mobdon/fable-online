@@ -40,6 +40,7 @@ std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);
 /** Vtables used by the mod (fixed: Fable.exe has no ASLR). */
 constexpr uint32_t kHeroVtable = 0x012457FC;      // CThingPlayerCreature
 constexpr uint32_t kPhysicsVtable = 0x0126616C;   // CTCPhysicsControlled
+constexpr uint32_t kPhysicsStandardVtable = 0x01265F84;  // CTCPhysicsStandard
 constexpr uint32_t kCreatureVtable = 0x0125AC0C;  // CThingCreatureBase
 
 }  // namespace fo::game
