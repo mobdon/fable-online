@@ -403,6 +403,10 @@ export class GameSocket {
       }
       const hero = app.heroes.get(t.heroId);
       if (!hero || hero.account_id !== t.accountId) throw new GameError('bad_ticket', 'Hero not found', 401);
+      // Resume tokens chain from one connection to the next without the launcher, so check
+      // for a ban here as well, or a banned player could stay on by reconnecting.
+      const acct = app.accounts.byId(t.accountId);
+      if (!acct || (acct.banned_until && acct.banned_until > Date.now())) throw new GameError('banned', 'This account is suspended', 403);
       // Same hero logging in twice: the newer connection wins, the old one is dropped.
       GameSocket.online.get(hero.id)?.close(4003, 'logged in elsewhere');
       const link: PlayerLink = {
