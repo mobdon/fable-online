@@ -164,6 +164,9 @@ export class GameSocket {
       if (area === 'same' && msg.load) area = g.noteLoad(now);
       if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
     }
+    // Authoritative movement: a report only anchors the hero after a join or an area change
+    // (the guard holds an anchor then); the rest say nothing the server wants to hear.
+    if (mode === 'anchor' && !(g && g.anchored)) return;
     if (mode === 'trusted') {
       if (ch.placeHero(heroId, ch.toLocal(at), msg.yaw)) this.followRegion(heroId, at, false);
       return;
@@ -452,6 +455,8 @@ export class GameSocket {
         resume_ms: app.cfg.resumeMs,
         // Whether the server uses the mod's position reports ('off', 'checked', 'trusted').
         client_move: app.cfg.clientMovement,
+        // Metres a second the server runs heroes at: the mod scales its stick to it.
+        run_speed: app.cfg.heroRunSpeed,
         // Monster defs the server runs: the mod drops the level files' own copies of them.
         ...(app.spawnDefs.length ? { spawn_defs: app.spawnDefs } : {}),
       });

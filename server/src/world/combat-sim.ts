@@ -16,6 +16,10 @@ import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
 import { Anim, type AiWorld, type Creature as AiCreature } from './ai/types.js';
 import { ChannelLaw, type LawServices } from '../law/guards.js';
+import type { NavMesh } from './nav/navmesh.js';
+
+/** A stick the server has not heard about for this long is let go: a lost client stops, not runs. */
+export const INPUT_HOLD_MS = 300;
 
 /** Input button bits the mod sends. Spell slot = (buttons >> SPELL_SHIFT) & 0xF, 1-based. */
 export const BUTTONS = { ATTACK: 1 << 0, BLOCK: 1 << 1, CAST: 1 << 2 } as const;
@@ -61,6 +65,10 @@ export interface WorldServices {
   spawnOptions?: Partial<SpawnOptions>;
   /** Crime and the town watch. Without it there are no guards and nothing is a crime. */
   law?: LawServices;
+  /** The region's walkable ground, when extracted: heroes then slide along walls and stay on the ground. */
+  nav?: (region: string) => NavMesh | undefined;
+  /** Metres a second heroes run at (config heroRunSpeed). */
+  heroRunSpeed?: number;
 }
 
 /** Guard stats when game.bin has no entry for the def (test data, or an unread def). */
@@ -71,6 +79,8 @@ export const GUARD_RESPAWN_MS = 60_000;
 interface HeroSlot {
   hero: Hero;
   move: [number, number];
+  /** When the stick is let go unless another input arrives (INPUT_HOLD_MS). */
+  moveUntil: number;
   buttons: number;
   home: Vec3;
   /** ms until respawn while dead, null while alive. */
@@ -105,6 +115,8 @@ export class CombatSim implements RegionSim {
   /** Staff dev spawns: they never pay loot or experience, so they can't be farmed for gold. */
   private devSpawned = new Set<number>();
   private guardAi?: AiDirector;
+  private readonly nav?: NavMesh;
+  private readonly runSpeed: number;
 
   constructor(
     readonly region: RegionDef,
@@ -116,6 +128,8 @@ export class CombatSim implements RegionSim {
       onDamaged: (id, by, n) => this.ai?.onDamaged?.(id, by, n),
       onDeath: (id, killer) => this.ai?.onDeath?.(id, killer),
     };
+    this.nav = s.nav?.(region.name);
+    this.runSpeed = s.heroRunSpeed ?? CombatSim.RUN_SPEED;
     this.combat = new CombatSystem(s.data, hooks, s.harm ?? defaultHarmPolicy);
     this.combat.onDeath((d) => this.onDeath(d));
     this.combat.onHit((a, t, _dmg, killed) => {
@@ -249,7 +263,7 @@ export class CombatSim implements RegionSim {
     const hero = heroCombatant(heroId, at, this.s.data, l, (i) => {
       if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
     });
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0 });
+    this.heroes.set(heroId, { hero, move: [0, 0], moveUntil: 0, buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0 });
     this.combat.add(hero);
   }
 
@@ -282,6 +296,7 @@ export class CombatSim implements RegionSim {
     slot.buttons = b;
     h.yaw = input.cameraYaw;
     slot.move = [input.moveX, input.moveY];
+    slot.moveUntil = Date.now() + INPUT_HOLD_MS;
     if (!h.alive) return;
 
     this.combat.setBlocking(heroId, (b & BUTTONS.BLOCK) !== 0);
@@ -300,7 +315,8 @@ export class CombatSim implements RegionSim {
   }
 
   step(dtMs: number): void {
-    const d = (CombatSim.RUN_SPEED * dtMs) / 1000;
+    const d = (this.runSpeed * dtMs) / 1000;
+    const now = Date.now();
     for (const slot of this.heroes.values()) {
       const h = slot.hero;
       if (!h.alive) {
@@ -308,6 +324,10 @@ export class CombatSim implements RegionSim {
         continue;
       }
       if (slot.actMs > 0 && (slot.actMs -= dtMs) <= 0) slot.actAnim = 0;
+      if (slot.moveUntil && now > slot.moveUntil) {
+        slot.move = [0, 0];
+        slot.moveUntil = 0;
+      }
       const [mx, my] = slot.move;
       if ((mx === 0 && my === 0) || h.stunnedMs > 0) {
         h.anim = this.actAnim(slot, 0);
@@ -317,8 +337,20 @@ export class CombatSim implements RegionSim {
       const k = h.blocking || h.chargeMs > 0 ? 0.4 : 1;
       const s = Math.sin(h.yaw);
       const c = Math.cos(h.yaw);
-      h.pos.x += (mx * c - my * s) * d * k;
-      h.pos.y += (mx * s + my * c) * d * k;
+      const nx = h.pos.x + (mx * c - my * s) * d * k;
+      const ny = h.pos.y + (mx * s + my * c) * d * k;
+      if (!this.nav) {
+        h.pos.x = nx;
+        h.pos.y = ny;
+      } else {
+        // Slide along walls (the full step, then each axis on its own) and stay on the ground.
+        if (this.nav.walkable(nx, ny)) {
+          h.pos.x = nx;
+          h.pos.y = ny;
+        } else if (this.nav.walkable(nx, h.pos.y)) h.pos.x = nx;
+        else if (this.nav.walkable(h.pos.x, ny)) h.pos.y = ny;
+        h.pos.z = this.nav.heightAt(h.pos.x, h.pos.y);
+      }
       h.anim = this.actAnim(slot, 1);
     }
     this.combat.step(dtMs, this.charging);

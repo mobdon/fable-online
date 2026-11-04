@@ -44,7 +44,7 @@ function fixture(): WorldThingsFile {
 
 function setup() {
   const sink = new MemorySink();
-  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', thingsPath: '' }, { events: sink, things: new WorldThings(fixture()) });
+  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', thingsPath: '', heroRunSpeed: 6 }, { events: sink, things: new WorldThings(fixture()) });
   return Object.assign(app, { sink });
 }
 

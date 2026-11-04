@@ -98,10 +98,10 @@ export type SimFactory = (region: RegionDef, channelId: string) => RegionSim;
 export class StubSim implements RegionSim {
   static readonly RUN_SPEED = 6; // metres per second
   static readonly BOUNDS = 512;
-  private heroes = new Map<number, { pos: Vec3; yaw: number; move: [number, number]; anim: number; health: number }>();
+  private heroes = new Map<number, { pos: Vec3; yaw: number; move: [number, number]; moveUntil: number; anim: number; health: number }>();
 
   addHero(heroId: number, at: Vec3): void {
-    this.heroes.set(heroId, { pos: { ...at }, yaw: 0, move: [0, 0], anim: 0, health: 100 });
+    this.heroes.set(heroId, { pos: { ...at }, yaw: 0, move: [0, 0], moveUntil: 0, anim: 0, health: 100 });
   }
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
@@ -113,6 +113,7 @@ export class StubSim implements RegionSim {
     if (!h) return;
     h.yaw = input.cameraYaw;
     h.move = [input.moveX, input.moveY];
+    h.moveUntil = Date.now() + 300;  // let go if no input follows (CombatSim.INPUT_HOLD_MS)
   }
   placeHero(heroId: number, at: Vec3, yaw?: number): void {
     const h = this.heroes.get(heroId);
@@ -126,6 +127,7 @@ export class StubSim implements RegionSim {
     const d = (StubSim.RUN_SPEED * dtMs) / 1000;
     const b = StubSim.BOUNDS;
     for (const h of this.heroes.values()) {
+      if (h.moveUntil && Date.now() > h.moveUntil) h.move = [0, 0];
       const [mx, my] = h.move;
       if (mx === 0 && my === 0) {
         h.anim = 0;

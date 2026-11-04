@@ -51,7 +51,7 @@ test('empty shared channels close after the idle timeout', () => {
 });
 
 test('position is server-simulated from input and saved on leave', () => {
-  const app = testApp();
+  const app = testApp({ heroRunSpeed: 6 }); // the distances below assume 6 m/s
   const h = makeHero(app).hero;
   const inbox: string[] = [];
   app.director.join(h, link(h.id, inbox));

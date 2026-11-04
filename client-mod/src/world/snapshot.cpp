@@ -251,8 +251,12 @@ bool parse_welcome(const std::string& json, Welcome& out) {
     {
         Reader r(json);
         std::string mode;
-        if (seek_key(r, "client_move") && r.read_string(mode) && (mode == "off" || mode == "checked" || mode == "trusted"))
+        if (seek_key(r, "client_move") && r.read_string(mode) && (mode == "off" || mode == "checked" || mode == "trusted" || mode == "anchor"))
             out.clientMove = mode;
+    }
+    {
+        Reader r(json);
+        if (seek_key(r, "run_speed") && r.read_number(n) && n > 0 && n <= 50) out.runSpeed = n;
     }
     {
         // A flat array of def names. Anything that is not a string ends the list.

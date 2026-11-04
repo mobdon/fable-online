@@ -57,8 +57,10 @@ struct Welcome {
     uint32_t tickRate = 15;
     /** One-time token to reconnect with after this connection drops (no new launcher ticket needed). */
     std::string resume;
-    /** What the server does with position reports: "off", "checked" or "trusted". */
+    /** What the server does with position reports: "off", "checked", "trusted" or "anchor" (it moves heroes from input). */
     std::string clientMove = "off";
+    /** Metres a second the server runs heroes at; the stick is scaled to it. 0 when the server is older than this field. */
+    double runSpeed = 0;
     /**
      * The creature defs the server spawns itself (spawn_defs). Empty when the server runs no
      * monsters, or is older than this field: the local level loader then places its own.

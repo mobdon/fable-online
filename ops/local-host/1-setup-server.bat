@@ -24,6 +24,7 @@ node ..\tools\extractor\regions.mjs "%FABLE%" || goto :fail
 node ..\tools\extractor\spawns.mjs "%FABLE%" || echo   (spawns failed; no monsters)
 node ..\tools\extractor\things.mjs "%FABLE%" || echo   (things failed; no doors or region exits)
 node ..\tools\extractor\quests.mjs "%FABLE%" || echo   (quests failed)
+node ..\tools\extractor\navmesh.mjs "%FABLE%" || echo   (navmesh failed; heroes and monsters move without walls)
 echo.
 echo Done. Next: 2-start-server.bat
 pause

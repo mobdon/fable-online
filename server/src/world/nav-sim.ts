@@ -11,6 +11,8 @@ interface Hero {
   pos: Vec3;
   yaw: number;
   move: [number, number];
+  /** When the stick is let go unless another input arrives. */
+  moveUntil: number;
   anim: number;
   health: number;
 }
@@ -74,7 +76,7 @@ export class NavSim implements RegionSim {
 
   addHero(heroId: number, at: Vec3): void {
     const p = this.nav.snap(at, 64) ?? this.anyGround();
-    this.heroes.set(heroId, { pos: p, yaw: 0, move: [0, 0], anim: 0, health: 100 });
+    this.heroes.set(heroId, { pos: p, yaw: 0, move: [0, 0], moveUntil: 0, anim: 0, health: 100 });
   }
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
@@ -87,6 +89,7 @@ export class NavSim implements RegionSim {
     if (!h) return;
     h.yaw = input.cameraYaw;
     h.move = [input.moveX, input.moveY];
+    h.moveUntil = Date.now() + 300;  // let go if no input follows (CombatSim.INPUT_HOLD_MS)
   }
   position(heroId: number): Vec3 | undefined {
     const p = this.heroes.get(heroId)?.pos;
@@ -134,6 +137,7 @@ export class NavSim implements RegionSim {
   step(dtMs: number): void {
     const d = (NavSim.RUN_SPEED * dtMs) / 1000;
     for (const h of this.heroes.values()) {
+      if (h.moveUntil && Date.now() > h.moveUntil) h.move = [0, 0];
       const [mx, my] = h.move;
       if (mx === 0 && my === 0) {
         h.anim = 0;

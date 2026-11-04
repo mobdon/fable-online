@@ -70,10 +70,18 @@ export interface ServerConfig {
    *   climb and fall limits from server/src/world/movement.ts). Anything else is refused and
    *   the client is told where the server has its hero, so it snaps back.
    * - 'trusted': accept every report. Dev machines only.
+   * - 'anchor': the server moves heroes from `input` alone. A report only places the hero
+   *   where the client's Fable loaded it, once after a join or an area change; every other
+   *   report is ignored. The mod follows the server's position (the authoritative mode).
    * Needed until Fable's own input is mapped and the server can move heroes from intent alone.
    * FO_TRUST_CLIENT_POS=1, the older switch, still means 'trusted'.
    */
-  clientMovement: 'off' | 'checked' | 'trusted';
+  clientMovement: 'off' | 'checked' | 'trusted' | 'anchor';
+  /**
+   * Metres a second a hero runs at on the server. Clients send a stick whose length is their
+   * share of this, so it must be at least Fable's own run speed or they are pulled back.
+   */
+  heroRunSpeed: number;
   /**
    * On join, accept the first position report wherever it is in the region. The client's
    * Fable loads its own save, which is not where the server last had the hero, and the mod
@@ -190,6 +198,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     persistEveryMs: num('FO_PERSIST_MS', 30_000),
     interestRadius: num('FO_INTEREST_RADIUS', 80),
     clientMovement: movementMode(),
+    heroRunSpeed: num('FO_HERO_SPEED', 7),
     joinAnchor: flag('FO_JOIN_ANCHOR', true),
     resumeMs: num('FO_RESUME_MS', 5 * 60_000),
     newHeroPhase: heroPhase(str('FO_NEW_HERO_PHASE', 'childhood')),
@@ -234,8 +243,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
 function movementMode(): ServerConfig['clientMovement'] {
   if (flag('FO_TRUST_CLIENT_POS', false)) return 'trusted';
   const v = str('FO_CLIENT_MOVE', 'checked');
-  if (v === 'off' || v === 'checked' || v === 'trusted') return v;
-  throw new Error(`FO_CLIENT_MOVE must be off, checked or trusted, got "${v}"`);
+  if (v === 'off' || v === 'checked' || v === 'trusted' || v === 'anchor') return v;
+  throw new Error(`FO_CLIENT_MOVE must be off, checked, trusted or anchor, got "${v}"`);
 }
 
 function heroPhase(v: string): ServerConfig['newHeroPhase'] {

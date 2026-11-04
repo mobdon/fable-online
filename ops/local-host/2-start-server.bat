@@ -16,8 +16,11 @@ rem Test realm: new heroes start in the shared world (at the Guild), not in a pr
 set FO_NEW_HERO_PHASE=world
 rem The launcher has no hero screen yet: an account's first join makes a hero named after it.
 set FO_AUTO_HERO=1
-rem The server checks every position the mod reports (speed, climbs, falls) and corrects cheats.
-set FO_CLIENT_MOVE=checked
+rem The server moves every hero itself from the stick the mod sends; a position report only
+rem places a hero where their Fable loaded its save, once after joining. The mod follows the server.
+set FO_CLIENT_MOVE=anchor
+rem Walkable ground per region (shared\defs\nav from 1-setup-server.bat): walls for heroes and paths for monsters.
+set FO_NAV_DIR=..\shared\defs\nav
 rem Region map with level sizes, so the server knows which region your Fable has loaded.
 rem Re-read from your Fable folder on every start (a second or two), so older setups get it.
 set "FABLE=C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters"

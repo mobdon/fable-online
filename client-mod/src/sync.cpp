@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +38,17 @@ constexpr unsigned kTickMs = 33;        // the puppets are driven about 30 times
 constexpr unsigned kStatusMs = 10000;
 constexpr unsigned kLoadStallMs = 1500;  // no tick for this long: the game thread was busy loading
 constexpr float kFarCorrection = 150.0f;
+// Authoritative movement (the server's 'anchor' mode): the stick and the pull to the server's position.
+constexpr float kStickDeadband = 0.3f;     // metres a second below which the hero counts as standing
+constexpr float kTeleportSpeed = 40.0f;    // faster than this between two samples is a map change, not a run
+constexpr float kStickEpsilon = 0.05f;     // a stick change smaller than this is not worth a packet
+constexpr unsigned kInputRepeatMs = 200;   // while moving, resend at least this often (the server lets go after 300 ms)
+constexpr unsigned kStaleMeMs = 1000;      // a server position older than this is not followed
+constexpr float kReconcileSoft = 1.0f;     // metres of error closed a little each tick
+constexpr float kReconcileSnap = 6.0f;     // metres of error closed at once
+constexpr float kReconcileZ = 3.0f;        // height difference past which the snap takes the server's height too
+constexpr float kReconcileGain = 0.25f;    // share of the error closed per tick
+constexpr unsigned kReconcileHoldMs = 3000;  // no pull after Fable loads another area, until the server re-anchors
 constexpr uint32_t kHoldAfterLoadMs = 3000;  // no new stand-ins this soon after an area load  // metres; a correction this far is from another map
 
 std::string env(const char* name, const char* fallback = "") {
@@ -96,6 +108,21 @@ struct State {
     int blockVk = 0;
     unsigned lastButtons = 0;
     uint32_t inputSeq = 0;
+    /** Metres a second the server runs heroes at (welcome), the stick's full deflection. */
+    float runSpeed = 7.0f;
+    /** The hero's last position sample: the stick is read off its own motion. */
+    game::Pos lastSample;
+    uint32_t lastSampleMs = 0;
+    bool haveSample = false;
+    float lastStick[2] = {0, 0};
+    uint32_t lastInputMs = 0;
+    /** Where the server has this hero, from the last tick frame. */
+    struct { float x = 0, y = 0, z = 0, yaw = 0; uint32_t ms = 0; bool valid = false; } me;
+    /** No pull to the server until then: Fable just loaded another area and the server must re-anchor first. */
+    uint32_t reconcileHoldUntilMs = 0;
+    uint32_t reconcileSoft = 0, reconcileSnaps = 0;
+    float reconcileMaxErr = 0;
+    uint32_t lastReconcileLogMs = 0;
 };
 
 State* g_state = nullptr;
@@ -182,6 +209,9 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.ownName = w.name;
         s.table.set_local_id(w.playerId);
         s.serverMove = w.clientMove;
+        if (w.runSpeed > 0) s.runSpeed = static_cast<float>(w.runSpeed);
+        s.me.valid = false;
+        s.haveSample = false;
         s.reporter.reset();
         // Kept for the next connection: a dropped link comes back without a new ticket.
         if (!w.resume.empty()) net::world_set_resume(w.resume);
@@ -234,6 +264,13 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
     case world::FrameType::Tick: {
         world::Tick t;
         if (!world::parse_tick(json, t)) return;
+        for (const world::EntityState& e : t.entities)
+            if (s.ownId && e.id == s.ownId) {
+                s.me.x = e.x; s.me.y = e.y; s.me.z = e.z; s.me.yaw = e.yaw;
+                s.me.ms = nowMs;
+                s.me.valid = true;
+                break;
+            }
         s.table.on_tick(t, nowMs);
         return;
     }
@@ -305,6 +342,8 @@ void report_position(uint32_t nowMs) {
         if (s.lastArea) {
             fo::log("sync: Fable loaded another area (%08x), telling the server", area);
             s.reporter.reset();
+            s.reconcileHoldUntilMs = nowMs + kReconcileHoldMs;
+            s.haveSample = false;
         }
         s.lastArea = area;
     }
@@ -325,23 +364,52 @@ void report_position(uint32_t nowMs) {
 }
 
 /**
- * The hero's swings and guard, sent as the server's `input` buttons so the server's combat
- * decides who is hit (stand-ins are never hit by the local game: see puppet.cpp).
+ * What the server moves the hero from: the stick (direction and share of the server's run
+ * speed, in the hero's own frame), the hero's facing as the camera yaw, and the attack and
+ * block buttons. The stick is read off the local hero's own motion, so it is exactly what the
+ * player's Fable is doing; the server owns the speed cap, the walls and the position, and
+ * `reconcile` pulls the local hero to wherever the server put it. Sent on a change and at
+ * least every kInputRepeatMs while moving: the server lets go of a stick it stops hearing.
  *
- * Only sent while Fable has the focus and the chat box is closed, and only on a change: the
- * server fires an attack when the button is released.
+ * Buttons only count while Fable has the focus and the chat box is closed; the server fires
+ * an attack when the button is released.
  */
-void report_combat(uint32_t nowMs) {
+void report_input(uint32_t nowMs) {
     State& s = *g_state;
-    (void)nowMs;
-    if (!net::world_connected() || !s.attackVk) return;
+    if (!net::world_connected()) return;
+    uintptr_t hero = game::local_hero();
+    game::Pos p;
+    float yaw = 0;
+    const bool havePos = hero && game::read_pos(hero, p);
+    const bool haveYaw = hero && game::read_yaw(hero, yaw);
+    float stick[2] = {0, 0};
+    if (havePos && haveYaw && s.haveSample && !s.objects.loading()) {
+        const uint32_t dt = nowMs - s.lastSampleMs;
+        if (dt >= 20 && dt <= 500) {
+            const float dx = (p.x - s.lastSample.x) * 1000.0f / dt, dy = (p.y - s.lastSample.y) * 1000.0f / dt;
+            const float speed = std::sqrt(dx * dx + dy * dy);
+            if (speed >= kStickDeadband && speed < kTeleportSpeed) {
+                const float share = std::min(1.0f, speed / s.runSpeed);
+                const float ux = dx / speed, uy = dy / speed;
+                const float sn = std::sin(yaw), cs = std::cos(yaw);
+                // Into the hero's frame: the server turns it back with the same yaw.
+                stick[0] = (ux * cs + uy * sn) * share;   // strafe
+                stick[1] = (-ux * sn + uy * cs) * share;  // forward
+            }
+        }
+    }
+    if (havePos) {
+        s.lastSample = p;
+        s.lastSampleMs = nowMs;
+        s.haveSample = true;
+    }
     DWORD pid = 0;
     HWND fg = GetForegroundWindow();
     if (fg) GetWindowThreadProcessId(fg, &pid);
-    bool focused = pid == GetCurrentProcessId() && !overlay::input_blocked_now();
+    const bool focused = pid == GetCurrentProcessId() && !overlay::input_blocked_now();
     // Fable owns the mouse through DirectInput, which can leave the window's own button
     // state stale, so the mouse buttons are read from what Fable itself last read.
-    unsigned di = overlay::mouse_buttons();
+    const unsigned di = overlay::mouse_buttons();
     auto down = [&](int vk) {
         if (!focused || !vk) return false;
         if (vk >= VK_LBUTTON && vk <= VK_MBUTTON) {
@@ -350,20 +418,61 @@ void report_combat(uint32_t nowMs) {
         }
         return (GetAsyncKeyState(vk) & 0x8000) != 0;
     };
-    unsigned buttons = (down(s.attackVk) ? 1u : 0u) | (down(s.blockVk) ? 2u : 0u);
-    if (buttons == s.lastButtons) return;
+    const unsigned buttons = (down(s.attackVk) ? 1u : 0u) | (down(s.blockVk) ? 2u : 0u);
+    const bool moving = stick[0] != 0 || stick[1] != 0;
+    const bool stickChanged = std::fabs(stick[0] - s.lastStick[0]) > kStickEpsilon || std::fabs(stick[1] - s.lastStick[1]) > kStickEpsilon;
+    const bool repeat = moving && nowMs - s.lastInputMs >= kInputRepeatMs;
+    if (!stickChanged && buttons == s.lastButtons && !repeat) return;
+    s.lastStick[0] = stick[0];
+    s.lastStick[1] = stick[1];
     s.lastButtons = buttons;
-    float yaw = 0;
-    uintptr_t hero = game::local_hero();
-    bool haveYaw = hero && game::read_yaw(hero, yaw);
-    char frame[160];
+    s.lastInputMs = nowMs;
+    char frame[200];
     if (haveYaw)
-        std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u,\"camera_yaw\":%.3f}",
-                      ++s.inputSeq, buttons, yaw);
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"move_x\":%.3f,\"move_y\":%.3f,\"buttons\":%u,\"camera_yaw\":%.3f}",
+                      ++s.inputSeq, stick[0], stick[1], buttons, yaw);
     else
         std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u}", ++s.inputSeq, buttons);
     net::world_send(frame);
-    if (s.inputSeq <= 40) fo::log("sync: sent buttons %u (attack %s)", buttons, buttons & 1 ? "down" : "up");
+    if (s.inputSeq <= 40) fo::log("sync: sent input %u: stick %.2f %.2f, buttons %u", s.inputSeq, stick[0], stick[1], buttons);
+}
+
+/**
+ * Pulls the local hero to where the server has it (the server's 'anchor' mode). The server's
+ * position is the truth; the local Fable only runs ahead of it as prediction. A small error
+ * is closed a little each tick, a large one at once, and a huge one is a map the server has
+ * not followed yet: left alone, like a far correction, until the next anchor.
+ */
+void reconcile(uint32_t nowMs) {
+    State& s = *g_state;
+    if (s.serverMove != "anchor" || !s.me.valid || !net::world_connected()) return;
+    if (nowMs < s.reconcileHoldUntilMs || s.objects.loading() || nowMs - s.me.ms > kStaleMeMs) return;
+    uintptr_t hero = game::local_hero();
+    game::Pos p;
+    if (!hero || !game::read_pos(hero, p)) return;
+    const float ex = s.me.x - p.x, ey = s.me.y - p.y;
+    const float err = std::sqrt(ex * ex + ey * ey);
+    if (err > s.reconcileMaxErr) s.reconcileMaxErr = err;
+    if (err > kFarCorrection) {
+        s.loadSeen = true;
+        return;
+    }
+    if (err > kReconcileSoft) {
+        const float dz = s.me.z - p.z;
+        if (err >= kReconcileSnap) {
+            game::write_pos(hero, game::Pos{s.me.x, s.me.y, std::fabs(dz) > kReconcileZ ? s.me.z : p.z}, false, 0);
+            ++s.reconcileSnaps;
+        } else {
+            game::write_pos(hero, game::Pos{p.x + ex * kReconcileGain, p.y + ey * kReconcileGain, p.z}, false, 0);
+            ++s.reconcileSoft;
+        }
+        s.haveSample = false;  // the next stick sample would read the pull as a run
+    }
+    if ((s.reconcileSoft || s.reconcileSnaps) && nowMs - s.lastReconcileLogMs >= 10000) {
+        s.lastReconcileLogMs = nowMs;
+        fo::log("sync: hero pulled to the server %u times (snapped %u), worst error %.1f m, ping %d ms", s.reconcileSoft,
+                s.reconcileSnaps, s.reconcileMaxErr, s.reporter.rtt_ms());
+    }
 }
 
 /**
@@ -549,6 +658,8 @@ void tick() {
     if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
         fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
         s.loadSeen = true;
+        s.reconcileHoldUntilMs = now + kReconcileHoldMs;
+        s.haveSample = false;
         s.reporter.reset();
         s.puppets->hold(now, kHoldAfterLoadMs);
     }
@@ -567,7 +678,8 @@ void tick() {
     }
 
     report_position(now);
-    report_combat(now);
+    report_input(now);
+    reconcile(now);
     sync_objects(now);
     apply_health(now);
     sync_trade(now);
