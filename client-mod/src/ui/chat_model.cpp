@@ -94,6 +94,7 @@ const char* kHelp[] = {
     "/s say (nearby)  /re region  /1 realm  /2 trade  /p party  /g guild",
     "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
     "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
+    "/barter: trade items and gold with the hero next to you  /barter Name: with that hero",
 };
 }  // namespace
 
@@ -268,6 +269,7 @@ void ChatModel::submit(double now) {
         system(tags_enabled_ ? "Name tags on." : "Name tags off.", now);
         return;
     }
+    if (cmd == "barter") { local_.push_back({cmd, rest}); return; }   // player trading: the overlay's trade window
     if (cmd == "clear") { log_.clear(); scroll_ = 0; return; }
     if (cmd == "help" || cmd == "?") { for (const char* h : kHelp) system(h, now); return; }
     system("Unknown command /" + cmd + ". Type /help.", now, kColorError);
@@ -316,6 +318,12 @@ void ChatModel::on_server(const json::Value& m, double now) {
     } else if (t == "err") {
         system(m.str("text"), now, kColorError);
     }
+}
+
+std::vector<std::pair<std::string, std::string>> ChatModel::take_local() {
+    std::vector<std::pair<std::string, std::string>> out;
+    out.swap(local_);
+    return out;
 }
 
 std::vector<std::string> ChatModel::take_outbox() {
