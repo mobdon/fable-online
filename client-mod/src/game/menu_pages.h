@@ -14,10 +14,12 @@
 // opens the Map for its teleport list), Fable read an empty slot and crashed
 // (CTCInventoryMap 0x006116E0, reading 0 at 0x0061173A).
 //
-// The fix routes the nine calls to the register function: a page only goes into an empty
-// slot, or replaces the page already there when that one belongs to the same thing (never to
-// a stand-in). The first hero to fill the slots is the local hero, who exists before any
-// stand-in; a new game or a load empties the slots first through Fable's own unregister.
+// The fix routes the nine calls to the register function. A page is refused when its owner
+// (the component at page - 0x130, its thing at +4) is not a CThingPlayerCreature, which keeps
+// every stand-in out. A second player creature also can't replace a page still held by the
+// live local hero; after a load or region change the old hero is gone and the new hero's
+// pages register as normal. Components are set up in the thing's init (0x006A9DD0), after
+// the constructor has set the final vtable, so the owner's class is known at that point.
 namespace fo::game::menu_pages {
 /** Routes the calls; logs how many were changed. Safe to call more than once. */
 bool install();
