@@ -23,7 +23,9 @@ struct PuppetStats {
     uint32_t lost = 0;  // the engine freed the thing under us
     uint32_t live = 0;
     uint32_t animsPlayed = 0;
-    uint32_t animsRefused = 0;  // no scripted-control component, or a pointer looked wrong
+    uint32_t animsRefused = 0;  // the engine fields the animation code reads were not valid
+    uint32_t healthLogs = 0;
+    uint32_t described = 0;
 };
 
 /** What a puppet is playing, picked from the server's anim field (world::Anim). */
@@ -63,12 +65,18 @@ class PuppetPool {
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        float lastHealth = -1;
         Gait gait = Gait::None;
         Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
         uint32_t wantedSinceMs = 0;
         uint32_t lastAnimMs = 0;
         uint32_t animSeq = 0;
         uint32_t strikes = 0;  // alternates left and right swings
+        uint32_t createdMs = 0;  // shown (made or taken from the pool) at this time
+        bool described = false;
+        bool animOk = false;  // the last animation was taken
+        uint32_t flinchUntilMs = 0;
+        uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);

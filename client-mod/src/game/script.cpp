@@ -49,6 +49,14 @@ constexpr uint32_t kThingComponents = 0x44;  // {begin, end} of sorted (id, comp
 constexpr uint32_t kThingDeadFlags = 0x91;   // bit 0: being removed
 constexpr uint32_t kThingCreatureFlags = 0x6C;  // bit 3: is a creature with an action list
 
+/** What 0x00662D80 reads first: thing+0x70 must be an object with a vtable (0x0042B0A2). */
+constexpr uint32_t kThingAnimSource = 0x70;
+/** What a script reference holds: a CGameScriptThing, with the CThingPtr at +0x0C. */
+constexpr uint32_t kGameScriptThingVtable = 0x012852CC;
+constexpr uint32_t kGameScriptThingPtr = 0x0C;
+/** The second object it reads (+0x134, then its vfunc +0x10 through 0x0073A6E0). */
+constexpr uint32_t kThingAnimTables = 0x134;
+
 // CThing slot the CreateNear sequence reads the "near" value from.
 constexpr unsigned kThingNearValue = 0x18;
 
@@ -174,11 +182,23 @@ bool ThingRef::alive() const {
     return as<bool(__thiscall*)(const void*)>(reinterpret_cast<void*>(kRefAlive))(storage_);
 }
 
-uintptr_t ThingRef::thing() const {
+uintptr_t ThingRef::script_thing() const {
     if (!held_) return 0;
     uint32_t t = 0;
     std::memcpy(&t, storage_ + 4, 4);
     return readable(t, 4) ? t : 0;
+}
+
+uintptr_t ThingRef::thing() const {
+    // The reference holds a CGameScriptThing, the script runner's wrapper. The CThing is
+    // behind its CThingPtr at +0x0C: {vtable, control*}, and the control block's first
+    // dword is the thing (0 once the engine has freed it), as 0x00A01B50 reads it.
+    uintptr_t gst = script_thing();
+    if (!gst || !readable(gst, kGameScriptThingPtr + 8) || read_ptr(gst) != kGameScriptThingVtable) return 0;
+    uintptr_t ctrl = read_ptr(gst + kGameScriptThingPtr + 4);
+    if (!ctrl || !readable(ctrl, 4)) return 0;
+    uintptr_t thing = read_ptr(ctrl);
+    return thing && readable(thing, 0x110) ? thing : 0;
 }
 
 // ---------- lookups ----------
@@ -214,7 +234,8 @@ bool create_near(const char* def, const char* script_name, float radius, ThingRe
 
     ThingRef near_hero;
     if (!hero(near_hero)) return false;
-    uintptr_t thing = near_hero.thing();
+    // The "near" value comes from the script wrapper's own slot, as the script runner asks it.
+    uintptr_t thing = near_hero.script_thing();
     if (!thing) return false;
     void* near_fn = slot(thing, kThingNearValue);
     void* create_fn = slot(obj, kCreateNear);
@@ -295,15 +316,91 @@ uintptr_t scripted_control(ThingRef& t) {
     return 0;
 }
 
+// The MSVC class name behind an object's vtable (".?AVCThingCreatureBase@@"), read through
+// its RTTI locator at vtable-4. False for anything that is not a live C++ object of
+// Fable.exe: garbage, freed memory and plain data all fail one of these checks.
+bool class_name(uintptr_t obj, char* out, size_t n) {
+    if (n < 8) return false;
+    out[0] = 0;
+    if (!obj || !readable(obj, 4)) return false;
+    uintptr_t vt = read_ptr(obj);
+    if (vt < 0x01200000 || vt >= 0x01400000 || !readable(vt - 4, 8)) return false;
+    uintptr_t col = read_ptr(vt - 4);
+    if (col < 0x01200000 || col >= 0x01400000 || !readable(col, 20) || read_ptr(col) != 0) return false;
+    uintptr_t td = read_ptr(col + 12);
+    if (td < 0x01200000 || td >= 0x01440000 || !readable(td + 8, 4)) return false;
+    size_t i = 0;
+    for (; i + 1 < n; ++i) {
+        if (!readable(td + 8 + i, 1)) return false;
+        char c = *reinterpret_cast<const char*>(td + 8 + i);
+        out[i] = c;
+        if (!c) break;
+    }
+    out[i < n ? i : n - 1] = 0;
+    return out[0] == '.' && out[1] == '?' && out[2] == 'A';
+}
+
+// 0x00662D80's second read: [[[thing+0x134]+0x0C]]+0x08 (0x0073A6E0), whose vfunc +0x10 it calls.
+uintptr_t anim_tables(uintptr_t thing) {
+    uintptr_t a = read_ptr(thing + kThingAnimTables);
+    if (!a || !readable(a + 0x0C, 4)) return 0;
+    uintptr_t b = read_ptr(a + 0x0C);
+    if (!b || !readable(b, 4)) return 0;
+    uintptr_t c = read_ptr(b);
+    if (!c || !readable(c + 8, 4)) return 0;
+    return read_ptr(c + 8);
+}
+
+// Everything 0x00662D80 dereferences before it reaches the animation tables: the thing must
+// be a live creature object, +0x70 its def holder and +0x134 another live object. A refusal
+// names the first check that failed, for the log.
+const char* anim_target_problem(uintptr_t thing) {
+    char name[96];
+    if (!class_name(thing, name, sizeof(name))) return "thing is not a live object";
+    if (!std::strstr(name, "Creature")) return "thing is not a creature";
+    if (!class_name(read_ptr(thing + kThingAnimSource), name, sizeof(name))) return "def holder (+0x70) not set";
+    if (!class_name(anim_tables(thing), name, sizeof(name))) return "anim tables (+0x134) not set";
+    return nullptr;
+}
+
 bool queue_empty_at(uintptr_t comp) {
     uintptr_t head = read_ptr(comp + 0x14);  // std::list sentinel
     return !head || read_ptr(head) == head;
 }
 }  // namespace
 
+void describe_for_anims(ThingRef& t, const char* label) {
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing, 0x110)) {
+        fo::log("anims: %s thing unreadable", label);
+        return;
+    }
+    uintptr_t src = read_ptr(thing + kThingAnimSource);
+    char cls[96], srcCls[96], tabCls[96];
+    if (!class_name(thing, cls, sizeof(cls))) std::strcpy(cls, "?");
+    if (!class_name(src, srcCls, sizeof(srcCls))) std::strcpy(srcCls, "?");
+    if (!class_name(anim_tables(thing), tabCls, sizeof(tabCls))) std::strcpy(tabCls, "?");
+    const char* problem = anim_target_problem(thing);
+    fo::log("anims: %s is %s, +0x70 %s, +0x134 %s: %s", label, cls, srcCls, tabCls,
+            problem ? problem : "can animate");
+    fo::log("anims: %s thing %08X vt %08X flags20 %08X %08X %08X %08X +6C %08X +70 %08X (vt %08X) +100 %08X",
+            label, static_cast<unsigned>(thing), static_cast<unsigned>(read_ptr(thing)),
+            static_cast<unsigned>(read_ptr(thing + 0x20)), static_cast<unsigned>(read_ptr(thing + 0x24)),
+            static_cast<unsigned>(read_ptr(thing + 0x28)), static_cast<unsigned>(read_ptr(thing + 0x2C)),
+            static_cast<unsigned>(read_ptr(thing + 0x6C)), static_cast<unsigned>(src),
+            static_cast<unsigned>(src && readable(src, 4) ? read_ptr(src) : 0),
+            static_cast<unsigned>(read_ptr(thing + 0x100)));
+}
+
 bool scripted_queue_empty(ThingRef& t) {
-    uintptr_t comp = scripted_control(t);
-    return !comp || queue_empty_at(comp);
+    // The creature's own action slot: empty, or holding an action that has finished.
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing, 0x110)) return true;
+    uintptr_t cur = read_ptr(thing + 0x100);
+    if (!cur || !readable(cur + 0x61, 1)) return true;
+    uint8_t done = 0;
+    std::memcpy(&done, reinterpret_cast<const void*>(cur + 0x61), 1);
+    return done != 0;
 }
 
 void clear_scripted(ThingRef& t) {
@@ -313,35 +410,79 @@ void clear_scripted(ThingRef& t) {
 }
 
 namespace {
+// What CActionPlayAnimation::Update (0x00712900) does once the scripted-control queue
+// starts it, done here directly: a CREATURE_HERO stand-in has no CTCScriptedControl
+// (the component comes from the def, and the hero's def does not list it), but every
+// creature has its own action slot at thing+0x100 and queue at thing+0x108.
+constexpr uintptr_t kCreatureIsBusy = 0x0085F0C0;    // CThing: true = no new actions now
+constexpr uintptr_t kCreatureAnimByName = 0x00662D80;  // CThing: (CCharString*, int -1) -> anim
+constexpr uintptr_t kCreatureAnimActionCtor = 0x008425E0;  // 11 args, object 0xB4 bytes
+constexpr size_t kCreatureAnimActionSize = 0xB4;
+constexpr uintptr_t kCreatureSetAction = 0x006644F0;   // CThing: (action*) -> bool, clones it
+constexpr uintptr_t kCreatureQueueAction = 0x00664490; // CThing: (action*), clones it
+constexpr uint32_t kCreatureCurrentAction = 0x100;
+
+bool creature_ok(uintptr_t thing) {
+    if (!thing || !readable(thing, 0x110)) return false;
+    uint8_t dead = 0;
+    std::memcpy(&dead, reinterpret_cast<const void*>(thing + kThingDeadFlags), 1);
+    if (dead & 1) return false;
+    return (read_ptr(thing + kThingCreatureFlags) & 8) != 0;
+}
+
+bool vtable_like(uintptr_t obj) {
+    if (!obj || !readable(obj, 4)) return false;
+    uintptr_t vt = read_ptr(obj);
+    return vt >= 0x01200000 && vt < 0x01400000;
+}
+
+
 bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool clear_first, uint32_t sequence) {
-    if (!anim || !*anim || !iface()) return false;
-    uintptr_t comp = scripted_control(t);
-    if (!comp) return false;
+    if (!anim || !*anim || !iface() || !t.held()) return false;
     uintptr_t thing = t.thing();
-    if (read_ptr(kPlayAnimVtable) != 0x00905070) {  // first slot: its destructor
-        disable("play-animation action vtable does not match this Fable.exe");
+    if (!creature_ok(thing)) return false;
+    // online-7 crashed inside 0x0042B0A2 with thing+0x70 pointing at string data: never
+    // call into the animation lookup unless that field looks like a real object.
+    if (const char* problem = anim_target_problem(thing)) {
+        static int logged = 0;
+        if (logged < 20) {
+            ++logged;
+            fo::log("anims: refused %s on %08X: %s", anim, static_cast<unsigned>(thing), problem);
+        }
         return false;
     }
-
-    // The same order as the slot `.PlayLoopingAnim` lands in (handle vtable +0x50).
-    if (clear_first) {
-        as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kQueueClear))(reinterpret_cast<void*>(comp));
-        if (read_ptr(thing + kThingCreatureFlags) & 8)
-            as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kStopCreatureAction))(reinterpret_cast<void*>(thing));
+    if (read_ptr(kCreatureAnimActionCtor) != 0x2C24448B) {  // mov eax, [esp+0x2C]: the ctor's first bytes
+        disable("creature animation action does not match this Fable.exe");
+        return false;
     }
+    void* self = reinterpret_cast<void*>(thing);
+    if (as<bool(__thiscall*)(void*)>(reinterpret_cast<void*>(kCreatureIsBusy))(self)) return false;
 
-    void* action = as<void*(__cdecl*)(size_t)>(reinterpret_cast<void*>(kOperatorNew))(kPlayAnimSize);
+    Str name(anim);
+    void* handle = as<void*(__thiscall*)(void*, void*, int)>(reinterpret_cast<void*>(kCreatureAnimByName))(
+        self, name.raw(), -1);
+    void* action = as<void*(__cdecl*)(size_t)>(reinterpret_cast<void*>(kOperatorNew))(kCreatureAnimActionSize);
     if (!action) return false;
     uint8_t global = 0;
     if (readable(kScriptGlobalFlag, 1)) std::memcpy(&global, reinterpret_cast<const void*>(kScriptGlobalFlag), 1);
-    Str name(anim);
-    // The runner's defaults: `.PlayLoopingAnim` builds (name, 0, 1, loops, 0, seq, 0, 1, global, 0, 0)
-    // and `.PlayAnimation` builds (name, 0, 0, -1, 0, seq, 0, 1, global, 0, 0).
-    as<void*(__thiscall*)(void*, void*, int, int, int, int, int, int, int, int, int, int)>(
-        reinterpret_cast<void*>(kPlayAnimCtor))(action, name.raw(), 0, looping ? 1 : 0, looping ? loops : -1, 0,
-                                               static_cast<int>(sequence), 0, 1, global, 0, 0);
-    as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kQueueAction))(reinterpret_cast<void*>(comp), action);
-    return true;
+    alignas(4) uint32_t out[2] = {0, 0};
+    // (creature, anim, 0, looping, loops, &out, 0, global, 0, 0, seq): the arguments the
+    // scripted action passes for `.PlayLoopingAnim` / `.PlayAnimation` defaults.
+    as<void*(__thiscall*)(void*, void*, void*, int, int, int, void*, int, int, int, int, int)>(
+        reinterpret_cast<void*>(kCreatureAnimActionCtor))(action, self, handle, 0, looping ? 1 : 0,
+                                                          looping ? loops : -1, out, 0, global, 0, 0,
+                                                          static_cast<int>(sequence));
+    bool ok = true;
+    uintptr_t cur = read_ptr(thing + kCreatureCurrentAction);
+    if (!clear_first && cur) {
+        as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kCreatureQueueAction))(self, action);
+    } else {
+        ok = as<bool(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kCreatureSetAction))(self, action);
+    }
+    // Both calls keep a copy (action vtable +0x2C clones), so ours is deleted, as the engine does.
+    uintptr_t vt = read_ptr(reinterpret_cast<uintptr_t>(action));
+    as<void(__thiscall*)(void*, int)>(reinterpret_cast<void*>(read_ptr(vt)))(action, 1);
+    return ok;
 }
 }  // namespace
 

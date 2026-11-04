@@ -37,4 +37,6 @@ std::vector<std::string> take_world_requests();
 void set_party_marks(std::vector<ui::PartyMark> marks);
 /** The world connection went down: the party list is no longer current. */
 void clear_party();
+/** Mouse buttons as Fable last read them through DirectInput (bit 0 = left). */
+unsigned mouse_buttons();
 }  // namespace fo::overlay

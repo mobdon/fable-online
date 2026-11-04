@@ -31,6 +31,8 @@ constexpr uint32_t kHealth = 0x0B4;       // float
 uintptr_t local_hero();
 /** Forgets the cached hero: call on a region change. */
 void forget_hero();
+/** Marks a stand-in (another player shown with the hero's def) so the hero scan skips it. */
+void mark_stand_in(uintptr_t thing, bool on);
 
 bool read_pos(uintptr_t thing, Pos& out);
 /** Facing in radians, the same convention write_pos uses (forward = -sin, cos). */

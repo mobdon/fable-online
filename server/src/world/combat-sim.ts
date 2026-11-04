@@ -14,7 +14,7 @@ import type { EntityState, PlayerInput, RegionSim, SimFactory, SimHealing, Vec3 
 import { HOSTILE_FACTIONS, SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
 import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
-import type { AiWorld, Creature as AiCreature } from './ai/types.js';
+import { Anim, type AiWorld, type Creature as AiCreature } from './ai/types.js';
 import { ChannelLaw, type LawServices } from '../law/guards.js';
 
 /** Input button bits the mod sends. Spell slot = (buttons >> SPELL_SHIFT) & 0xF, 1-based. */
@@ -76,7 +76,14 @@ interface HeroSlot {
   /** ms until respawn while dead, null while alive. */
   downMs: number | null;
   phial: boolean;
+  /** A swing or a flinch shown to other players for this many more ms (0: none). */
+  actMs: number;
+  actAnim: number;
 }
+
+/** How long other players see a hero's swing and flinch. */
+const SWING_SHOW_MS = 450;
+const FLINCH_SHOW_MS = 350;
 
 /**
  * A channel's world: hero movement (same kinematics as StubSim), server-side combat,
@@ -111,10 +118,12 @@ export class CombatSim implements RegionSim {
     };
     this.combat = new CombatSystem(s.data, hooks, s.harm ?? defaultHarmPolicy);
     this.combat.onDeath((d) => this.onDeath(d));
-    this.combat.onHit((a, t) => {
+    this.combat.onHit((a, t, _dmg, killed) => {
       const now = Date.now();
       if (a.kind === 'hero') this.lastHit.set(a.id, now);
       if (t.kind === 'hero') this.lastHit.set(t.id, now);
+      const slot = t.kind === 'hero' ? this.heroes.get(t.id) : undefined;
+      if (slot && !killed && slot.actAnim !== Anim.Attack) this.showAct(slot, Anim.Hit, FLINCH_SHOW_MS);
     });
     this.spawns = new SpawnManager(s.spawns.regions[region.name], s.data, this.combat, hooks, s.spawnOptions);
     this.ai = s.ai?.({
@@ -240,7 +249,7 @@ export class CombatSim implements RegionSim {
     const hero = heroCombatant(heroId, at, this.s.data, l, (i) => {
       if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
     });
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false });
+    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0 });
     this.combat.add(hero);
   }
 
@@ -282,6 +291,7 @@ export class CombatSim implements RegionSim {
       this.charging.delete(heroId);
       const kind = h.weapon?.class === 'ranged' ? 'ranged' : h.chargeMs >= BALANCE.flourishChargeMs ? 'flourish' : 'light';
       this.combat.attack(heroId, null, kind);
+      this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
     }
     if (b & BUTTONS.CAST && !(prev & BUTTONS.CAST)) {
       const spell = SPELL_SLOTS[((b >> SPELL_SHIFT) & 0xf) - 1];
@@ -297,9 +307,10 @@ export class CombatSim implements RegionSim {
         if (slot.downMs !== null && (slot.downMs -= dtMs) <= 0) this.respawn(slot);
         continue;
       }
+      if (slot.actMs > 0 && (slot.actMs -= dtMs) <= 0) slot.actAnim = 0;
       const [mx, my] = slot.move;
       if ((mx === 0 && my === 0) || h.stunnedMs > 0) {
-        h.anim = 0;
+        h.anim = this.actAnim(slot, 0);
         continue;
       }
       // Blocking and winding up a flourish slow the hero down, as in Fable.
@@ -308,13 +319,25 @@ export class CombatSim implements RegionSim {
       const c = Math.cos(h.yaw);
       h.pos.x += (mx * c - my * s) * d * k;
       h.pos.y += (mx * s + my * c) * d * k;
-      h.anim = 1;
+      h.anim = this.actAnim(slot, 1);
     }
     this.combat.step(dtMs, this.charging);
     this.ai?.step?.(dtMs);
     this.spawns.setHeroes([...this.heroes.values()].map((h) => h.hero.pos));
     this.spawns.step(dtMs);
     if (this.law) this.stepGuards(dtMs);
+  }
+
+  private showAct(slot: HeroSlot, anim: number, ms: number): void {
+    slot.actAnim = anim;
+    slot.actMs = ms;
+  }
+
+  /** What other players see: a swing or flinch in progress, then a raised guard, then `moving`. */
+  private actAnim(slot: HeroSlot, moving: number): number {
+    if (slot.actMs > 0 && slot.actAnim) return slot.actAnim;
+    if (slot.hero.blocking) return Anim.Block;
+    return moving;
   }
 
   snapshot(): EntityState[] {
@@ -441,7 +464,7 @@ export class CombatSim implements RegionSim {
 
 function state(c: Hero | Creature, defId: number): EntityState {
   const r = (n: number) => Math.round(n * 100) / 100;
-  return { id: c.id, def_id: defId, x: r(c.pos.x), y: r(c.pos.y), z: r(c.pos.z), yaw: r(c.yaw), anim: c.alive ? c.anim : 2, health: Math.ceil(c.health) };
+  return { id: c.id, def_id: defId, x: r(c.pos.x), y: r(c.pos.y), z: r(c.pos.z), yaw: r(c.yaw), anim: c.alive ? c.anim : Anim.Death, health: Math.ceil(c.health) };
 }
 
 export const combatSimFactory =

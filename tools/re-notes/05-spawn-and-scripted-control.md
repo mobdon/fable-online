@@ -89,6 +89,26 @@ reference to the target thing, so driving a puppet with it needs a second thing 
 
 ## Playing animations (used by the puppets)
 
+**Correction (in-game test):** a `CREATURE_HERO` thing has no `CTCScriptedControl`. Components
+come from the def through a registry by name (`0x004EFFB4` registers the factory `0x004D311E`
+as "CTCScriptedControl"), and the hero's def does not list it. Bit `id` of the dwords at
+`thing+0x20` says which components a thing has (bit 31 of +0x20 is 0x1F). So the puppets skip
+the scripted queue and do what `CActionPlayAnimation::Update` (`0x00712900`) does, on the
+creature itself:
+
+| What | Address | Shape |
+| --- | --- | --- |
+| refuse new actions now | `0x0085F0C0` | `CThing::() -> bool` |
+| animation by name | `0x00662D80` | `CThing::(CCharString*, int -1) -> anim`, `ret 8` |
+| creature play-animation action | `0x008425E0` | ctor, 0xB4 bytes: `(creature, anim, b, looping, loops, out[2], b, global, b, 0, seq)` |
+| set as the current action | `0x006644F0` | `CThing::(action*) -> bool`, keeps a clone (action vtable +0x2C) |
+| queue behind the current one | `0x00664490` | `CThing::(action*)`, keeps a clone |
+| current action | `thing+0x100` | its byte +0x61 set = finished |
+
+The caller deletes its own action afterwards (vtable slot 0 with 1), as the engine does.
+
+The scripted-control path below is still right for creatures whose def has the component.
+
 The handle is not needed: every handle slot finds the thing's `CTCScriptedControl`
 (component id 0x1F, vtable `0x012658E4`) and queues an action on it. The mod does the same.
 
@@ -160,3 +180,24 @@ Script-created creatures (`CreateNear` and friends) never pass through this load
 
 Not checked in game yet: whether Fable records a removed level creature as dead in the save,
 which would keep it gone in an offline game played later from the same save.
+
+## Checks before the creature animation call (0x00662D80)
+
+0x00662D80 reads `[thing+0x70]` (def holder; 0x0042B0A2 calls its vfunc +0x38 with
+"CAppearanceDef") and `[[[[thing+0x134]+0x0C]]+0x08]` (0x0073A6E0, then its vfunc +0x10).
+The CThing ctor (0x004C9030) zeroes +0x70. A stand-in made by CreateNear was seen with
+garbage there (0xFFFFFFFF, 0xCCCCCCCC, string bytes), so the mod only calls the
+animation path when the thing, the +0x70 object and the +0x134 chain object all have
+valid MSVC RTTI (vtable-4 -> complete object locator, signature 0 -> type descriptor
+".?AV..."), the thing's class name contains "Creature", and the stand-in is at least
+2 s old. A refusal is logged with the failed check ("anims: refused ...").
+An unknown ST_ name falls back to the def's default animation inside 0x00662D80.
+
+## Script references hold a CGameScriptThing, not the CThing
+
+A script reference ({vtable 0x01238C8C, object*, counter*}) points at a CGameScriptThing
+(vtable 0x012852CC), the script runner's wrapper. Its CThingPtr is at +0x0C
+({vtable, control*}); the control block's first dword is the CThing, or 0 once the engine
+has freed it (0x00A01B50). Reading component or creature fields straight off the wrapper
+gives the garbage seen at +0x70. The wrapper's own slots (e.g. vtable +0x18, the "near"
+value CreateNear asks for) are still called on the wrapper itself.

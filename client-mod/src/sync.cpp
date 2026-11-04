@@ -339,7 +339,17 @@ void report_combat(uint32_t nowMs) {
     HWND fg = GetForegroundWindow();
     if (fg) GetWindowThreadProcessId(fg, &pid);
     bool focused = pid == GetCurrentProcessId() && !overlay::input_blocked_now();
-    auto down = [&](int vk) { return focused && vk && (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    // Fable owns the mouse through DirectInput, which can leave the window's own button
+    // state stale, so the mouse buttons are read from what Fable itself last read.
+    unsigned di = overlay::mouse_buttons();
+    auto down = [&](int vk) {
+        if (!focused || !vk) return false;
+        if (vk >= VK_LBUTTON && vk <= VK_MBUTTON) {
+            int bit = vk == VK_LBUTTON ? 0 : vk == VK_RBUTTON ? 1 : 2;
+            if (di & (1u << bit)) return true;
+        }
+        return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    };
     unsigned buttons = (down(s.attackVk) ? 1u : 0u) | (down(s.blockVk) ? 2u : 0u);
     if (buttons == s.lastButtons) return;
     s.lastButtons = buttons;
@@ -353,6 +363,7 @@ void report_combat(uint32_t nowMs) {
     else
         std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u}", ++s.inputSeq, buttons);
     net::world_send(frame);
+    if (s.inputSeq <= 40) fo::log("sync: sent buttons %u (attack %s)", buttons, buttons & 1 ? "down" : "up");
 }
 
 /**
