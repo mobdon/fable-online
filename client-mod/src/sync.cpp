@@ -19,6 +19,7 @@
 #include "overlay/overlay.h"
 #include "world/entities.h"
 #include "world/health.h"
+#include "world/held.h"
 #include "world/objects.h"
 #include "world/reporter.h"
 #include "world/snapshot.h"
@@ -48,6 +49,8 @@ struct State {
     world::EntityTable table;
     /** Doors, chests, items on the ground and the region-change handshake. */
     world::WorldObjects objects;
+    /** Exits and chest gives Fable was stopped from doing until the server answers. */
+    world::HeldActions held;
     /** The hero's area when a region change began, to see the local load finish. */
     uint32_t areaBeforeLoad = 0;
     /** The hero's area at the last report, to notice Fable loading another area by itself. */
@@ -103,6 +106,8 @@ void on_disconnected(const std::string& why) {
             static_cast<unsigned>(g_state->puppets->live_count()));
     g_state->table.clear();
     g_state->objects.clear();
+    // Nobody will answer what is held: let Fable carry on by itself.
+    g_state->held.release_all("offline");
     g_state->puppets->clear_all();
     // With no server driving them, the local generators should run the region again.
     game::spawns::restore();
@@ -188,6 +193,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
                         rc.from.c_str(), rc.via.c_str(), rc.entrance.c_str());
             }
             s.objects.begin_region(rc, nowMs);
+            // The hero has been moved: an exit Fable was held at may load the region now.
+            if (rc.loading) s.held.on_region_change();
         }
         // No entity id carries across a region, and the hero object is rebuilt.
         s.table.clear();
@@ -317,6 +324,54 @@ void apply_health(uint32_t nowMs) {
     }
 }
 
+const char* event_name(game::things::Event::Kind k) {
+    switch (k) {
+    case game::things::Event::Kind::Exit: return "exit";
+    case game::things::Event::Kind::Give: return "give";
+    case game::things::Event::Kind::DoorOpened: return "door opened";
+    case game::things::Event::Kind::DoorClosed: return "door closed";
+    }
+    return "?";
+}
+
+/** What the hero did with Fable's doors, chests and exits: ask the server, hold Fable's own action. */
+void send_thing_events(uint32_t nowMs) {
+    State& s = *g_state;
+    using Kind = game::things::Event::Kind;
+    for (const game::things::Event& e : game::things::drain_events()) {
+        const char* action = e.kind == Kind::DoorOpened ? "open" : e.kind == Kind::DoorClosed ? "close" : "use";
+        world::HeldKind hk = e.kind == Kind::Exit ? world::HeldKind::Exit : world::HeldKind::Give;
+        // Fable can ask again while the first one waits (a search timer runs every frame).
+        if (e.held && !s.held.hold(e.comp, hk, e.id, nowMs)) continue;
+        std::string frame;
+        bool sent = net::world_connected() && s.objects.request(e.id, action, nowMs, frame);
+        if (sent) net::world_send(frame);
+        if (s.dev || e.held) fo::log("sync: %s %s%s%s", event_name(e.kind), e.id.c_str(), e.held ? ", waiting for the server" : "",
+                                     sent ? "" : " (not sent)");
+        // A held action that could not be asked about must not wait for an answer.
+        if (e.held && !sent && !s.objects.loading()) {
+            world::Refusal r;
+            r.thing = e.id;
+            r.code = net::world_connected() ? "busy" : "offline";
+            s.held.on_refusal(r);
+        }
+    }
+}
+
+/** Carries out what the server decided about held exits and gives. */
+void run_decisions(uint32_t nowMs) {
+    State& s = *g_state;
+    for (const world::Decision& d : s.held.drain(nowMs)) {
+        const char* what = d.kind == world::HeldKind::Exit ? "exit" : "give";
+        if (d.verdict == world::Verdict::Drop) {
+            fo::log("sync: %s %s stopped by the server (%s)", what, d.id.c_str(), d.why.c_str());
+            continue;
+        }
+        bool ok = game::things::release(d.token, d.kind);
+        fo::log("sync: %s %s goes ahead (%s)%s", what, d.id.c_str(), d.why.c_str(), ok ? "" : ", but it is gone from the game");
+    }
+}
+
 /** Region-change handshake, and the server's door / chest / item answers. */
 void sync_objects(uint32_t nowMs) {
     State& s = *g_state;
@@ -329,9 +384,18 @@ void sync_objects(uint32_t nowMs) {
     for (const world::Loot& l : s.objects.drain_loot()) {
         fo::log("sync: %s gave %u gold and %u items%s%s", l.thing.c_str(), l.gold, static_cast<unsigned>(l.items.size()),
                 l.again ? " (already taken before)" : "", l.blocked.empty() ? "" : ", some blocked");
+        s.held.on_loot(l);
     }
-    for (const world::Refusal& r : s.objects.drain_refusals())
+    for (const world::Refusal& r : s.objects.drain_refusals()) {
         fo::log("sync: server refused %s: %s (%s)", r.thing.empty() ? "a request" : r.thing.c_str(), r.code.c_str(), r.message.c_str());
+        s.held.on_refusal(r);
+    }
+    for (const std::string& id : s.objects.drain_acks()) s.held.on_ok(id);
+
+    // Hold Fable's exits and gives only while there is a server to answer.
+    game::things::set_hold(net::world_connected() && !s.objects.loading());
+    send_thing_events(nowMs);
+    run_decisions(nowMs);
 }
 
 /** Keeps the F8 test puppet walking a circle around the hero so movement is visible. */
@@ -435,11 +499,14 @@ void start() {
         fo::log("sync: no server address in the environment; the mod runs offline (F8 still spawns a test puppet)");
         return;
     }
+    // Doors, chests and region exits go through the server (FABLE_ONLINE_THINGS=0 leaves them local).
+    if (env_flag("FABLE_ONLINE_THINGS", true)) game::things::install();
     net::world_start(cfg);
 }
 
 void stop() {
     net::world_stop();
+    game::things::remove();
     if (g_state) {
         g_state->puppets->clear_all();
         game::spawns::restore();
