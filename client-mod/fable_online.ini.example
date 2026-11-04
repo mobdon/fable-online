@@ -71,10 +71,19 @@ camera_assist=0
 camera_latch=0
 ; Over-the-shoulder camera: how far to move the view sideways (metres), so the crosshair
 ; isn't on the hero. Negative = over the left shoulder, positive = the right. 0 = Fable's own.
-camera_shoulder=0
+camera_shoulder=-0.5
+; Key that swaps the camera to the other shoulder while playing (Windows key code: 117 = F6,
+; 0 = no key).
+camera_shoulder_key=117
+; 1 = glide the camera between Fable's 15-a-second camera moves (stops the view jumping and
+; bouncing while you turn at high frame rates). 0 = Fable's own steps.
+camera_smooth=1
 ; 1 = melee, spells and target lock pick the enemy you're looking at (the centre of the
 ; view) instead of the one in front of the hero. Experimental.
 aim_at_crosshair=0
+; 1 = with a weapon or spell out, any creature you target is highlighted red like an enemy
+; (villagers too). 0 = Fable's own colours (red for enemies only).
+red_target=1
 ; HUD, minimap and menu size. auto = as big as on a 900-pixel-tall screen (x1.6 at 1440p,
 ; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4. Experimental: menus
 ; aren't stretched to fill the screen yet.

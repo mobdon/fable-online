@@ -94,6 +94,8 @@ void config_load(HMODULE self) {
     if (c.camera_shoulder > 3.0f || c.camera_shoulder < -3.0f) c.camera_shoulder = 0;
     c.camera_latch = ini_bool(f, L"display", L"camera_latch", c.camera_latch);
     c.camera_assist = ini_bool(f, L"display", L"camera_assist", c.camera_assist);
+    c.camera_smooth = ini_bool(f, L"display", L"camera_smooth", c.camera_smooth);
+    c.camera_shoulder_key = static_cast<int>(_wtoi(ini_str(f, L"display", L"camera_shoulder_key", L"117").c_str()));
     std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
     c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
     if (c.mouse_smoothing < -1 || c.mouse_smoothing > 60) c.mouse_smoothing = 0;
@@ -104,6 +106,7 @@ void config_load(HMODULE self) {
     if (c.hud_bottom_scale < 0 || c.hud_bottom_scale > 4.0f) c.hud_bottom_scale = 0;
     c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);
     c.aim_at_crosshair = ini_bool(f, L"display", L"aim_at_crosshair", c.aim_at_crosshair);
+    c.red_target = ini_bool(f, L"display", L"red_target", c.red_target);
     std::wstring ch = ini_str(f, L"overlay", L"crosshair", L"off");
     c.crosshair = ch == L"ring" ? Crosshair::Ring : ch == L"dot" ? Crosshair::Dot : ch == L"cross" ? Crosshair::Cross : Crosshair::Off;
 

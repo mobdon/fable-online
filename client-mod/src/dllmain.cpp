@@ -21,6 +21,7 @@
 #include "display/hud_scale.h"
 #include "display/mouse_look.h"
 #include "display/present.h"
+#include "display/target_colour.h"
 #include "display/widescreen.h"
 #include "menu/menu.h"
 #include "overlay/overlay.h"
@@ -148,6 +149,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         if (g_online) fo::display::install();   // a few code bytes and a VirtualAlloc: fine here
         if (g_online) fo::display::hud::install();
         if (g_online) fo::display::mouse_look::install();
+        if (g_online) fo::display::target_colour::install();
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);
         break;
