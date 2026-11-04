@@ -281,7 +281,7 @@ test('test realms can start new heroes in the shared world', () => {
 });
 
 test('an account with no hero gets one named after it on its first join', async () => {
-  const s = await serve({ newHeroPhase: 'world' });
+  const s = await serve({ newHeroPhase: 'world', autoHero: true });
   try {
     const base = s.url.replace('ws://', 'http://').replace('/play', '');
     const post = async (path: string, body: object, token?: string) =>

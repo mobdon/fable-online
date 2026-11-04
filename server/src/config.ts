@@ -148,7 +148,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     joinAnchor: flag('FO_JOIN_ANCHOR', true),
     resumeMs: num('FO_RESUME_MS', 5 * 60_000),
     newHeroPhase: heroPhase(str('FO_NEW_HERO_PHASE', 'childhood')),
-    autoHero: flag('FO_AUTO_HERO', true),
+    autoHero: flag('FO_AUTO_HERO', false),
     maxHeroesPerAccount: num('FO_MAX_HEROES', 3),
     sessionTtlMs: num('FO_SESSION_TTL_MS', 7 * 24 * 3600_000),
     gameDataPath: str('FO_GAME_DATA', 'data/game-data.json'),

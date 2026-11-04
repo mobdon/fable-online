@@ -60,7 +60,7 @@ still, so silence means idle.
 | Variable | Default | Test host |
 | --- | --- | --- |
 | `FO_NEW_HERO_PHASE` | `childhood` | `world`: new heroes start at the Guild, in the shared world |
-| `FO_AUTO_HERO` | on | The first join of an account with no hero makes one named after the account |
+| `FO_AUTO_HERO` | off | On: the first join of an account with no hero makes one named after the account |
 | `FO_PUBLIC_HOST` | `127.0.0.1` | The address friends reach the server on (Tailscale or LAN) |
 
 With no `manifest-live.json` in `server/content`, the server answers the launcher with an

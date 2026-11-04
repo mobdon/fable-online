@@ -14,6 +14,8 @@ set "FO_PUBLIC_HOST=%~1"
 if "%FO_PUBLIC_HOST%"=="" set "FO_PUBLIC_HOST=127.0.0.1"
 rem Test realm: new heroes start in the shared world (at the Guild), not in a private childhood.
 set FO_NEW_HERO_PHASE=world
+rem The launcher has no hero screen yet: an account's first join makes a hero named after it.
+set FO_AUTO_HERO=1
 rem The server checks every position the mod reports (speed, climbs, falls) and corrects cheats.
 set FO_CLIENT_MOVE=checked
 echo Players connect to %FO_PUBLIC_HOST% port 7777. Press Ctrl+C to stop (heroes are saved).
