@@ -6,8 +6,11 @@ rem Log in (Register makes an account; your hero is named after it), then Enter 
 cd /d "%~dp0"
 set "HOST=%~1"
 if "%HOST%"=="" set "HOST=127.0.0.1"
+taskkill /F /IM WerFault.exe >nul 2>&1
 taskkill /F /T /IM Fable.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
 set FABLE_ONLINE_WIDESCREEN=1
 set FABLE_ONLINE_DEV=1
 set FABLE_ONLINE_SUPPRESS_SPAWNS=1
+set FABLE_ONLINE_STANDIN_TEST=1
 fable_online_launcher.exe --gateway http://%HOST%:7777
