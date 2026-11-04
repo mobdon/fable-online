@@ -314,6 +314,10 @@ void ChatModel::submit(double now) {
         outbox_.push_back(msg + "}");
         return;
     }
+    if (cmd == "settings" || cmd == "mod" || cmd == "modsettings" || cmd == "options") {
+        settings_requested_ = true;   // the overlay opens the Mod settings screen
+        return;
+    }
     if (cmd == "tags") {
         tags_enabled_ = !tags_enabled_;
         system(tags_enabled_ ? "Name tags on." : "Name tags off.", now);
