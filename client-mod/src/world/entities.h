@@ -83,6 +83,15 @@ class EntityTable {
 
     size_t size() const { return live_.size(); }
     const Remote* find(uint32_t id) const;
+    /**
+     * This player's own hero as the server last had it (its health, for the local hero).
+     * False until a frame has carried it.
+     */
+    bool own_state(EntityState& out) const {
+        if (!haveOwn_) return false;
+        out = own_;
+        return true;
+    }
     /** Frames whose tick number went backwards (a stale or duplicated frame). */
     uint32_t stale_frames() const { return staleFrames_; }
 
@@ -100,6 +109,8 @@ class EntityTable {
     std::vector<Spawn> spawned_;
     std::vector<uint32_t> removed_;
     uint32_t localId_ = 0;
+    EntityState own_;
+    bool haveOwn_ = false;
     uint32_t lastTick_ = 0;
     uint32_t staleFrames_ = 0;
 };

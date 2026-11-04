@@ -35,6 +35,12 @@ export type ClientMessage =
   | { t: 'shop_open'; shop: string }
   | { t: 'shop_buy'; shop: string; def: string; qty: number; key: string }
   | { t: 'shop_sell'; shop: string; item: string; key: string }
+  /**
+   * The local game healed the hero by `share` of its max (a potion, food or Heal Life the mod
+   * cannot tell apart yet). The server decides what was used, spends it and heals by its own
+   * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
+   */
+  | { t: 'heal'; share: number; key: string }
   | LawRequest;
 
 /**
@@ -131,6 +137,9 @@ export function decode(raw: string): ClientMessage {
       return decodeLaw(m);
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
+    case 'heal':
+      if (!isNum(m.share) || m.share <= 0 || m.share > 2) throw new ProtocolError('bad heal');
+      return { t: 'heal', share: m.share, key: clientKey(m.key) };
     case 'shop_buy': {
       if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');
       const qty = isNum(m.qty) ? m.qty : 1;

@@ -148,6 +148,28 @@ export class Economy {
     });
   }
 
+  /**
+   * Use up one of an item from the hero's carried inventory (a potion drunk, food eaten).
+   * Takes from the smallest stack. Throws `not_owner` when the hero carries none.
+   */
+  consumeOne(heroId: number, defId: string, key: string): TxResult & { itemId: string } {
+    let used = '';
+    const r = this.action('consume', wallet(heroId), key, { defId }, (tx) => {
+      const it = this.db.get<ItemRow>(
+        "SELECT * FROM items WHERE owner_hero = ? AND def_id = ? AND location = 'inventory' AND quantity > 0 ORDER BY quantity, rowid LIMIT 1",
+        heroId,
+        defId,
+      );
+      if (!it) throw new GameError('not_owner', 'You do not have that item');
+      used = it.id;
+      if (it.quantity > 1) this.db.run('UPDATE items SET quantity = quantity - 1 WHERE id = ?', it.id);
+      else this.db.run("UPDATE items SET location = 'destroyed', destroyed_tx = ? WHERE id = ?", tx, it.id);
+      // Logged as a destroy of one: item_history's actions are fixed by a CHECK in the schema.
+      this.history(tx, it, 'destroy', heroId, null, -1);
+    });
+    return { ...r, itemId: used };
+  }
+
   /** Split `quantity` off a stack into a brand-new item ID. */
   splitStack(heroId: number, itemId: string, quantity: number, key: string): TxResult & { itemId: string } {
     let newId = '';

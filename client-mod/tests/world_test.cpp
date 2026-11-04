@@ -5,6 +5,7 @@
 #include <string>
 
 #include "world/entities.h"
+#include "world/health.h"
 #include "world/reporter.h"
 #include "world/snapshot.h"
 
@@ -252,6 +253,53 @@ void test_reporter() {
     CHECK(r.rtt_ms() == 100);
 }
 
+void test_health() {
+    // The own hero's state is kept from the frame, max_health included.
+    Tick t;
+    CHECK(parse_tick(R"({"t":"tick","tick":3,"entities":[{"id":7,"kind":"hero","x":1,"y":2,"z":3,"health":40,"max_health":160},{"id":9,"x":0,"y":0,"z":0,"health":5}]})", t));
+    CHECK(t.entities.size() == 2 && t.entities[0].maxHealth == 160 && t.entities[1].maxHealth == 0);
+    EntityTable table;
+    EntityState own;
+    CHECK(!table.own_state(own));
+    table.set_local_id(7);
+    table.on_tick(t, 1000);
+    CHECK(table.own_state(own) && own.health == 40 && own.maxHealth == 160);
+    CHECK(table.size() == 1);  // still no puppet for ourselves
+    table.clear();
+    CHECK(!table.own_state(own));
+
+    CHECK(health_target(40, 160, 300, 300) == 75);    // a quarter of Fable's own max
+    CHECK(health_target(160, 160, 299.8f, 300) < 0); // rounding only: left alone
+    CHECK(health_target(160, 160, 120, 300) == 300);  // healed on the server
+    CHECK(health_target(0, 160, 50, 300) == 1);       // downed: held at 1, never Fable's death
+    CHECK(health_target(0, 160, 1, 300) < 0);         // already there
+    CHECK(health_target(200, 160, 10, 300) == 300);   // over max is max
+    CHECK(health_target(40, 0, 300, 300) < 0);        // no max from the server: leave it
+    CHECK(health_target(40, 160, 300, 0) < 0);        // Fable has no max yet
+    CHECK(health_target(NAN, 160, 300, 300) < 0);
+
+    // A local heal is gathered, reported once as a share of max, and held while the server answers.
+    HealWatch w;
+    float share = 0;
+    w.observe(100, 200, 1000);
+    CHECK(!w.holding(1000));
+    w.observe(150, 200, 1033);  // a potion: +50
+    w.observe(160, 200, 1066);  // still landing: +10
+    CHECK(w.holding(1100));
+    CHECK(!w.take_report(1200, share));  // still gathering
+    CHECK(w.take_report(1340, share) && std::fabs(share - 0.3f) < 1e-4f);
+    CHECK(!w.take_report(1400, share));  // only once
+    CHECK(w.holding(2000));
+    CHECK(!w.holding(3000));
+    // The mod's own writes are not heals.
+    w.wrote(190);
+    w.observe(190, 200, 3100);
+    CHECK(!w.holding(3100) && !w.take_report(3500, share));
+    // Damage is not a heal either.
+    w.observe(120, 200, 3600);
+    CHECK(!w.holding(3600));
+}
+
 }  // namespace
 
 int main() {
@@ -266,6 +314,7 @@ int main() {
     test_real_frame();
     test_connection_frames();
     test_reporter();
+    test_health();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;
 }

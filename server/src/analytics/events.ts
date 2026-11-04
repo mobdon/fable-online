@@ -50,7 +50,9 @@ export type GameEvent =
   | { type: 'steal'; heroId: number; shop: string; defId: string; value: number; spotted: boolean; chance: number }
   | { type: 'bounty_placed'; heroId: number; victim: string }
   | { type: 'shop_buy'; heroId: number; shopId: string; defId: string; quantity: number; price: number; replayed: boolean }
-  | { type: 'shop_sell'; heroId: number; shopId: string; itemId: string; gold: number; replayed: boolean };
+  | { type: 'shop_sell'; heroId: number; shopId: string; itemId: string; gold: number; replayed: boolean }
+  /** The local game healed a hero: what the server matched it to and spent, or why it refused. */
+  | { type: 'heal'; heroId: number; ok: boolean; share: number; source?: 'spell' | 'item'; def?: string; healed?: number; reason?: string };
 
 export interface EventSink {
   emit(e: GameEvent): void;

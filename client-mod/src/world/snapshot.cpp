@@ -120,7 +120,7 @@ bool read_entity(Reader& r, EntityState& e) {
         if (key == "id") {
             if (!r.read_number(n)) return false;
             e.id = static_cast<uint32_t>(n);
-        } else if (key == "x" || key == "y" || key == "z" || key == "yaw" || key == "health" || key == "renown" ||
+        } else if (key == "x" || key == "y" || key == "z" || key == "yaw" || key == "health" || key == "max_health" || key == "renown" ||
                    key == "anim" || key == "kind_id") {
             if (!r.read_number(n)) return false;
             if (key == "x") { e.x = static_cast<float>(n); have_pos = true; }
@@ -128,6 +128,7 @@ bool read_entity(Reader& r, EntityState& e) {
             else if (key == "z") e.z = static_cast<float>(n);
             else if (key == "yaw") e.yaw = static_cast<float>(n);
             else if (key == "health") e.health = static_cast<float>(n);
+            else if (key == "max_health") e.maxHealth = static_cast<float>(n);
             else if (key == "renown") e.renown = static_cast<uint32_t>(n);
             else if (key == "anim") e.anim = n >= 0 && n <= 10 ? static_cast<Anim>(static_cast<uint8_t>(n)) : Anim::Idle;
         } else if (key == "def") {
