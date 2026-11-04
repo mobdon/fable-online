@@ -30,6 +30,8 @@ enabled=1
 enabled=1
 font_px=15
 chat_rows=8
+; A mark at the centre of the view while you play: off, ring, dot or cross.
+crosshair=off
 
 [display]
 ; 1 = widescreen field of view: on screens wider than 4:3 you see more to the sides

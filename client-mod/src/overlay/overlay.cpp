@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <mutex>
@@ -277,6 +278,41 @@ void draw_chat(const Config& cfg, double now) {
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(conv_x, y, phys[i].first, phys[i].second);
 }
 
+// A small mark at the centre of the view, in the warm parchment-gold of Fable's menu text
+// over a soft dark halo so it reads on snow and on night scenes alike. Sized with the screen
+// height, so it looks the same at 1080p and at 4K.
+void draw_crosshair(const Config& cfg) {
+    if (cfg.crosshair == Crosshair::Off || !g_hero.valid) return;
+    const float k = g_r.screen_h() / 900.0f;
+    const float cx = std::floor(g_r.screen_w() * 0.5f) + 0.5f, cy = std::floor(g_r.screen_h() * 0.5f) + 0.5f;
+    constexpr uint32_t kGold = 0xD8E9D6A0, kHalo = 0x70000000;
+    switch (cfg.crosshair) {
+    case Crosshair::Ring:
+        g_r.ring(cx, cy, 7.0f * k, 10.5f * k, 1.2f * k, kHalo);
+        g_r.ring(cx, cy, 8.0f * k, 9.5f * k, 0.8f * k, kGold);
+        g_r.ring(cx, cy, 0.0f, 2.2f * k, 1.0f * k, kHalo);
+        g_r.ring(cx, cy, 0.0f, 1.3f * k, 0.6f * k, kGold);
+        break;
+    case Crosshair::Dot:
+        g_r.ring(cx, cy, 0.0f, 3.2f * k, 1.2f * k, kHalo);
+        g_r.ring(cx, cy, 0.0f, 2.0f * k, 0.7f * k, kGold);
+        break;
+    case Crosshair::Cross: {
+        const float gap = 3.5f * k, len = 7.0f * k, t = 1.4f * k, f = 0.7f * k;
+        for (int halo = 1; halo >= 0; --halo) {
+            const float e = halo ? 1.0f * k : 0.0f;
+            const uint32_t c = halo ? kHalo : kGold;
+            g_r.soft_rect(cx - gap - len - e, cy - t / 2 - e, len + 2 * e, t + 2 * e, f, c);
+            g_r.soft_rect(cx + gap - e, cy - t / 2 - e, len + 2 * e, t + 2 * e, f, c);
+            g_r.soft_rect(cx - t / 2 - e, cy - gap - len - e, t + 2 * e, len + 2 * e, f, c);
+            g_r.soft_rect(cx - t / 2 - e, cy + gap - e, t + 2 * e, len + 2 * e, f, c);
+        }
+        break;
+    }
+    case Crosshair::Off: break;
+    }
+}
+
 void draw(IDirect3DDevice9* dev) {
     const Config& cfg = config();
     const assets::UiArt* art = g_art.load();
@@ -292,6 +328,7 @@ void draw(IDirect3DDevice9* dev) {
     if (g_hero.valid)
         g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, g_hero.x, g_hero.y, g_hero.z);
     if (!g_r.begin(dev, art, cfg.font_px)) return;
+    draw_crosshair(cfg);
     draw_tags(cfg);
     if (cfg.chat_enabled) draw_chat(cfg, now);
     g_r.end();
