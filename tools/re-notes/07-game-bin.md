@@ -78,3 +78,12 @@ game's file alone. The copy is written to `cache\game.bin` next to fable_online.
 game's CreateFile of `CompiledDefs\game.bin` is pointed at it. `[shops] filter = false` in
 fable_online.ini turns it off. Not yet checked in game: the log line `shops: ... stock rows
 emptied` says what it did.
+
+Shops also keep their stock in the save. CTCShop's persist (around 0x775D80) writes
+`StockItemDefsKeys`, `StockItemDefsQuantity` and `StockItemDefsMaxStock`. On load
+(0x775EED onwards), each saved key is resolved to a def and looked up in the shop's def rows
+with 0x772250 (thiscall, one arg, `ret 4`). That function returns the row's stock record
+(+0 type, +4 Quantity, +8 PriceMultiplier, +0xC MaxStock, as floats), and the saved quantity
+and max stock are copied over it. A shop saved before the filter therefore kept its banned items.
+The mod redirects the check call at 0x776024 so that a row the filter emptied counts as
+"not stocked", which is the branch Fable already takes for items a shop no longer lists.

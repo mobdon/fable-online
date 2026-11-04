@@ -9,5 +9,7 @@ namespace fo::game::shop_stock {
 
 /** Hooks CreateFileA/W in Fable.exe's import table. Call from DllMain, before the game runs. */
 void install(HMODULE self);
+/** One log line: whether the filtered game.bin was served and the save-load check patched. */
+void log_status();
 
 }  // namespace fo::game::shop_stock
