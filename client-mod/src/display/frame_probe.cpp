@@ -12,7 +12,8 @@ namespace fo::display::probe {
 namespace {
 constexpr int kSetRenderTarget = 37, kSetViewport = 47, kDrawPrimitive = 81, kDrawIndexedPrimitive = 82,
               kDrawPrimitiveUP = 83, kDrawIndexedPrimitiveUP = 84, kSetVertexDeclaration = 87, kSetFVF = 89,
-              kSetVertexShader = 92, kSetVertexShaderConstantF = 94;
+              kSetVertexShader = 92, kSetVertexShaderConstantF = 94,
+              kSetRenderState = 57, kSetTexture = 65, kSetPixelShader = 107, kSetPixelShaderConstantF = 109;
 
 using SetRenderTarget_t = HRESULT(WINAPI*)(IDirect3DDevice9*, DWORD, IDirect3DSurface9*);
 using SetViewport_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
@@ -24,6 +25,10 @@ using SetVertexDeclaration_t = HRESULT(WINAPI*)(IDirect3DDevice9*, IDirect3DVert
 using SetFVF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, DWORD);
 using SetVertexShader_t = HRESULT(WINAPI*)(IDirect3DDevice9*, IDirect3DVertexShader9*);
 using SetVertexShaderConstantF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, UINT, const float*, UINT);
+using SetRenderState_t = HRESULT(WINAPI*)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+using SetTexture_t = HRESULT(WINAPI*)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9*);
+using SetPixelShader_t = HRESULT(WINAPI*)(IDirect3DDevice9*, IDirect3DPixelShader9*);
+using SetPixelShaderConstantF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, UINT, const float*, UINT);
 using Disassemble_t = HRESULT(WINAPI*)(const DWORD*, BOOL, LPCSTR, ID3DXBuffer**);
 
 SetRenderTarget_t o_SetRenderTarget;
@@ -36,11 +41,15 @@ SetVertexDeclaration_t o_SetVertexDeclaration;
 SetFVF_t o_SetFVF;
 SetVertexShader_t o_SetVertexShader;
 SetVertexShaderConstantF_t o_SetVertexShaderConstantF;
+SetRenderState_t o_SetRenderState;
+SetTexture_t o_SetTexture;
+SetPixelShader_t o_SetPixelShader;
+SetPixelShaderConstantF_t o_SetPixelShaderConstantF;
 
 // Render thread only.
 bool g_on = false;
 int g_lines = 0;
-constexpr int kMaxLines = 6000;
+constexpr int kMaxLines = 12000;
 IDirect3DVertexShader9* g_vs = nullptr;
 std::vector<IDirect3DVertexShader9*> g_shaders;   // seen this capture, in order
 std::vector<IDirect3DVertexDeclaration9*> g_decls;
@@ -121,8 +130,9 @@ void dump_shaders() {
     g_decls.clear();
 }
 
-void draw_line(const char* kind, unsigned prims, const void* up, UINT stride) {
+void draw_line(const char* kind, unsigned prims, const void* up, UINT stride, void* caller) {
     if (!g_on) return;
+    line("  from %p", caller);
     char extra[160] = "";
     if (up && stride >= 16) {
         const float* f = static_cast<const float*>(up);
@@ -144,20 +154,20 @@ HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     return o_SetViewport(d, v);
 }
 HRESULT WINAPI hk_DrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT a, UINT n) {
-    draw_line("DrawPrimitive", n, nullptr, 0);
+    draw_line("DrawPrimitive", n, nullptr, 0, __builtin_return_address(0));
     return o_DrawPrimitive(d, t, a, n);
 }
 HRESULT WINAPI hk_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT b, UINT m, UINT nv, UINT s, UINT n) {
-    draw_line("DrawIndexedPrimitive", n, nullptr, 0);
+    draw_line("DrawIndexedPrimitive", n, nullptr, 0, __builtin_return_address(0));
     return o_DrawIndexedPrimitive(d, t, b, m, nv, s, n);
 }
 HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT n, const void* v, UINT stride) {
-    draw_line("DrawPrimitiveUP", n, v, stride);
+    draw_line("DrawPrimitiveUP", n, v, stride, __builtin_return_address(0));
     return o_DrawPrimitiveUP(d, t, n, v, stride);
 }
 HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT mi, UINT nv, UINT n, const void* i,
                                          D3DFORMAT f, const void* v, UINT stride) {
-    draw_line("DrawIndexedPrimitiveUP", n, v, stride);
+    draw_line("DrawIndexedPrimitiveUP", n, v, stride, __builtin_return_address(0));
     return o_DrawIndexedPrimitiveUP(d, t, mi, nv, n, i, f, v, stride);
 }
 HRESULT WINAPI hk_SetVertexDeclaration(IDirect3DDevice9* d, IDirect3DVertexDeclaration9* decl) {
@@ -182,6 +192,28 @@ HRESULT WINAPI hk_SetVertexShaderConstantF(IDirect3DDevice9* d, UINT start, cons
     return o_SetVertexShaderConstantF(d, start, c, n);
 }
 
+HRESULT WINAPI hk_SetRenderState(IDirect3DDevice9* d, D3DRENDERSTATETYPE st, DWORD v) {
+    // Colours and blending: what decides a tint such as the target highlight.
+    if (g_on && (st == D3DRS_TEXTUREFACTOR || st == D3DRS_SRCBLEND || st == D3DRS_DESTBLEND || st == D3DRS_ALPHABLENDENABLE ||
+                 st == D3DRS_AMBIENT))
+        line("SetRenderState %d = 0x%08lX", static_cast<int>(st), static_cast<unsigned long>(v));
+    return o_SetRenderState(d, st, v);
+}
+HRESULT WINAPI hk_SetTexture(IDirect3DDevice9* d, DWORD stage, IDirect3DBaseTexture9* t) {
+    if (g_on) line("SetTexture %lu %p", static_cast<unsigned long>(stage), static_cast<void*>(t));
+    return o_SetTexture(d, stage, t);
+}
+HRESULT WINAPI hk_SetPixelShader(IDirect3DDevice9* d, IDirect3DPixelShader9* ps) {
+    if (g_on) line("SetPixelShader %p", static_cast<void*>(ps));
+    return o_SetPixelShader(d, ps);
+}
+HRESULT WINAPI hk_SetPixelShaderConstantF(IDirect3DDevice9* d, UINT start, const float* c, UINT n) {
+    if (g_on && c)
+        for (UINT i = 0; i < n && i < 8; ++i)
+            line("  pc%u = %.5g %.5g %.5g %.5g", start + i, c[i * 4], c[i * 4 + 1], c[i * 4 + 2], c[i * 4 + 3]);
+    return o_SetPixelShaderConstantF(d, start, c, n);
+}
+
 template <typename T>
 void slot(IDirect3DDevice9* dev, int index, T hook, T& orig) {
     if (auto o = fo::patch::vtable(dev, index, reinterpret_cast<void*>(hook))) orig = reinterpret_cast<T>(o);
@@ -199,6 +231,10 @@ void hook(IDirect3DDevice9* dev) {
     slot(dev, kSetFVF, hk_SetFVF, o_SetFVF);
     slot(dev, kSetVertexShader, hk_SetVertexShader, o_SetVertexShader);
     slot(dev, kSetVertexShaderConstantF, hk_SetVertexShaderConstantF, o_SetVertexShaderConstantF);
+    slot(dev, kSetRenderState, hk_SetRenderState, o_SetRenderState);
+    slot(dev, kSetTexture, hk_SetTexture, o_SetTexture);
+    slot(dev, kSetPixelShader, hk_SetPixelShader, o_SetPixelShader);
+    slot(dev, kSetPixelShaderConstantF, hk_SetPixelShaderConstantF, o_SetPixelShaderConstantF);
     fo::log("probe: frame probe ready, press F10 in game to capture one frame");
 }
 
