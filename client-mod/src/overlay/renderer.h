@@ -41,6 +41,12 @@ public:
     void rule(float x, float y, float w, float alpha);
     // UTF-8 text with Fable's soft black shadow (or a full outline for name tags).
     float text(float x, float y, const std::string& utf8, uint32_t argb, Face f = Face::Chat, bool outline = false);
+    // The same text scaled (linear filtering), with a dark outline, for matching Fable's
+    // larger menu lettering. Returns the scaled width.
+    float text_scaled(float x, float y, const std::string& utf8, uint32_t argb, Face f, float scale);
+    // A rounded menu row like the entries of Fable's in-game menu: `edge` outline, fill
+    // shading from `top` to `bottom`, left corners radius h/4, right end fully round.
+    void pill(float x, float y, float w, float h, uint32_t top, uint32_t bottom, uint32_t edge);
     float measure(const std::string& utf8, Face f = Face::Chat) const;
     std::vector<std::string> wrap(const std::string& utf8, float max_w, Face f = Face::Chat) const;
     float line_height(Face f = Face::Chat) const;

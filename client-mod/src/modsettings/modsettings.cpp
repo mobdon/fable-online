@@ -414,9 +414,15 @@ void draw_pause_button(Renderer& r, bool) {
     }
     was_paused = paused;
     if (!show) { g_pause_mouse_was_down = false; return; }
-    const float line = r.line_height(Face::Chat);
-    const float h = std::round(line * 2.0f), w = std::round(std::fmax(200.0f, line * 13));
-    const float x = std::round(r.screen_w() * 0.04f), y = std::round(r.screen_h() - h - r.screen_h() * 0.06f);
+    // An extra entry at the foot of Fable's in-game menu list, in the same place, size and
+    // look as Fable's own rows. Fable lays that list out on a 480-line grid scaled to the
+    // screen height and anchored left: the first row's top edge at 75.3, 15 per row, the
+    // bar from x 4.7 to 116.7, text from x 15.3 (measured at 2560x1440). Seven rows
+    // (Inventory .. Return To Game), so ours is the eighth.
+    const float u = r.screen_h() / 480.0f;
+    const float pitch = 15.0f * u;
+    const float x = std::round(4.7f * u), w = std::round(112.0f * u);
+    const float y = std::round((75.3f + 7 * 15.0f) * u), h = std::round(pitch - u / 3);
     POINT pt;
     RECT rc;
     bool inside = false;
@@ -426,15 +432,19 @@ void draw_pause_button(Renderer& r, bool) {
     }
     const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     if (inside && down && !g_pause_mouse_was_down && GetForegroundWindow() == g_window) {
-        fo::log("modsettings: opened from the pause screen");
+        fo::log("modsettings: opened from Fable's menu");
         g_pause_mouse_was_down = down;
         open(kExtras);
         return;
     }
     g_pause_mouse_was_down = down;
     g_pause_lit = inside;
-    r.bar(x, y, w, h, 1.0f, inside, true);
-    text_centred(r, x + w / 2, y + (h - line) / 2, "MOD SETTINGS", inside ? kTextLit : kText, Face::Chat);
+    // Colours sampled from Fable's rows: pewter grey, warm gold when under the pointer.
+    if (inside) r.pill(x, y, w, h, 0xFFB49A60, 0xFF8E7444, 0xFF020101);
+    else r.pill(x, y, w, h, 0xFF99907F, 0xFF7E766A, 0xFF020101);
+    const float target = h * 0.66f;   // Fable's capitals fill about two thirds of the row
+    const float scale = target / std::max(1.0f, r.line_height(Face::Title));
+    r.text_scaled(std::round(15.3f * u), y + (h - target) / 2, "Mod Settings", 0xFFFFFFFF, Face::Title, scale);
 }
 
 bool input_blocked() { return g_open.load() || GetTickCount() < g_block_until.load(); }
