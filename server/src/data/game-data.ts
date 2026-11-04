@@ -43,6 +43,14 @@ export interface CreatureData {
   group: string | null;
   /** A per-creature melee multiplier read from the creature def (unverified meaning). */
   attackScale: number;
+  /** Fable's drop tables (REWARD_* object families) this creature rolls on when it dies. */
+  rewards?: string[];
+}
+
+/** One row of a Fable drop table: an object def (null = nothing) and its weight. */
+export interface RewardRow {
+  item: string | null;
+  weight: number;
 }
 
 export interface SpellData {
@@ -67,6 +75,8 @@ export interface GameData {
   /** CREATURE_GENERATION_FAMILY name -> the creature defs a generator may pick from it. */
   families: Record<string, string[]>;
   questCards: Record<string, QuestCardData>;
+  /** OBJECT_FAMILY REWARD_* name -> its weighted rows (one pick per kill). */
+  rewardTables?: Record<string, RewardRow[]>;
 }
 
 /** Hand-made numbers in Fable's ballpark. Not taken from the game files. */
@@ -81,9 +91,11 @@ export const FALLBACK_DATA: GameData = {
     OBJECT_HEALTH_POTION: { value: 100 },
     OBJECT_WILL_POTION: { value: 250 },
     OBJECT_RESURRECTION_PHIAL: { value: 1000 },
+    OBJECT_GEMSTONE_RUBY: { value: 600 },
   },
   creatures: {
-    CREATURE_BANDIT_GRUNT_LEVEL1: { health: 30, experience: 10, reward2: 10, faction: 'FACTION_BANDITS', combatType: null, weapon: 'OBJECT_IRON_LONGSWORD', group: 'G_CREATURES_BANDIT', attackScale: 1 },
+    CREATURE_BANDIT_GRUNT_LEVEL1: { health: 30, experience: 10, reward2: 10, faction: 'FACTION_BANDITS', combatType: null, weapon: 'OBJECT_IRON_LONGSWORD', group: 'G_CREATURES_BANDIT', attackScale: 1, rewards: ['REWARD_BANDIT_01'] },
+    CREATURE_EARTH_TROLL: { health: 200, experience: 120, reward2: 90, faction: 'FACTION_MONSTERS', combatType: null, weapon: null, group: 'G_CREATURES_FAE', attackScale: 3.5, rewards: ['REWARD_TROLL_01'] },
     CREATURE_WOLF: { health: 20, experience: 8, reward2: 0, faction: 'FACTION_MONSTERS', combatType: null, weapon: null, group: 'G_CREATURES_ANIMAL', attackScale: 1.5 },
     CREATURE_TRADER_TEST: { health: 20, experience: 0, reward2: 0, faction: 'FACTION_TRADERS', combatType: null, weapon: null, group: null, attackScale: 1 },
   },
@@ -94,11 +106,26 @@ export const FALLBACK_DATA: GameData = {
     OBJECT_QUEST_CARD_TEST_WOLVES: { gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'] },
     OBJECT_QUEST_CARD_TEST_NO_GOLD: { gold: 0, renown: 50, items: [] },
   },
+  // Same shape as Fable's own tables (weights as in game.bin).
+  rewardTables: {
+    REWARD_BANDIT_01: [
+      { item: 'OBJECT_GOLD_5', weight: 150 },
+      { item: 'OBJECT_GOLD_10', weight: 50 },
+      { item: 'OBJECT_DYNAMIC_POTION_DUMMY', weight: 50 },
+      { item: 'OBJECT_DYNAMIC_RESURRECTION_DUMMY', weight: 150 },
+      { item: 'OBJECT_RED_MEAT_01', weight: 75 },
+      { item: null, weight: 500 },
+    ],
+    REWARD_TROLL_01: [
+      { item: 'OBJECT_DYNAMIC_POTION_DUMMY', weight: 100 },
+      { item: 'OBJECT_GEMSTONE_RUBY', weight: 200 },
+    ],
+  },
 };
 
 export function loadGameData(file: string | undefined): GameData {
   if (!file || !fs.existsSync(file)) return FALLBACK_DATA;
   const d = JSON.parse(fs.readFileSync(file, 'utf8')) as GameData;
   if (!d.items || !d.creatures) throw new Error(`${file} is not a game-data file`);
-  return { ...d, abilities: d.abilities ?? [], spells: d.spells ?? {}, families: d.families ?? {}, questCards: d.questCards ?? {} };
+  return { ...d, abilities: d.abilities ?? [], spells: d.spells ?? {}, families: d.families ?? {}, questCards: d.questCards ?? {}, rewardTables: d.rewardTables ?? {} };
 }

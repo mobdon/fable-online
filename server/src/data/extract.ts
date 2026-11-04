@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GameBin, NamesBin, fieldOffset, readF32, readI32, type Def } from './fable-bin.js';
-import type { CreatureData, GameData, ItemData, QuestCardData, SpellData, WeaponClass, WeaponType } from './game-data.js';
+import type { CreatureData, GameData, ItemData, QuestCardData, RewardRow, SpellData, WeaponClass, WeaponType } from './game-data.js';
 
 /**
  * Pulls the numbers the server needs out of game.bin. Each field below was identified by
@@ -17,6 +17,10 @@ export const FIELDS = {
   creatureDef: { experience: 0x2638684a, reward2: 0x277ede57 },
   enemy: { faction: 'Faction' },
   questCard: { gold: 'GoldReward', renown: 'RenownReward', objects: 'RewardObjects' },
+  /** CContainerRewardHeroDef: u32 count, then that many OBJECT_FAMILY refs (the drop tables). */
+  containerReward: { families: 0x08f03d58 },
+  /** OBJECT_FAMILY: u32 count, then count x { object ref (0 = nothing), f32 weight }. */
+  objectFamily: { rows: 0xe0cb2a11 },
   /** CREATURE_GENERATION_FAMILY: u32 count, then that many creature def refs. */
   family: { creatures: 0xc50c0369 },
 } as const;
@@ -61,6 +65,7 @@ export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
     if (health === undefined || health <= 0) continue;
     const cd = g.component(def, 'CCreatureDef');
     const enemy = g.component(def, 'CEnemyDef');
+    const rewards = refList(g.component(def, 'CContainerRewardHeroDef'), FIELDS.containerReward.families, ref);
     creatures[def.name] = {
       health,
       experience: Math.max(0, readI32(cd, FIELDS.creatureDef.experience) ?? 0),
@@ -70,6 +75,7 @@ export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
       weapon: ref(readI32(own, FIELDS.creature.weapon)),
       group: ref(readI32(own, FIELDS.creature.group)),
       attackScale: readF32(own, FIELDS.creature.attackScale) ?? 1,
+      ...(rewards.length ? { rewards } : {}),
     };
   }
 
@@ -91,6 +97,23 @@ export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
       if (name) list.push(name);
     }
     if (list.length) families[def.name] = list;
+  }
+
+  // Drop tables: what Fable's own game rolls when a creature dies (one weighted pick per table).
+  const rewardTables: GameData['rewardTables'] = {};
+  for (const def of g.group('OBJECT_FAMILY')) {
+    const b = g.entry(def.index);
+    const o = fieldOffset(b, FIELDS.objectFamily.rows);
+    if (o < 0 || o + 4 > b.length) continue;
+    const n = b.readUInt32LE(o);
+    const rows: RewardRow[] = [];
+    for (let i = 0; i < n && i < 64 && o + 12 + i * 8 <= b.length; i++) {
+      const r = b.readInt32LE(o + 4 + i * 8);
+      const weight = b.readFloatLE(o + 8 + i * 8);
+      if (!(weight > 0)) continue;
+      rows.push({ item: r === 0 ? null : ref(r), weight: Math.round(weight * 1000) / 1000 });
+    }
+    if (rows.length) rewardTables[def.name] = rows;
   }
 
   // Quest cards carry the rewards the game pays: the cap for client-side quests.
@@ -122,7 +145,22 @@ export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
     spells,
     families,
     questCards,
+    rewardTables,
   };
+}
+
+/** A `u32 n` + n x def ref list, as names. */
+function refList(entry: Buffer | undefined, field: number, ref: (v: number | undefined) => string | null): string[] {
+  if (!entry) return [];
+  const o = fieldOffset(entry, field);
+  if (o < 0 || o + 4 > entry.length) return [];
+  const n = entry.readUInt32LE(o);
+  const out: string[] = [];
+  for (let i = 0; i < n && i < 16 && o + 8 + i * 4 <= entry.length; i++) {
+    const name = ref(entry.readInt32LE(o + 4 + i * 4));
+    if (name) out.push(name);
+  }
+  return out;
 }
 
 /** Spell defs store per-level tuning as { u32 hash, u32 4, f32 x4 }. */

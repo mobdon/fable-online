@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CombatSystem } from '../src/combat/combat.js';
 import { FALLBACK_DATA as D } from '../src/data/game-data.js';
-import { SpawnManager, serverSpawnDefs, type SpawnTable } from '../src/world/spawns.js';
+import { SpawnManager, healthScale, scaledLimit, serverSpawnDefs, DEFAULT_SPAWN_OPTIONS, type SpawnTable } from '../src/world/spawns.js';
 import { BUTTONS, CombatSim, DEATH, SPELL_SHIFT } from '../src/world/combat-sim.js';
 import { MemorySink } from '../src/analytics/events.js';
 import { LootService } from '../src/economy/loot.js';
@@ -24,7 +24,7 @@ const REGION = { name: 'TestRegion', uid: 1, sea: false, neighbours: [] };
 test('spawns: hostile placed creatures and generators fill up, respawn after death, respect total limits', () => {
   const combat = new CombatSystem(D);
   const spawned: Creature[] = [];
-  const sm = new SpawnManager(TABLE, D, combat, { onSpawn: (c) => spawned.push(c) }, { rng: () => 0.5, respawnMs: 1000, generatorRespawnMs: 500, corpseMs: 100 });
+  const sm = new SpawnManager(TABLE, D, combat, { onSpawn: (c) => spawned.push(c) }, { rng: () => 0.5, respawnMs: 1000, generatorRespawnMs: 500, corpseMs: 100, soloDensity: 1 });
   assert.equal(sm.pointCount, 2, 'the trader is skipped');
   sm.start();
   assert.equal([...sm.creatures()].length, 3);
@@ -64,7 +64,8 @@ test('spawns: quest-named creatures stay with the client; the welcome lists the 
 test('combat sim: a kill pays loot through the ledger and experience; replays never pay twice', () => {
   const app = testApp();
   const { hero } = makeHero(app);
-  const loot = new LootService(app.economy, D, { goldPerReward: 1, byGroup: {}, byCreature: {} }, () => 0.99);
+  // Every kill pays the creature's reward value.
+  const loot = new LootService(app.economy, D, {}, () => 0.1);
   const sim = new CombatSim(REGION, 'TestRegion#1', {
     data: D,
     spawns: { regions: { TestRegion: TABLE } },
@@ -85,7 +86,7 @@ test('combat sim: a kill pays loot through the ledger and experience; replays ne
   sim.applyInput(hero.id, { seq: 2, moveX: 0, moveY: 0, buttons: 0, cameraYaw: 0 });
   assert.equal(bandit.alive, false);
   const gold = app.economy.balance(hero.id);
-  assert.ok(gold > 0 && gold <= D.creatures.CREATURE_BANDIT_GRUNT_LEVEL1!.reward2);
+  assert.equal(gold, D.creatures.CREATURE_BANDIT_GRUNT_LEVEL1!.reward2);
   assert.equal(app.progress.get(hero.id).kills, 1);
   assert.ok(app.progress.get(hero.id).experience >= D.creatures.CREATURE_BANDIT_GRUNT_LEVEL1!.experience);
   // Paying the same creature again is a no-op.
@@ -208,4 +209,98 @@ test('quest rewards: repeatable quests and the daily cap', () => {
   assert.deepEqual(q.claim(hero.id, { quest: 'V_TestMinigame', gold: 200 }, t0 + 61_000), { ok: false, reason: 'daily_cap' });
   assert.equal(q.claim(hero.id, { quest: 'V_TestMinigame', gold: 100 }, t0 + 61_000).ok, true);
   app.close();
+});
+
+test('loot: by default every kill pays its reward value in gold, and nothing else', () => {
+  const app = testApp();
+  const mk = (defName: string, id: number) => ({ id, defName }) as Creature;
+  for (const x of [0, 0.5, 0.99]) {
+    const l = new LootService(app.economy, D, {}, () => x);
+    assert.deepEqual(l.roll(mk('CREATURE_BANDIT_GRUNT_LEVEL1', 1)), { gold: 10, items: [] });
+    assert.deepEqual(l.roll(mk('CREATURE_EARTH_TROLL', 2)), { gold: 90, items: [] });
+    assert.deepEqual(l.roll(mk('CREATURE_WOLF', 3)), { gold: 0, items: [] });
+  }
+  app.close();
+});
+
+test('loot tables mode: gold only, from Fable\'s drop tables; no phials, food or potions', () => {
+  const app = testApp();
+  const mk = (defName: string, id: number) => ({ id, defName }) as Creature;
+  const at = (x: number) => new LootService(app.economy, D, { mode: 'tables' }, () => x);
+  // Bandit: gold rows 5 (w150) and 10 (w50); 50% chance; x2.
+  assert.deepEqual(at(0.1).roll(mk('CREATURE_BANDIT_GRUNT_LEVEL1', 1)), { gold: 10, items: [] });
+  assert.deepEqual(at(0.6).roll(mk('CREATURE_BANDIT_GRUNT_LEVEL1', 1)), { gold: 0, items: [] }, 'missed the 50% roll');
+  // Troll: no gold rows; ruby (w200 of 300) pays a quarter of its 600 value.
+  assert.deepEqual(at(0.1).roll(mk('CREATURE_EARTH_TROLL', 2)), { gold: 150, items: [] });
+  assert.deepEqual(at(0.7).roll(mk('CREATURE_EARTH_TROLL', 2)), { gold: 0, items: [] }, 'missed the gem chance');
+  // Wolf: no table and no reward value: nothing.
+  assert.deepEqual(at(0.1).roll(mk('CREATURE_WOLF', 3)), { gold: 0, items: [] });
+  app.close();
+});
+
+test('loot: a hero earns at most the hourly cap from kills', () => {
+  const app = testApp();
+  const { hero } = makeHero(app);
+  let now = 10 * 3_600_000;
+  const loot = new LootService(app.economy, D, { hourlyGoldCap: 15 }, () => 0.1, () => now); // 10 gold a bandit
+  const bandit = (id: number) => ({ id, defName: 'CREATURE_BANDIT_GRUNT_LEVEL1' }) as Creature;
+  assert.equal(loot.award(hero.id, bandit(5_000_001)).gold, 10);
+  assert.equal(loot.award(hero.id, bandit(5_000_002)).gold, 5, 'topped up to the cap');
+  assert.equal(loot.award(hero.id, bandit(5_000_003)).gold, 0);
+  now += 3_600_000;
+  assert.equal(loot.award(hero.id, bandit(5_000_004)).gold, 10, 'a new hour');
+  assert.equal(app.economy.balance(hero.id), 25);
+  assert.equal(app.economy.audit().ok, true);
+  app.close();
+});
+
+test('spawns scale with the heroes in the channel: more monsters and more health', () => {
+  const o = DEFAULT_SPAWN_OPTIONS;
+  // Generators: 1.5x solo, +50% per extra hero, at most 3x.
+  assert.deepEqual([0, 1, 2, 3, 5, 10].map((n) => scaledLimit(2, true, n, o)), [3, 3, 5, 6, 6, 6]);
+  // Placed camps: only extra heroes add copies.
+  assert.deepEqual([1, 2, 3, 5, 10].map((n) => scaledLimit(1, false, n, o)), [1, 1, 2, 3, 3]);
+  assert.deepEqual([1, 2, 4, 6, 10].map((n) => healthScale(n, o)), [1, 1.15, 1.45, 1.75, 1.75]);
+
+  const table: SpawnTable = {
+    creatures: [{ uid: '1', def: 'CREATURE_BANDIT_GRUNT_LEVEL1', x: 0, y: 3, z: 0, yaw: 0, script: null }],
+    generators: [{ uid: '3', x: 100, y: 100, z: 0, families: ['WOLVES_TEST'], radius: 5, triggerRadius: 0, activeLimit: 2, totalLimit: -1, script: null }],
+  };
+  const sm = new SpawnManager(table, D, new CombatSystem(D), {}, { rng: () => 0.5 });
+  sm.start();
+  const count = (def: string) => [...sm.creatures()].filter((c) => c.defName === def && c.alive).length;
+  assert.equal(count('CREATURE_WOLF'), 3, 'solo: 1.5x the 2 Fable keeps');
+  assert.equal(count('CREATURE_BANDIT_GRUNT_LEVEL1'), 1);
+  sm.setHeroCount(3);
+  sm.step(DEFAULT_SPAWN_OPTIONS.fillDelayMs - 1);
+  assert.equal(count('CREATURE_WOLF'), 3, 'extras arrive after the fill delay');
+  sm.step(1);
+  assert.equal(count('CREATURE_WOLF'), 6);
+  const bandits = [...sm.creatures()].filter((c) => c.defName === 'CREATURE_BANDIT_GRUNT_LEVEL1');
+  assert.equal(bandits.length, 2, 'a second bandit with three heroes');
+  const extra = bandits[1]!;
+  assert.equal(extra.maxHealth, Math.round(D.creatures.CREATURE_BANDIT_GRUNT_LEVEL1!.health * 1.3));
+  assert.ok(Math.hypot(extra.pos.x - 0, extra.pos.y - 3) > 0, 'stands beside the original, not in it');
+  // Heroes leave: the extras stay until killed but aren't replaced.
+  sm.setHeroCount(1);
+  extra.alive = false;
+  sm.died(extra.id);
+  sm.step(DEFAULT_SPAWN_OPTIONS.respawnMs * 2);
+  assert.equal(count('CREATURE_BANDIT_GRUNT_LEVEL1'), 1);
+});
+
+test('spawns: a dead monster only comes back while no hero is near its spot', () => {
+  const table: SpawnTable = { creatures: [{ uid: '1', def: 'CREATURE_BANDIT_GRUNT_LEVEL1', x: 0, y: 0, z: 0, yaw: 0, script: null }], generators: [] };
+  const sm = new SpawnManager(table, D, new CombatSystem(D), {}, { rng: () => 0.5 });
+  sm.start();
+  assert.equal(DEFAULT_SPAWN_OPTIONS.respawnMs, 300_000, 'five minutes');
+  const b = [...sm.creatures()][0]!;
+  b.alive = false;
+  sm.died(b.id);
+  sm.setHeroes([{ x: 10, y: 0, z: 0 }]); // standing in the camp
+  sm.step(DEFAULT_SPAWN_OPTIONS.respawnMs * 2);
+  assert.equal([...sm.creatures()].filter((c) => c.alive).length, 0, 'held back while watched');
+  sm.setHeroes([{ x: 200, y: 0, z: 0 }]); // walked off
+  sm.step(50);
+  assert.equal([...sm.creatures()].filter((c) => c.alive).length, 1);
 });

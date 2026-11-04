@@ -45,6 +45,8 @@ most aren't, so unnamed fields are referred to by hash.
 | CCreatureDef | `0x2638684A` | i32 | rises grunt level 1 < 2 < 3 < leader < boss: experience |
 | CCreatureDef | `0x277EDE57` | i32 | second reward value, used for loot gold (unverified meaning) |
 | CEnemyDef | `Faction` | ref | FACTION_* |
+| CContainerRewardHeroDef (on CREATURE) | `0x08F03D58` | `u32 n` + n refs | the OBJECT_FAMILY drop tables the creature rolls on death (REWARD_BANDIT_01 ...) |
+| OBJECT_FAMILY | `0xE0CB2A11` | `u32 n` + n x `{ref, f32 weight}` | weighted rows; ref 0 = nothing. Gold rows are OBJECT_GOLD_<n>; DYNAMIC_POTION/RESURRECTION_DUMMY are placeholder rows |
 | CREATURE_GENERATION_FAMILY | `0xC50C0369` | `u32 n` + n refs | the creatures a generator may pick |
 | CQuestCardDef | `GoldReward`, `RenownReward` | i32 | |
 | CQuestCardDef | `RewardObjects` | `u32 n` + n refs | |
