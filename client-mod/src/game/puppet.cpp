@@ -15,7 +15,16 @@ constexpr uint32_t kClearCommandsEveryMs = 1000;
 constexpr float kSpawnRadius = 6.0f;
 /** Parked puppets kept per def. Beyond this they are released. */
 constexpr size_t kPoolPerDef = 8;
+/** After the engine freed a puppet (an area load), wait this long before making any. */
+constexpr uint32_t kHoldAfterLossMs = 5000;
+/** Fewest milliseconds between two new puppets, so a crowd does not arrive in one frame. */
+constexpr uint32_t kSpawnEveryMs = 250;
 }  // namespace
+
+void PuppetPool::hold(uint32_t nowMs, uint32_t ms) {
+    uint32_t until = nowMs + ms;
+    if (!holding(nowMs) || static_cast<int32_t>(until - holdUntil_) > 0) holdUntil_ = until;
+}
 
 const std::string& PuppetPool::def_for(const world::Spawn& s) const {
     return s.kind == world::Kind::Hero || s.def.empty() ? heroDef_ : s.def;
@@ -30,6 +39,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
         Puppet p = std::move(pooled->second);
         pool_.erase(pooled);
         if (p.ref.alive()) {
+            p.spawn = s;
             script::set_drawable(p.ref, true);
             p.hidden = false;
             p.lastCommandsMs = 0;
@@ -43,6 +53,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     char name[64];
     std::snprintf(name, sizeof(name), "FO_PUPPET_%u_%u", s.id, nextName_++);
     Puppet p;
+    p.spawn = s;
     p.def = def;
     p.scriptName = name;
     if (!script::create_near(def.c_str(), name, kSpawnRadius, p.ref)) {
@@ -90,8 +101,11 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     Puppet& p = it->second;
     uintptr_t thing = p.ref.thing();
     if (!thing || !p.ref.alive()) {
+        // Fable freed it: it loaded another area. Make it again once things have settled.
         ++stats_.lost;
+        pending_[pose.id] = p.spawn;
         live_.erase(it);
+        hold(nowMs, kHoldAfterLossMs);
         return;
     }
 
@@ -112,16 +126,26 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
 
 void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
                       const std::vector<world::Pose>& poses, uint32_t nowMs) {
-    for (uint32_t id : removed) park(id);
-    for (const world::Spawn& s : spawned) {
-        if (live_.count(s.id)) continue;
-        spawn_for(s, nowMs);
+    for (uint32_t id : removed) {
+        pending_.erase(id);
+        park(id);
     }
+    for (const world::Spawn& s : spawned)
+        if (!live_.count(s.id)) pending_[s.id] = s;
     for (const world::Pose& p : poses) drive(p, nowMs);
+    // One new puppet at a time, and none while held.
+    if (!pending_.empty() && !holding(nowMs) && nowMs - lastSpawnMs_ >= kSpawnEveryMs) {
+        auto it = pending_.begin();
+        world::Spawn s = it->second;
+        pending_.erase(it);
+        lastSpawnMs_ = nowMs;
+        if (!live_.count(s.id)) spawn_for(s, nowMs);
+    }
     stats_.live = static_cast<uint32_t>(live_.size());
 }
 
 void PuppetPool::clear_all() {
+    pending_.clear();
     std::vector<uint32_t> ids;
     ids.reserve(live_.size());
     for (const auto& [id, p] : live_) ids.push_back(id);

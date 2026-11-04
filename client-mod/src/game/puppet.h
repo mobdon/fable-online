@@ -36,11 +36,20 @@ class PuppetPool {
     /** Parks every puppet and drops the pool: on a region change or on disconnect. */
     void clear_all();
 
+    /**
+     * No new puppets until `ms` from now. Creating creatures while Fable is still loading an
+     * area, or just after it freed the old ones, crashes its renderer. Spawns asked for in the
+     * meantime wait and go out one at a time afterwards.
+     */
+    void hold(uint32_t nowMs, uint32_t ms);
+    bool holding(uint32_t nowMs) const { return static_cast<int32_t>(holdUntil_ - nowMs) > 0; }
+
     const PuppetStats& stats() const { return stats_; }
     size_t live_count() const { return live_.size(); }
 
   private:
     struct Puppet {
+        world::Spawn spawn;
         script::ThingRef ref;
         std::string def;
         std::string scriptName;
@@ -59,6 +68,10 @@ class PuppetPool {
     std::unordered_multimap<std::string, Puppet> pool_;
     PuppetStats stats_;
     uint32_t nextName_ = 1;
+    /** Entities waiting for a puppet (held, or lost to an area load and to be made again). */
+    std::unordered_map<uint32_t, world::Spawn> pending_;
+    uint32_t holdUntil_ = 0;
+    uint32_t lastSpawnMs_ = 0;
 };
 
 }  // namespace fo::game

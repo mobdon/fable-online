@@ -26,7 +26,8 @@ namespace {
 constexpr unsigned kTickMs = 33;        // the puppets are driven about 30 times a second
 constexpr unsigned kStatusMs = 10000;
 constexpr unsigned kLoadStallMs = 1500;  // no tick for this long: the game thread was busy loading
-constexpr float kFarCorrection = 150.0f;  // metres; a correction this far is from another map
+constexpr float kFarCorrection = 150.0f;
+constexpr uint32_t kHoldAfterLoadMs = 3000;  // no new stand-ins this soon after an area load  // metres; a correction this far is from another map
 
 std::string env(const char* name, const char* fallback = "") {
     char buf[512] = {};
@@ -52,6 +53,8 @@ struct State {
     uint32_t lastTickMs = 0;
     /** Fable stalled like an area load since the last report: tell the server with it. */
     bool loadSeen = false;
+    /** The local hero object last tick; a new one means Fable rebuilt the area. */
+    uintptr_t lastHero = 0;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
     /** What the server said it does with position reports ("off" until the welcome says). */
@@ -275,8 +278,13 @@ void tick() {
         fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
         s.loadSeen = true;
         s.reporter.reset();
+        s.puppets->hold(now, kHoldAfterLoadMs);
     }
     s.lastTickMs = now;
+    // No local hero means Fable is between areas or in a menu: making creatures then crashes it.
+    uintptr_t heroNow = game::local_hero();
+    if (!heroNow || heroNow != s.lastHero) s.puppets->hold(now, kHoldAfterLoadMs);
+    s.lastHero = heroNow;
 
     for (net::WorldEvent& e : net::world_poll()) {
         switch (e.kind) {
