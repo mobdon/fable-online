@@ -314,6 +314,8 @@ export class GameSocket {
         resume_ms: app.cfg.resumeMs,
         // Whether the server uses the mod's position reports ('off', 'checked', 'trusted').
         client_move: app.cfg.clientMovement,
+        // Monster defs the server runs: the mod drops the level files' own copies of them.
+        ...(app.spawnDefs.length ? { spawn_defs: app.spawnDefs } : {}),
       });
       if (resumed) app.events.emit({ type: 'player_resumed', heroId: hero.id });
       app.director.join(hero, link, resumed);

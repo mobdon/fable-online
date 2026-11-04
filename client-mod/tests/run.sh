@@ -21,7 +21,7 @@ $cxx $flags -o "$out/fable_online_display_test" "$here/display_test.cpp" "$src/d
 "$out/fable_online_display_test"
 # Frame decoding and the entity table.
 $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_online_world_tests" \
-  "$here/world_test.cpp" "$src/world/entities.cpp" "$src/world/snapshot.cpp" "$src/world/reporter.cpp" "$src/world/health.cpp"
+  "$here/world_test.cpp" "$src/world/entities.cpp" "$src/world/snapshot.cpp" "$src/world/reporter.cpp" "$src/world/health.cpp" "$src/world/spawn_filter.cpp"
 "$out/fable_online_world_tests"
 $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_online_objects_tests" \
   "$here/objects_test.cpp" "$src/world/objects.cpp"
