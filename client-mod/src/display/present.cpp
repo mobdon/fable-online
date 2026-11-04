@@ -6,9 +6,14 @@
 
 namespace fo::display {
 namespace {
-IDirect3DQuery9* g_query = nullptr;
+// One event query per frame in flight: Present waits for the frame before last, so the
+// driver can queue one finished frame (keeping the CPU and GPU working side by side) but
+// never the usual three, which is what makes the camera trail the mouse.
+constexpr int kFramesAhead = 2;
+IDirect3DQuery9* g_query[kFramesAhead] = {};
 bool g_query_failed = false;
-bool g_issued = false;
+bool g_issued[kFramesAhead] = {};
+unsigned g_slot = 0;
 // Frame timing (render thread writes, log thread reads; plain atomics are enough).
 std::atomic<unsigned> g_frames{0};
 std::atomic<double> g_worst_ms{0};
@@ -125,23 +130,29 @@ void fix_window(HWND window) {
 bool restyling() { return g_restyling.load(); }
 
 void before_present(IDirect3DDevice9* dev) {
-    // Wait for the GPU to finish the previous frame before handing it this one, so the
-    // driver can't queue up to three frames: the camera then answers the mouse a frame later
-    // at most, instead of three.
     if (!config().low_latency || g_query_failed) return;
-    if (!g_query && FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &g_query))) { g_query_failed = true; return; }
-    if (g_issued) {
-        for (int spins = 0; spins < 200000 && g_query->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE; ++spins) {
-            if (spins > 64) Sleep(0);
+    IDirect3DQuery9*& q = g_query[g_slot];
+    if (!q && FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &q))) { g_query_failed = true; return; }
+    if (g_issued[g_slot]) {
+        // This slot's query went in after the frame before last. Wait at most ~50 ms so a
+        // lost device or a driver that never answers can't hang the game.
+        LARGE_INTEGER f, t0, t;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&t0);
+        while (q->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+            QueryPerformanceCounter(&t);
+            if ((t.QuadPart - t0.QuadPart) * 20 > f.QuadPart) break;
+            YieldProcessor();
         }
-        g_issued = false;
+        g_issued[g_slot] = false;
     }
 }
 
 void after_present(IDirect3DDevice9*) {
-    if (g_query && !g_query_failed && config().low_latency) {
-        g_query->Issue(D3DISSUE_END);
-        g_issued = true;
+    if (config().low_latency && !g_query_failed && g_query[g_slot]) {
+        g_query[g_slot]->Issue(D3DISSUE_END);
+        g_issued[g_slot] = true;
+        g_slot = (g_slot + 1) % kFramesAhead;
     }
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -155,8 +166,11 @@ void after_present(IDirect3DDevice9*) {
 }
 
 void on_device_lost() {
-    if (g_query) { g_query->Release(); g_query = nullptr; }
-    g_issued = false;
+    for (int i = 0; i < kFramesAhead; ++i) {
+        if (g_query[i]) { g_query[i]->Release(); g_query[i] = nullptr; }
+        g_issued[i] = false;
+    }
+    g_slot = 0;
 }
 
 void log_failure(const char* call, HRESULT hr) {
