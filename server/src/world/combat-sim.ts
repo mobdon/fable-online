@@ -10,7 +10,7 @@ import { GameError } from '../errors.js';
 import type { Progress } from '../heroes/progress.js';
 import type { AiHooks, Creature, Hero } from './entities.js';
 import type { RegionDef } from './regions.js';
-import type { EntityState, PlayerInput, RegionSim, SimFactory, Vec3 } from './sim.js';
+import type { EntityState, PlayerInput, RegionSim, SimFactory, SimHealing, Vec3 } from './sim.js';
 import { SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
 import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
@@ -307,6 +307,16 @@ export class CombatSim implements RegionSim {
   hero(heroId: number): Hero | undefined {
     return this.heroes.get(heroId)?.hero;
   }
+
+  readonly healing: SimHealing = {
+    state: (heroId) => {
+      const h = this.heroes.get(heroId)?.hero;
+      if (!h) return undefined;
+      return { alive: h.alive, health: h.health, maxHealth: h.maxHealth, spellHeal: this.combat.healLifePreview(heroId) };
+    },
+    castHealLife: (heroId) => this.combat.cast(heroId, 'heal_life', null).ok,
+    addHealth: (heroId, amount) => this.combat.addHealth(heroId, amount),
+  };
 
   dispose(): void {
     this.ai?.dispose?.();

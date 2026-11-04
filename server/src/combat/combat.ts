@@ -175,6 +175,30 @@ export class CombatSystem implements CombatPort {
     return { ok: true, hit: true, targetId: first.id, damage: total, blocked: false, killed: !first.alive };
   }
 
+  /**
+   * What Heal Life would heal this hero for right now, or null when they could not cast it
+   * (dead, stunned, not learned, on cooldown or short of Will). Nothing is spent.
+   */
+  healLifePreview(heroId: number): number | null {
+    const c = this.all.get(heroId);
+    if (!c || !c.alive || c.kind !== 'hero') return null;
+    const h = c as Hero;
+    if (h.stunnedMs > 0) return null;
+    const level = Math.min(4, Math.max(0, Math.floor(h.spells.heal_life ?? 0)));
+    if (level === 0 || (this.spellCooldown.get(`${h.id}:heal_life`) ?? 0) > 0) return null;
+    if (h.will < SPELLS.heal_life.cost[level - 1]!) return null;
+    return this.healLevels[level - 1] ?? SPELLS.heal_life.heal[level - 1]!;
+  }
+
+  /** Add health to a living combatant, capped at max. Returns how much was added. */
+  addHealth(id: number, amount: number): number {
+    const c = this.all.get(id);
+    if (!c || !c.alive || !(amount > 0)) return 0;
+    const before = c.health;
+    c.health = Math.min(c.maxHealth, c.health + amount);
+    return c.health - before;
+  }
+
   /** Advance timers: cooldowns, stuns, shields, Will regeneration, flourish charge. */
   step(dtMs: number, charging?: ReadonlySet<number>): void {
     for (const c of this.all.values()) {

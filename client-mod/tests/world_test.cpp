@@ -277,6 +277,27 @@ void test_health() {
     CHECK(health_target(40, 0, 300, 300) < 0);        // no max from the server: leave it
     CHECK(health_target(40, 160, 300, 0) < 0);        // Fable has no max yet
     CHECK(health_target(NAN, 160, 300, 300) < 0);
+
+    // A local heal is gathered, reported once as a share of max, and held while the server answers.
+    HealWatch w;
+    float share = 0;
+    w.observe(100, 200, 1000);
+    CHECK(!w.holding(1000));
+    w.observe(150, 200, 1033);  // a potion: +50
+    w.observe(160, 200, 1066);  // still landing: +10
+    CHECK(w.holding(1100));
+    CHECK(!w.take_report(1200, share));  // still gathering
+    CHECK(w.take_report(1340, share) && std::fabs(share - 0.3f) < 1e-4f);
+    CHECK(!w.take_report(1400, share));  // only once
+    CHECK(w.holding(2000));
+    CHECK(!w.holding(3000));
+    // The mod's own writes are not heals.
+    w.wrote(190);
+    w.observe(190, 200, 3100);
+    CHECK(!w.holding(3100) && !w.take_report(3500, share));
+    // Damage is not a heal either.
+    w.observe(120, 200, 3600);
+    CHECK(!w.holding(3600));
 }
 
 }  // namespace

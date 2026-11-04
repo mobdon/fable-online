@@ -5,6 +5,7 @@ import type { PlayerLink } from '../world/channel.js';
 import { ResumeTokens } from './resume.js';
 import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage } from './protocol.js';
 import { SHOP_REACH } from '../economy/shops.js';
+import { claimHeal } from '../combat/healing.js';
 import { townOf } from '../world/town/town-sim.js';
 import { shopIdOf } from '../world/town/townsfolk.js';
 
@@ -26,6 +27,7 @@ export class GameSocket {
   private interacts = new Bucket(4, 8);
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
+  private heals = new Bucket(2, 4);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -98,6 +100,9 @@ export class GameSocket {
       case 'shop_sell':
         if (!this.shopActions.take()) return this.send({ t: 'shop_result', ok: false, error: 'rate', message: 'Slow down' });
         return this.shop(this.heroId, msg);
+      case 'heal':
+        if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
+        return this.heal(this.heroId, msg.share, msg.key);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
@@ -183,6 +188,18 @@ export class GameSocket {
       if (!(e instanceof GameError)) throw e;
       this.send({ t: 'error', error: e.code, message: e.message });
     }
+  }
+
+  /**
+   * The local game healed the hero. Work out what the hero could have used (Heal Life first,
+   * then the healing items they carry), spend the closest match and heal by the server's own
+   * amount. Health itself reaches the client in the next tick, as always.
+   */
+  private heal(heroId: number, share: number, clientKey: string): void {
+    const { app } = this;
+    const r = claimHeal(app.director.channelOf(heroId)?.sim.healing, app.economy, heroId, share, `heal:${heroId}:${clientKey}`);
+    if (!r.replayed) app.events.emit({ type: 'heal', heroId, share, ok: r.ok, source: r.source, def: r.def, healed: r.healed, reason: r.reason });
+    this.send({ t: 'heal_result', key: clientKey, ...r, healed: r.healed === undefined ? undefined : Math.round(r.healed) });
   }
 
   /**

@@ -49,9 +49,26 @@ because the hero's stats code owns it. A hero the server has down is held at 1.
 Only tick frames whose own-hero entry carries `max_health` are applied, which today means
 regions running the combat sim.
 
+## Local heals (potions, food, Heal Life)
+
+Fable's item use and spell casting are not mapped yet, so the mod watches for the hero's
+health going up without its own write (`world::HealWatch`). Rises within 300 ms are gathered
+into one heal and sent as `{"t":"heal","share":<of Fable's max>,"key":...}`. While the server
+answers (1.5 s) the mod does not lower the local health, so there is no flicker.
+
+The server (`server/src/combat/healing.ts`) never takes the number as health. It lists what
+the hero could have used: Heal Life if castable now, and every healing item carried in the
+inventory (not the bank). It picks the one whose heal is nearest the reported share (within
+a factor of 2), spends it (Will and cooldown, or one item from the ledger, once per key) and
+heals by the server's amount. Otherwise it refuses, and the mod puts the health back.
+
+The item heal shares in `HEAL_ITEMS` are first guesses. The analytics `heal` event logs the
+share each local heal reported, so they can be tuned to Fable's real amounts.
+
 ## Still open
 
-- Local healing (potions, Heal Life) is undone on the next frame until the server handles
-  item use and spells sent as intents.
+- Read Fable's real potion and food heal amounts from game.bin instead of guessing.
+- Mapping item use and casting directly would remove the guess (and fix the local
+  inventory count, which Fable changes on its own today).
 - Will: probably next to health on the thing or on CTCHeroStats; not looked at yet.
 - Showing the server's downed state (kneel animation) instead of holding at 1.

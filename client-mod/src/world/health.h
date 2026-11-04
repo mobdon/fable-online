@@ -22,4 +22,37 @@ constexpr float kHealthSlack = 0.5f;
  */
 float health_target(float serverHealth, float serverMax, float fableHealth, float fableMax);
 
+/** Rises closer together than this are one heal (a potion can land over a few frames). */
+constexpr uint32_t kHealGatherMs = 300;
+/** After reporting a heal, the local health is not lowered for this long (the server's answer). */
+constexpr uint32_t kHealWaitMs = 1500;
+
+/**
+ * Notices the local game healing the hero (a potion, food, Heal Life) so the mod can ask the
+ * server for it, and holds the local health up while the server answers. Without this the
+ * next frame would put the old health straight back, and the heal would be lost.
+ */
+class HealWatch {
+  public:
+    /** Call once a frame with Fable's health, before deciding what to write. */
+    void observe(float health, float maxHealth, uint32_t nowMs);
+    /** Call after the mod itself wrote health, so its own write is not taken for a heal. */
+    void wrote(float health) { last_ = health; }
+    /** Forget everything (region change, hero rebuilt, offline). */
+    void reset() { *this = HealWatch(); }
+    /**
+     * A heal ready to report: its share of Fable's max. True once per gathered heal.
+     */
+    bool take_report(uint32_t nowMs, float& share);
+    /** True while a reported heal waits for the server: do not lower the local health. */
+    bool holding(uint32_t nowMs) const;
+
+  private:
+    float last_ = -1;
+    float gathered_ = 0;
+    uint32_t firstMs_ = 0;
+    uint32_t holdUntilMs_ = 0;
+    bool gathering_ = false;
+};
+
 }  // namespace fo::world

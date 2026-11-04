@@ -66,6 +66,9 @@ struct State {
     /** Times the server's health was written into the local hero, and when that was last logged. */
     uint32_t healthWrites = 0;
     uint32_t lastHealthLogMs = 0;
+    /** Local heals (potions, food, Heal Life) waiting to be reported or answered. */
+    world::HealWatch heals;
+    uint32_t healSeq = 0;
     uint32_t lastCorrectionLogMs = 0;
     bool suppressSpawns = true;
     bool dev = false;
@@ -194,6 +197,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         return;
     }
     case world::FrameType::Unknown:
+        if (json.find("\"t\":\"heal_result\"") != std::string::npos)
+            fo::log("sync: server answered a heal: %s", json.c_str());
         return;
     }
 }
@@ -245,15 +250,29 @@ void report_position(uint32_t nowMs) {
  */
 void apply_health(uint32_t nowMs) {
     State& s = *g_state;
-    if (!net::world_connected() || s.objects.loading()) return;
+    if (!net::world_connected() || s.objects.loading()) return s.heals.reset();
     world::EntityState own;
-    if (!s.table.own_state(own) || own.maxHealth <= 0) return;
+    if (!s.table.own_state(own) || own.maxHealth <= 0) return s.heals.reset();
     uintptr_t hero = game::local_hero();
     float hp = 0, max = 0;
-    if (!hero || !game::read_health(hero, hp, max)) return;
+    if (!hero || !game::read_health(hero, hp, max)) return s.heals.reset();
+    // Fable healed the hero itself (a potion, food, Heal Life): ask the server for it. The
+    // server decides what was used and heals by its own amount, or refuses.
+    s.heals.observe(hp, max, nowMs);
+    float share = 0;
+    if (s.heals.take_report(nowMs, share)) {
+        char frame[96];
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"heal\",\"share\":%.4f,\"key\":\"h%08x%06u\"}", share, nowMs,
+                      ++s.healSeq % 1000000u);
+        net::world_send(frame);
+        fo::log("sync: Fable healed the hero by %.0f%% of max, asking the server", share * 100.0f);
+    }
     float want = world::health_target(own.health, own.maxHealth, hp, max);
     if (want < 0) return;
+    // Waiting on the server's answer to a heal: raise if it says so, never lower yet.
+    if (want < hp && s.heals.holding(nowMs)) return;
     if (!game::write_health(hero, want)) return;
+    s.heals.wrote(want);
     ++s.healthWrites;
     if (nowMs - s.lastHealthLogMs > 2000) {
         s.lastHealthLogMs = nowMs;
