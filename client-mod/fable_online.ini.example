@@ -11,6 +11,8 @@ name=
 ; The key that opens the chat box, as a Windows virtual-key code. 13 = Enter.
 open_key=13
 enabled=1
+; 1 = while the chat window is open, Fable's HUD under it is not drawn.
+hide_hud=1
 
 [tags]
 enabled=1

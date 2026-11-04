@@ -289,8 +289,37 @@ static void test_party() {
     }
 }
 
+// What the chat window's mouse does: click a hero to whisper, wheel to scroll, click to place the cursor.
+static void test_chat_mouse() {
+    ui::ChatModel c;
+    c.on_server(parse(R"({"t":"welcome","v":1,"id":1,"name":"Hal","renown":0,"motd":"hi","channels":["say"]})"), 0);
+    c.open();
+    c.whisper_to("Maze");
+    EQ(c.channel_label(), "To Maze");
+    c.whisper_to("Hal");                          // yourself: no change
+    EQ(c.channel_label(), "To Maze");
+    for (char32_t ch : std::u32string(U"hello")) c.character(ch, 0);
+    c.set_cursor(2);
+    c.character(U'X', 0);
+    EQ(c.input_utf8(), "heXllo");
+    c.set_cursor(99);
+    CHECK(c.cursor() == 6);
+    c.key(ui::Key::Enter, 0);
+    auto out = c.take_outbox();
+    CHECK(!out.empty());
+    EQ(out.back(), R"({"t":"whisper","to":"Maze","text":"heXllo"})");
+    for (int i = 0; i < 20; ++i) c.system("line " + std::to_string(i), 1);
+    c.scroll_by(3);
+    CHECK(c.scrolled() == 3);
+    c.scroll_by(-10);
+    CHECK(c.scrolled() == 0);
+    c.scroll_by(1000);
+    CHECK(c.scrolled() > 0 && c.scrolled() < 1000);
+}
+
 int main() {
     test_json();
+    test_chat_mouse();
     test_chat_commands();
     test_chat_editing_and_log();
     test_tabs();
