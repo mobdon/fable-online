@@ -77,11 +77,13 @@ HRESULT WINAPI hk_SetScissorRect(IDirect3DDevice9* d, const RECT* r) {
     return o_SetScissorRect(d, r);
 }
 
-// 2D viewports (menus, text boxes) come from the layout in virtual pixels too: Fable sets
-// the virtual size + 1 for full-screen 2D. Viewports already the screen's size are 3D.
+// 2D viewports (menus, text boxes, videos, loading screens) come from the layout in virtual
+// pixels too: Fable sets the virtual size + 1 for full-screen 2D, and + 2 for videos.
+// Viewports already the screen's size are 3D.
+constexpr UINT kViewportSlack = 4;
 HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
-    if (v && active() && !(v->Width == g_w && v->Height == g_h) && v->X + v->Width <= g_vw + 1 &&
-        v->Y + v->Height <= g_vh + 1 && drawing_to_screen(d)) {
+    if (v && active() && !(v->Width == g_w && v->Height == g_h) && v->X + v->Width <= g_vw + kViewportSlack &&
+        v->Y + v->Height <= g_vh + kViewportSlack && drawing_to_screen(d)) {
         const float s = g_scale.load();
         D3DVIEWPORT9 x = *v;
         const DWORD l = static_cast<DWORD>(std::floor(v->X * s)), t = static_cast<DWORD>(std::floor(v->Y * s));
