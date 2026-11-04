@@ -25,6 +25,8 @@ namespace {
 
 constexpr unsigned kTickMs = 33;        // the puppets are driven about 30 times a second
 constexpr unsigned kStatusMs = 10000;
+constexpr unsigned kLoadStallMs = 1500;  // no tick for this long: the game thread was busy loading
+constexpr float kFarCorrection = 150.0f;  // metres; a correction this far is from another map
 
 std::string env(const char* name, const char* fallback = "") {
     char buf[512] = {};
@@ -46,6 +48,10 @@ struct State {
     uint32_t areaBeforeLoad = 0;
     /** The hero's area at the last report, to notice Fable loading another area by itself. */
     uint32_t lastArea = 0;
+    /** When tick last ran; a long gap is Fable loading an area on the game thread. */
+    uint32_t lastTickMs = 0;
+    /** Fable stalled like an area load since the last report: tell the server with it. */
+    bool loadSeen = false;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
     /** What the server said it does with position reports ("off" until the welcome says). */
@@ -113,6 +119,19 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         // Applying it would drop the hero somewhere in the new map, so it is skipped.
         if (hero && c.area && game::area_id(hero) != c.area) {
             fo::log("sync: skipped a correction meant for the last area");
+            return;
+        }
+        // A correction from far away means the server has not followed a map change. Snapping
+        // across the map would put the hero inside a wall or a gate, so leave it and let the
+        // server catch up (it accepts a hero that keeps moving normally from the new spot).
+        game::Pos here;
+        if (hero && game::read_pos(hero, here) &&
+            std::hypot(here.x - c.x, here.y - c.y) > kFarCorrection) {
+            if (nowMs - s.lastCorrectionLogMs > 5000) {
+                s.lastCorrectionLogMs = nowMs;
+                fo::log("sync: skipped a correction %.0f m away (%s)", std::hypot(here.x - c.x, here.y - c.y), c.reason.c_str());
+            }
+            s.loadSeen = true;
             return;
         }
         bool moved = hero && game::write_pos(hero, game::Pos{c.x, c.y, c.z}, false, 0);
@@ -200,12 +219,14 @@ void report_position(uint32_t nowMs) {
     if (!s.reporter.due(nowMs, p.x, p.y, p.z, yaw)) return;
     s.reporter.sent(nowMs, p.x, p.y, p.z, yaw);
     char frame[224];
+    const char* load = s.loadSeen ? ",\"load\":1" : "";
+    s.loadSeen = false;
     if (haveYaw)
-        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"yaw\":%.3f,\"area\":%u}",
-                      p.x, p.y, p.z, yaw, area);
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"yaw\":%.3f,\"area\":%u%s}",
+                      p.x, p.y, p.z, yaw, area, load);
     else
-        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x,
-                      p.y, p.z, area);
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u%s}", p.x,
+                      p.y, p.z, area, load);
     net::world_send(frame);
 }
 
@@ -250,6 +271,12 @@ void tick() {
     if (!g_state) return;
     State& s = *g_state;
     uint32_t now = GetTickCount();
+    if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
+        fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
+        s.loadSeen = true;
+        s.reporter.reset();
+    }
+    s.lastTickMs = now;
 
     for (net::WorldEvent& e : net::world_poll()) {
         switch (e.kind) {

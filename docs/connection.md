@@ -42,7 +42,12 @@ Gate makes the client's Fable load another area, and the hero's coordinates jump
 area's. Each report carries the area hash (`area`). When it changes, the guard lets the next
 report through from anywhere, once (`area_change`), but no more than once every 3 seconds: a
 real load takes longer than that. A `pos_correct` carries the area it was meant for, and the
-mod skips one that arrives after its Fable has already moved on. Until the server follows
+mod skips one that arrives after its Fable has already moved on. The area hash does not
+always change when Fable loads the next area, so two more signals do the same: the mod
+adds `load: 1` to the first report after the game thread stalled for 1.5 s, and a hero
+refused for a jump who then keeps moving normally from the new spot for 2 seconds is taken
+to be there (`settleMs`). The mod also ignores a correction more than 150 m from where its
+hero is, since that one is from another map. Until the server follows
 those exits itself, the hero stays in the same channel. Heroes in different areas of one
 channel don't see each other's stand-ins.
 

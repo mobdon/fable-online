@@ -34,6 +34,14 @@ export const MOVE_RULES = {
    * takes seconds, so anything faster is a client faking area changes to teleport.
    */
   areaChangeEveryMs: 3_000,
+  /**
+   * A hero refused for a jump who then keeps moving normally from the new spot for this long
+   * is taken to be there: Fable loaded another area by itself and the mod could not tell.
+   * Until the server follows exits this is what lets a hero leave a town. 0 turns it off.
+   */
+  settleMs: 2_000,
+  /** Metres a settling hero may drift from one refused report to the next, plus the speed budget. */
+  settleSlack: 3,
   /** Ground speed thresholds for the stand-in's animation (metres per second). */
   walkFrom: 0.4,
   runFrom: 4,
@@ -64,6 +72,8 @@ export class MoveGuard {
   area = 0;
   private lastAreaChangeAt = -Infinity;
   private refusedArea = 0;
+  /** Where refused reports have been coming from, and since when (see MOVE_RULES.settleMs). */
+  private pending: { since: number; at: Vec3 } | null = null;
 
   constructor(
     now: number,
@@ -109,6 +119,35 @@ export class MoveGuard {
     return 'changed';
   }
 
+  /**
+   * The mod saw its Fable stall the way it does while loading an area (or rebuild the hero).
+   * Same as an area change, for when the area hash does not move.
+   */
+  noteLoad(now: number): 'changed' | 'too_soon' {
+    if (now - this.lastAreaChangeAt < this.rules.areaChangeEveryMs) return 'too_soon';
+    this.lastAreaChangeAt = now;
+    this.reanchor(Infinity);
+    this.speed = 0;
+    return 'changed';
+  }
+
+  private settled(next: Vec3, now: number, dt: number): boolean {
+    const r = this.rules;
+    if (r.settleMs <= 0) return false;
+    const p = this.pending;
+    if (p && Math.hypot(next.x - p.at.x, next.y - p.at.y, next.z - p.at.z) <= r.settleSlack + r.maxSpeed * Math.max(dt, 0.1)) {
+      p.at = next;
+      if (now - p.since < r.settleMs || now - this.lastAreaChangeAt < r.areaChangeEveryMs) return false;
+      this.pending = null;
+      this.lastAreaChangeAt = now;
+      this.speed = 0;
+      this.rejected = 0;
+      return true;
+    }
+    this.pending = { since: now, at: next };
+    return false;
+  }
+
   get anchored(): boolean {
     return this.anchor > 0;
   }
@@ -127,7 +166,11 @@ export class MoveGuard {
       this.speed = 0;
       return { ok: true, anchored: true, speed: 0 };
     }
-    if (ground > this.budget) return this.refuse('too_fast');
+    if (ground > this.budget) {
+      if (this.settled(next, now, dt)) return { ok: true, anchored: true, speed: 0 };
+      return this.refuse('too_fast');
+    }
+    this.pending = null;
     if (rise > r.climb + r.climbPerSecond * dt) return this.refuse('too_high');
     if (-rise > r.climb + r.fallSpeed * dt) return this.refuse('too_low');
 

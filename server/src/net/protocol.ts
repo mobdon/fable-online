@@ -26,7 +26,7 @@ export type ClientMessage =
    * clientMovement 'checked' (the default) the server only takes moves the hero could have
    * made (src/world/movement.ts) and answers anything else with `pos_correct`.
    */
-  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number }
+  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number; load?: boolean }
   /**
    * Shops. `shop` is the shop building's UID from the level file, as the client's Fable knows it;
    * the server adds the region from where it has the hero. `key` is the client's idempotency key
@@ -117,6 +117,7 @@ export function decode(raw: string): ClientMessage {
         z: m.z,
         yaw: isNum(m.yaw) ? wrapAngle(m.yaw) : undefined,
         area: isNum(m.area) ? m.area >>> 0 : 0,
+        load: m.load === 1 || m.load === true,
       };
     }
     case 'ping':

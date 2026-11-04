@@ -124,8 +124,10 @@ export class GameSocket {
     const g = ch.moves.get(heroId);
     if (g) {
       const from = g.area;
-      const area = g.noteArea(msg.area, Date.now());
-      if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon' });
+      const now = Date.now();
+      let area = g.noteArea(msg.area, now);
+      if (area === 'same' && msg.load) area = g.noteLoad(now);
+      if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
     }
     if (mode === 'trusted') {
       ch.placeHero(heroId, at, msg.yaw);

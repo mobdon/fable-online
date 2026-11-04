@@ -341,3 +341,29 @@ test('heroes in different areas of one channel do not see each other', () => {
   assert.ok(ids().includes(b.id), 'B still sees itself');
   app.close();
 });
+
+test('a hero who keeps moving normally after a refused jump is taken to be there', () => {
+  const g = new MoveGuard(0);
+  assert.ok(g.check(at(0), at(1), 100).ok);
+  let t = 100;
+  // Fable loaded the next area without the mod noticing: reports now come from 3 km away.
+  const far = (i: number) => at(3000 + i * 0.5, 10);
+  let accepted = -1;
+  for (let i = 0; i < 40 && accepted < 0; i++) {
+    t += 100;
+    const v = g.check(at(1), far(i), t);
+    if (v.ok) accepted = i;
+  }
+  assert.ok(accepted >= 19 && accepted <= 22, `settled after about two seconds (report ${accepted})`);
+  // A single teleport, or one that keeps hopping, never settles.
+  const h = new MoveGuard(0);
+  for (let i = 1; i <= 40; i++) assert.equal(h.check(at(0), at(i % 2 ? 3000 : -3000), i * 100).ok, false);
+});
+
+test('a load the mod saw lets one jump through, at most every few seconds', () => {
+  const g = new MoveGuard(0);
+  assert.equal(g.noteLoad(10_000), 'changed');
+  assert.ok(g.check(at(0), at(2500), 10_100).ok);
+  assert.equal(g.noteLoad(11_000), 'too_soon');
+  assert.equal(g.check(at(2500), at(0), 11_100).ok, false);
+});
