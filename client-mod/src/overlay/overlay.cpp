@@ -12,6 +12,7 @@
 #include "../config.h"
 #include "../display/frame_probe.h"
 #include "../display/hud_scale.h"
+#include "../display/mouse_look.h"
 #include "../display/present.h"
 #include "../display/widescreen.h"
 #include "../log.h"
@@ -83,6 +84,25 @@ game::HeroPos g_hero;
 std::atomic<bool> g_chat_open{false};
 std::atomic<DWORD> g_block_until{0};   // swallow keys briefly after the box closes
 
+// Where things are in the open chat window, from the last frame drawn, for mouse clicks.
+// Back-buffer pixels. Guarded by g_mu.
+struct ChatHit {
+    float x, y, w, h;
+    enum Kind { Tab, Hero } kind;
+    int tab;
+    std::string name;
+};
+struct ChatLayout {
+    bool valid = false;
+    float win_x = 0, win_y = 0, win_w = 0, win_h = 0;
+    float edit_x = 0, edit_y = 0, edit_w = 0, edit_h = 0;
+    float screen_w = 0, screen_h = 0;
+    std::vector<ChatHit> hits;
+    std::vector<float> caret_x;   // x of each cursor position shown in the edit box
+    size_t caret_from = 0;        // the input character caret_x[0] stands for
+} g_layout;
+float g_ptr_x = -1, g_ptr_y = -1;   // the chat pointer, back-buffer pixels; < 0 = not over the window
+
 // Fable's fonts and frame art, read once by the mod thread; the render thread waits for it.
 std::atomic<const assets::UiArt*> g_art{nullptr};
 
@@ -119,6 +139,35 @@ void flush_outbox() {  // caller holds g_mu
     for (auto& line : g_chat.take_world_outbox()) g_world_out.push_back(std::move(line));
     g_chat_open = g_chat.is_open();
     g_trade_keys = g_trade.wants_keys();
+    // Open chat has the mouse: Fable's camera and attacks don't see it (display/mouse_look).
+    display::mouse_look::hold(g_chat_open.load(), g_hwnd);
+}
+
+// A window-message mouse position (client pixels) in back-buffer pixels. Caller holds g_mu.
+bool to_backbuffer(HWND w, LONG cx, LONG cy, float& x, float& y) {
+    RECT rc;
+    if (!w || !GetClientRect(w, &rc) || rc.right <= 0 || rc.bottom <= 0 || g_layout.screen_w <= 0) return false;
+    x = static_cast<float>(cx) * g_layout.screen_w / static_cast<float>(rc.right);
+    y = static_cast<float>(cy) * g_layout.screen_h / static_cast<float>(rc.bottom);
+    return true;
+}
+
+// A left click in the open chat window. Caller holds g_mu.
+void chat_click(float x, float y) {
+    if (!g_layout.valid) return;
+    auto inside = [&](float rx, float ry, float rw, float rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; };
+    for (const ChatHit& h : g_layout.hits) {
+        if (!inside(h.x, h.y, h.w, h.h)) continue;
+        if (h.kind == ChatHit::Tab) g_chat.set_tab(static_cast<ui::ChatTab>(h.tab));
+        else g_chat.whisper_to(h.name);
+        return;
+    }
+    if (inside(g_layout.edit_x, g_layout.edit_y, g_layout.edit_w, g_layout.edit_h) && !g_layout.caret_x.empty()) {
+        size_t best = 0;
+        for (size_t i = 1; i < g_layout.caret_x.size(); ++i)
+            if (std::fabs(g_layout.caret_x[i] - x) < std::fabs(g_layout.caret_x[best] - x)) best = i;
+        g_chat.set_cursor(g_layout.caret_from + best);
+    }
 }
 
 // ---- drawing ---------------------------------------------------------------
@@ -261,9 +310,18 @@ void draw_chat(const Config& cfg, double now) {
     }
     size_t first = phys.size() > static_cast<size_t>(rows) ? phys.size() - rows : 0;
 
+    g_layout.valid = open;
+    g_layout.hits.clear();
+    g_layout.caret_x.clear();
+    g_layout.screen_w = g_r.screen_w();
+    g_layout.screen_h = g_r.screen_h();
+    // Fable's HUD pieces under the open window are left out, so nothing shows through or on top.
+    if (open && cfg.chat_hide_hud) display::hud::hide_under(win_x, win_y, win_w, win_h);
+    else display::hud::hide_under(0, 0, 0, 0);
     if (open) {
         const uint32_t kHead = 0xFFC9C0A8, kText = 0xFFE9E4D6, kBright = 0xFFFFF6DC, kDim = 0xFF7E786C;
         g_r.window(win_x, win_y, win_w, win_h, 1.0f);
+        g_layout.win_x = win_x; g_layout.win_y = win_y; g_layout.win_w = win_w; g_layout.win_h = win_h;
 
         // Title bar: the window's name, and the connection on the right.
         const float ty = win_y + pad - 2;
@@ -285,7 +343,9 @@ void draw_chat(const Config& cfg, double now) {
         for (int t = 0; t < static_cast<int>(ui::ChatTab::Count); ++t) {
             auto tab = static_cast<ui::ChatTab>(t);
             bool active = g_chat.tab() == tab, fresh = g_chat.unread(tab);
-            if (active) g_r.bar(sx, y, side_w, row_h, 1.0f, true, false);
+            const bool lit = !active && g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + row_h;
+            if (active || lit) g_r.bar(sx, y, side_w, row_h, active ? 1.0f : 0.45f, true, false);
+            g_layout.hits.push_back({sx, y, side_w, row_h, ChatHit::Tab, t, {}});
             g_r.text(sx + 10, y + (row_h - lh) / 2, ui::tab_name(tab), active ? kBright : fresh ? 0xFFF4E3A8 : kText);
             if (fresh && !active) g_r.text(sx + side_w - 14, y + (row_h - lh) / 2, "*", 0xFFF4E3A8);
             y += row_h;
@@ -297,7 +357,9 @@ void draw_chat(const Config& cfg, double now) {
             for (const auto& name : g_chat.contacts()) {
                 if (!room_for_row()) break;
                 bool target = g_chat.channel_label() == "To " + name;
-                draw_text_line(sx + 10, y, side_w - 12, name, target ? ui::ChatModel::kColorWhisper : kText, Face::Chat);
+                const bool lit = g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + lh;
+                draw_text_line(sx + 10, y, side_w - 12, name, target ? ui::ChatModel::kColorWhisper : lit ? kBright : kText, Face::Chat);
+                g_layout.hits.push_back({sx, y, side_w, lh, ChatHit::Hero, 0, name});
                 y += lh;
             }
             y += 6;
@@ -314,7 +376,10 @@ void draw_chat(const Config& cfg, double now) {
                     g_r.text(sx + 10, y, "and " + std::to_string(nearby.size() - shown) + " more", kDim, Face::Small);
                     break;
                 }
+                const bool lit = g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + lh;
+                if (lit) g_r.bar(sx, y, side_w, lh, 0.45f, true, false);
                 draw_text_line(sx + 10, y, side_w - 12, t->name, ui::renown_color(t->renown) | 0xFF000000, Face::Chat);
+                g_layout.hits.push_back({sx, y, side_w, lh, ChatHit::Hero, 0, t->name});
                 y += lh;
                 ++shown;
             }
@@ -330,6 +395,7 @@ void draw_chat(const Config& cfg, double now) {
 
         // Edit box: an inset frame under the conversation, like PC_MSN_EDIT_BOX.
         g_r.panel(conv_x - 8, edit_y, conv_w + 16, edit_h, 0.95f);
+        g_layout.edit_x = conv_x - 8; g_layout.edit_y = edit_y; g_layout.edit_w = conv_w + 16; g_layout.edit_h = edit_h;
         const float iy = edit_y + (edit_h - lh) / 2, ix = conv_x + 2;
         std::string label = g_chat.channel_label() + ": ";
         float lx = ix + g_r.text(ix, iy, label, net::chat_connected() ? kHead : kDim);
@@ -341,6 +407,8 @@ void draw_chat(const Config& cfg, double now) {
         size_t to = from;
         while (to < u.size() && g_r.measure(ui::u32_to_utf8(u.substr(from, to + 1 - from))) <= room) ++to;
         g_r.text(lx, iy, ui::u32_to_utf8(u.substr(from, to - from)), kBright);
+        g_layout.caret_from = from;
+        for (size_t i = from; i <= to; ++i) g_layout.caret_x.push_back(lx + g_r.measure(ui::u32_to_utf8(u.substr(from, i - from))));
         if (static_cast<int>(now * 2) % 2 == 0) {
             float cx = lx + g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from)));
             g_r.rect(cx, iy + 1, 1, lh - 2, 0xE0FFF6DC);
@@ -348,6 +416,20 @@ void draw_chat(const Config& cfg, double now) {
     }
     float y = conv_bottom - lh * static_cast<float>(phys.size() - first);
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(conv_x, y, phys[i].first, phys[i].second);
+}
+
+// The pointer for the open chat window, where the Windows cursor is (Fable no longer pulls
+// it back to the centre while chat has the mouse). Same arrow as the Mod settings screen.
+void draw_chat_pointer() {
+    g_ptr_x = g_ptr_y = -1;
+    if (!g_chat.is_open() || !g_hwnd) return;
+    POINT pt;
+    if (!GetCursorPos(&pt) || !ScreenToClient(g_hwnd, &pt)) return;
+    float x, y;
+    if (!to_backbuffer(g_hwnd, pt.x, pt.y, x, y) || x < 0 || y < 0 || x > g_r.screen_w() || y > g_r.screen_h()) return;
+    g_ptr_x = x;
+    g_ptr_y = y;
+    g_r.pointer(x, y, std::fmax(18.0f, g_r.line_height(Face::Chat) * 1.3f));
 }
 
 // The trade window, in the same frame as Realm chat (Lionhead's unused PC chat screen):
@@ -526,6 +608,7 @@ void draw(IDirect3DDevice9* dev) {
     modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
     modsettings::draw_pause_button(g_r, g_hero.valid);
     modsettings::draw(g_r);
+    if (cfg.chat_enabled && !modsettings::is_open()) draw_chat_pointer();   // on top of everything
     g_r.end();
 }
 
@@ -707,9 +790,31 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             return 0;
         case WM_KILLFOCUS: {
             std::lock_guard<std::mutex> lock(g_mu);  // alt-tab closes the box so the game isn't stuck
-            if (g_chat.is_open()) { g_chat.close(); g_chat_open = false; }
+            if (g_chat.is_open()) { g_chat.close(); flush_outbox(); }
             break;
         }
+        case WM_SETCURSOR:
+            // Our own pointer is drawn while chat is open; keep the Windows arrow out of the way.
+            if (g_chat_open && LOWORD(l) == HTCLIENT) { SetCursor(nullptr); return TRUE; }
+            break;
+        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: {
+            if (!g_chat_open) break;
+            std::lock_guard<std::mutex> lock(g_mu);
+            float x, y;
+            if (to_backbuffer(h, static_cast<short>(LOWORD(l)), static_cast<short>(HIWORD(l)), x, y)) chat_click(x, y);
+            flush_outbox();
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            if (!g_chat_open) break;
+            std::lock_guard<std::mutex> lock(g_mu);
+            g_chat.scroll_by(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 3 : -3);
+            return 0;
+        }
+        case WM_MOUSEMOVE: case WM_LBUTTONUP: case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_XBUTTONDOWN: case WM_XBUTTONUP:
+            if (g_chat_open) return 0;   // chat has the mouse; Fable doesn't see it
+            break;
         }
     }
     return CallWindowProcW(o_WndProc, h, msg, w, display::hud::map_mouse(msg, l));
@@ -744,6 +849,8 @@ HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
     } else if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
         menu::on_mouse_state(data, size);   // the menu reads the mouse, Fable's menu underneath doesn't
         std::memset(data, 0, size);
+    } else if (SUCCEEDED(hr) && data && is_mouse(dev) && g_chat_open) {
+        std::memset(data, 0, size);   // chat has the mouse
     }
     if (SUCCEEDED(hr) && data && is_keyboard(dev) && input_blocked()) std::memset(data, 0, size);
     return hr;
@@ -772,6 +879,8 @@ HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DW
     } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
         if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) menu::on_mouse_data(rg, cb, *inout);
         *inout = 0;
+    } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && g_chat_open) {
+        *inout = 0;   // chat has the mouse
     }
     if (SUCCEEDED(hr) && inout && is_keyboard(dev) && input_blocked()) *inout = 0;  // read and thrown away
     return hr;

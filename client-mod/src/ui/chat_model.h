@@ -69,6 +69,11 @@ public:
     ChatTab tab() const { return tab_; }
     size_t scrolled() const { return scroll_; }  // lines up from the newest
     void set_tab(ChatTab t);
+    // Mouse: clicking a hero's name in the list makes them the one you whisper to; the wheel
+    // scrolls the conversation (positive = older); clicking in the edit box moves the cursor.
+    void whisper_to(const std::string& name);
+    void scroll_by(int lines);
+    void set_cursor(size_t at);
     bool unread(ChatTab t) const { return (unread_ >> static_cast<int>(t)) & 1; }
 
     // Heroes you have whispered with, most recent first: the contact list of the chat window.

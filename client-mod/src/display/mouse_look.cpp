@@ -70,9 +70,51 @@ void* g_mouse_dx = nullptr;
 int g_state_size = 0;  // 0 = not known yet, -1 = not readable
 long g_poll_x = 0, g_poll_y = 0;
 
+std::atomic<bool> g_hold{false};
+std::atomic<HWND> g_hold_window{nullptr};
+
+// Throws away the mouse's buffered events (button presses, wheel), so Fable never reads them.
+void flush_device(void* self) {
+    const uint32_t dev = *reinterpret_cast<const uint32_t*>(static_cast<const char*>(self) + 0x341C);
+    if (!dev || !readable(dev, 4) || !readable(*reinterpret_cast<const uint32_t*>(dev) + 10 * 4, 4)) return;
+    using GetDeviceData_t = HRESULT(__stdcall*)(void*, DWORD, void*, DWORD*, DWORD);
+    auto get_data = reinterpret_cast<GetDeviceData_t>((*reinterpret_cast<uint32_t* const*>(dev))[10]);
+    DWORD n = INFINITE;
+    get_data(reinterpret_cast<void*>(dev), 16 /* sizeof(DIDEVICEOBJECTDATA) */, nullptr, &n, 0);
+}
+
+bool window_centre(HWND w, POINT& c) {
+    RECT rc;
+    if (!w || !GetClientRect(w, &rc)) return false;
+    c = {(rc.right - rc.left) / 2, (rc.bottom - rc.top) / 2};
+    return ClientToScreen(w, &c) != FALSE;
+}
+
 void __fastcall hk_mouse(void* self, void*) {
     ++g_mouse_reads;
     g_mouse_dx = self;
+    static bool was_held = false;
+    const bool held = g_hold.load();
+    POINT centre;
+    if (held && window_centre(g_hold_window.load(), centre)) {
+        // Fable reads movement as the cursor's offset from the window centre, then warps it
+        // back there. Put the cursor on the centre for the read (no movement), then back where
+        // the player has it, so the chat pointer follows the mouse.
+        POINT at;
+        GetCursorPos(&at);
+        flush_device(self);
+        SetCursorPos(centre.x, centre.y);
+        o_mouse(self);
+        SetCursorPos(at.x, at.y);
+        was_held = true;
+        return;
+    }
+    if (was_held) {
+        // Released: start from the centre so the camera doesn't jump by the pointer's offset.
+        was_held = false;
+        flush_device(self);
+        if (window_centre(g_hold_window.load(), centre)) SetCursorPos(centre.x, centre.y);
+    }
     o_mouse(self);
 }
 
@@ -259,9 +301,16 @@ bool in_game() {
     return t && GetTickCount() - t < 300;
 }
 
+void hold(bool on, HWND window) {
+    if (window) g_hold_window = window;
+    g_hold = on;
+}
+
+bool held() { return g_hold.load(); }
+
 void poll_mouse() {
     void* self = g_mouse_dx;
-    if (!self || g_state_size < 0) return;
+    if (!self || g_state_size < 0 || g_hold.load()) return;
     const uint32_t dev = *reinterpret_cast<const uint32_t*>(static_cast<const char*>(self) + 0x341C);
     if (!dev || !readable(dev, 4) || !readable(*reinterpret_cast<const uint32_t*>(dev) + 9 * 4, 4)) return;
     using GetDeviceState_t = HRESULT(__stdcall*)(void*, DWORD, void*);

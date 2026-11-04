@@ -12,6 +12,7 @@ enum class Crosshair { Off, Ring, Dot, Cross };
 struct Config {
     // [chat]
     bool chat_enabled = true;
+    bool chat_hide_hud = true;   // [chat] hide_hud: Fable's HUD under the open chat window is left out
     std::string chat_host = "127.0.0.1";
     unsigned short chat_port = 7781;
     std::string name;    // dev servers log in by name

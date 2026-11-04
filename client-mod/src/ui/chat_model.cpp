@@ -126,6 +126,19 @@ void ChatModel::set_tab(ChatTab t) {
     }
 }
 
+void ChatModel::whisper_to(const std::string& name) {
+    if (name.empty() || name == me_) return;
+    channel_ = "whisper";
+    whisper_to_ = name;
+}
+
+void ChatModel::scroll_by(int lines) {
+    if (lines > 0) scroll_ = std::min(scroll_ + static_cast<size_t>(lines), log_.size() > 1 ? log_.size() - 1 : 0);
+    else scroll_ = scroll_ > static_cast<size_t>(-lines) ? scroll_ - static_cast<size_t>(-lines) : 0;
+}
+
+void ChatModel::set_cursor(size_t at) { cursor_ = std::min(at, input_.size()); }
+
 void ChatModel::open(char32_t first) {
     open_ = true;
     input_.clear();
