@@ -8,6 +8,11 @@ endif()
 if(MINGW)
   add_link_options(-static -static-libgcc -static-libstdc++)
 endif()
+if(MSVC)
+  # Same intent as the MinGW -static above: the DLL goes into a player's Fable.exe and the
+  # launcher onto a player's PC, so neither should need the VC++ redistributable installed.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 add_subdirectory(client-mod)
 add_subdirectory(launcher)
 option(FO_BUILD_OVERLAY_TEST "Build tools/overlay-test (a fake game for testing the overlay)" OFF)

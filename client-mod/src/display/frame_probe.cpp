@@ -1,5 +1,16 @@
 #include "frame_probe.h"
+#include "../util/compiler.h"
+#if __has_include(<d3dx9core.h>)
 #include <d3dx9core.h>
+#else
+// The Windows SDK no longer ships D3DX (only the legacy DirectX SDK and mingw-w64 do).
+// The probe loads D3DXDisassembleShader at run time from d3dx9_25.dll, so all it needs
+// from the header is the buffer interface that call hands back.
+struct ID3DXBuffer : IUnknown {
+    virtual LPVOID STDMETHODCALLTYPE GetBufferPointer() = 0;
+    virtual DWORD STDMETHODCALLTYPE GetBufferSize() = 0;
+};
+#endif
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -140,7 +151,7 @@ void draw_line(const char* kind, unsigned prims, const void* up, UINT stride, vo
     // enough to tell which game code drew it (HUD, minimap, loading screen, highlights).
     char chain[200];
     int n = snprintf(chain, sizeof chain, "%p", caller);
-    const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+    const uint32_t* sp = reinterpret_cast<const uint32_t*>(FO_FRAME_ADDRESS());
     MEMORY_BASIC_INFORMATION mbi = {};
     if (VirtualQuery(sp, &mbi, sizeof mbi) && mbi.State == MEM_COMMIT) {
         const uint32_t* end = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(mbi.BaseAddress) + mbi.RegionSize);
@@ -175,20 +186,20 @@ HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     return o_SetViewport(d, v);
 }
 HRESULT WINAPI hk_DrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT a, UINT n) {
-    draw_line("DrawPrimitive", n, nullptr, 0, __builtin_return_address(0));
+    draw_line("DrawPrimitive", n, nullptr, 0, FO_RETURN_ADDRESS());
     return o_DrawPrimitive(d, t, a, n);
 }
 HRESULT WINAPI hk_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT b, UINT m, UINT nv, UINT s, UINT n) {
-    draw_line("DrawIndexedPrimitive", n, nullptr, 0, __builtin_return_address(0));
+    draw_line("DrawIndexedPrimitive", n, nullptr, 0, FO_RETURN_ADDRESS());
     return o_DrawIndexedPrimitive(d, t, b, m, nv, s, n);
 }
 HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT n, const void* v, UINT stride) {
-    draw_line("DrawPrimitiveUP", n, v, stride, __builtin_return_address(0));
+    draw_line("DrawPrimitiveUP", n, v, stride, FO_RETURN_ADDRESS());
     return o_DrawPrimitiveUP(d, t, n, v, stride);
 }
 HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT mi, UINT nv, UINT n, const void* i,
                                          D3DFORMAT f, const void* v, UINT stride) {
-    draw_line("DrawIndexedPrimitiveUP", n, v, stride, __builtin_return_address(0));
+    draw_line("DrawIndexedPrimitiveUP", n, v, stride, FO_RETURN_ADDRESS());
     return o_DrawIndexedPrimitiveUP(d, t, mi, nv, n, i, f, v, stride);
 }
 HRESULT WINAPI hk_SetVertexDeclaration(IDirect3DDevice9* d, IDirect3DVertexDeclaration9* decl) {

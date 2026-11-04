@@ -1,4 +1,5 @@
 #include "camera_probe.h"
+#include "../util/compiler.h"
 #include <windows.h>
 #include <cstdint>
 #include <cstdio>
@@ -32,7 +33,7 @@ bool readable(const void* p, size_t n) {
 void log_first(uint32_t ret, const uint8_t* params) {
     char buf[700];
     int n = std::snprintf(buf, sizeof buf, "camera: engine camera set from %08X", ret);
-    const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+    const uint32_t* sp = reinterpret_cast<const uint32_t*>(FO_FRAME_ADDRESS());
     for (int i = 0, found = 0; i < 200 && found < 8 && n < 300; ++i) {
         if (!readable(sp + i, 4)) break;
         const uint32_t v = sp[i];
@@ -48,7 +49,7 @@ void log_first(uint32_t ret, const uint8_t* params) {
 }
 
 void __fastcall hk_set(void* self, void* edx, const uint8_t* params, uint32_t a, uint32_t b) {
-    const uint32_t ret = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__builtin_return_address(0)));
+    const uint32_t ret = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(FO_RETURN_ADDRESS()));
     for (Caller& c : g_callers) {
         if (c.ret == ret || c.ret == 0) {
             c.ret = ret;

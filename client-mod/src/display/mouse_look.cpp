@@ -1,4 +1,5 @@
 #include "mouse_look.h"
+#include "../util/compiler.h"
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
@@ -144,7 +145,7 @@ void __fastcall hk_update(void* self, void*) {
     fo::game::pause_menu::open();   // keeps the pause screen watch in place
     if (!g_chain_logged.exchange(true)) {
         // Once: return addresses in Fable.exe on the stack, to trace the loop that runs the camera.
-        const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+        const uint32_t* sp = reinterpret_cast<const uint32_t*>(FO_FRAME_ADDRESS());
         char buf[600];
         int n = std::snprintf(buf, sizeof buf, "camera: update thread %lu, called from", GetCurrentThreadId());
         for (int i = 0, found = 0; i < 256 && found < 14 && n < 560; ++i) {

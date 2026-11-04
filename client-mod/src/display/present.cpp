@@ -1,4 +1,5 @@
 #include "present.h"
+#include "../util/compiler.h"
 #include <atomic>
 #include <cstdio>
 #include "../config.h"
@@ -167,7 +168,7 @@ void after_present(IDirect3DDevice9*) {
     mouse_look::poll_mouse();
     if (++g_frames == 600) {
         // Once, a few seconds in: the render loop's thread and callers, to compare with the camera's.
-        const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+        const uint32_t* sp = reinterpret_cast<const uint32_t*>(FO_FRAME_ADDRESS());
         char buf[600];
         int n = std::snprintf(buf, sizeof buf, "display: render thread %lu, present called from", GetCurrentThreadId());
         MEMORY_BASIC_INFORMATION mbi = {};

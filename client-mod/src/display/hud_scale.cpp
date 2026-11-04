@@ -1,4 +1,5 @@
 #include "hud_scale.h"
+#include "../util/compiler.h"
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -284,7 +285,7 @@ bool hidden_sprites(IDirect3DDevice9* d, const void* data, UINT first, UINT coun
 }
 
 HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT prims, const void* data, UINT stride) {
-    if (from_fable(__builtin_return_address(0))) {
+    if (from_fable(FO_RETURN_ADDRESS())) {
         if (hidden_pixels(d, data, 0, vertex_count(t, prims), stride)) return D3D_OK;
         if (const void* v = scaled_rhw(d, data, 0, vertex_count(t, prims), stride)) return o_DrawPrimitiveUP(d, t, prims, v, stride);
     }
@@ -293,7 +294,7 @@ HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT 
 
 HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT min_index, UINT verts, UINT prims,
                                          const void* idx, D3DFORMAT fmt, const void* data, UINT stride) {
-    void* ret = __builtin_return_address(0);
+    void* ret = FO_RETURN_ADDRESS();
     if (reinterpret_cast<uintptr_t>(ret) == kSpriteDraw) {
         if (hidden_sprites(d, data, min_index, verts, stride)) return D3D_OK;
         if (const void* v = bottom_sprites(d, data, min_index, verts, stride))

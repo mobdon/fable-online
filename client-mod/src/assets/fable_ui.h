@@ -9,7 +9,7 @@
 namespace fo::assets {
 
 struct UiArt {
-    Font chat, small, title;              // Tahoma 16, Tahoma 13, Arial 21
+    Font chat, small_font, title;              // Tahoma 16, Tahoma 13, Arial 21
     // Panel frame: four 32x32 corners with the pewter rivet, and 8x8 edge tiles.
     art::Image tl, tr, bl, br, top, bottom, left, right;
     // Fable's pewter scroll bar (the menu buttons), cut into left end, stretchable middle and

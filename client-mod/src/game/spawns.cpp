@@ -15,6 +15,23 @@
 // then hand the filled header to fo_level_header_read.
 extern "C" void fo_level_header_read(uintptr_t header);
 extern "C" void fo_level_header_thunk();
+#if defined(_MSC_VER)
+// MSVC has no file-scope asm: the same thunk as a naked function in Intel syntax.
+extern "C" __declspec(naked) void fo_level_header_thunk() {
+    __asm {
+        push edx
+        mov eax, 0x004C81F0
+        call eax
+        pop edx
+        push eax
+        push edx
+        call fo_level_header_read
+        add esp, 4
+        pop eax
+        ret
+    }
+}
+#else
 asm(R"(
     .text
     .globl _fo_level_header_thunk
@@ -30,6 +47,7 @@ _fo_level_header_thunk:
     pop %eax
     ret
 )");
+#endif
 
 namespace fo::game::spawns {
 namespace {

@@ -13,7 +13,7 @@ UiArt load(const Path& fonts_path, const Path& frontend_path, const Path& textur
         auto one = [&](const char* name, Font& f) {
             return fonts.load_raw(name, raw) && parse_font(raw, f, &err);
         };
-        ui.fonts_ok = one(kFontChat, ui.chat) && one(kFontSmall, ui.small) && one(kFontTitle, ui.title);
+        ui.fonts_ok = one(kFontChat, ui.chat) && one(kFontSmall, ui.small_font) && one(kFontTitle, ui.title);
         if (!ui.fonts_ok) ui.report += "fonts.big unreadable (" + (err.empty() ? fonts.error() : err) + "); ";
     } else {
         ui.report += "fonts.big not found; ";

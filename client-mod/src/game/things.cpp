@@ -10,8 +10,13 @@
 #include "thing.h"
 #include "../log.h"
 
+#if defined(_MSC_VER)
+#define FO_THISCALL __thiscall
+#define FO_FASTCALL __fastcall
+#else
 #define FO_THISCALL __attribute__((thiscall))
 #define FO_FASTCALL __attribute__((fastcall))
+#endif
 
 namespace fo::game::things {
 namespace {

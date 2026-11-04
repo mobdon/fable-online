@@ -83,7 +83,7 @@ bool Renderer::build_atlas(const assets::UiArt* art, int fallback_px) {
     fable_frame_ = art && art->frame_ok;
     const assets::Font* fonts[3];
     if (fable_fonts_) {
-        fonts[0] = &art->chat; fonts[1] = &art->small; fonts[2] = &art->title;
+        fonts[0] = &art->chat; fonts[1] = &art->small_font; fonts[2] = &art->title;
     } else {
         gdi_font(L"Tahoma", fallback_px, FW_NORMAL, fallback_[0]);
         gdi_font(L"Tahoma", fallback_px - 3, FW_NORMAL, fallback_[1]);

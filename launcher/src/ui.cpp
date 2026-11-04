@@ -78,7 +78,7 @@ struct App {
     Config* cfg = nullptr;
     HWND wnd = nullptr;
     int dpi = 96;
-    HFONT title = nullptr, subtitle = nullptr, heading = nullptr, body = nullptr, small = nullptr,
+    HFONT title = nullptr, subtitle = nullptr, heading = nullptr, body = nullptr, small_font = nullptr,
           button = nullptr, play = nullptr, field = nullptr, news = nullptr;
     HBRUSH field_brush = nullptr;
     HBITMAP backdrop = nullptr;   // static art: background, frames, headings
@@ -383,10 +383,10 @@ void on_news(std::unique_ptr<NewsResult> n) {
     if (n->ok && n->items.empty()) news_append(re, L"No news from Albion yet.\n", app.news, kParchmentDim, false);
     for (auto& i : n->items) {
         news_append(re, widen(i.title) + L"\n", app.heading, kGoldBright, true);
-        if (!i.date.empty()) news_append(re, widen(i.date) + L"\n", app.small, kGoldDim, false);
+        if (!i.date.empty()) news_append(re, widen(i.date) + L"\n", app.small_font, kGoldDim, false);
         news_append(re, widen(i.body) + L"\n", app.news, kParchment, false);
-        if (!i.url.empty()) news_append(re, widen(i.url) + L"\n", app.small, kGold, false);
-        news_append(re, L"\n", app.small, kParchment, false);
+        if (!i.url.empty()) news_append(re, widen(i.url) + L"\n", app.small_font, kGold, false);
+        news_append(re, L"\n", app.small_font, kParchment, false);
     }
     SendMessageW(re, EM_SETSEL, 0, 0);
     SendMessageW(re, WM_VSCROLL, SB_TOP, 0);
@@ -839,7 +839,7 @@ void paint(HDC target) {
         COLORREF sc = g.status == "online" ? kGood : g.status == "busy" ? kWarn : g.status == "full" ? kBad : kPewter;
         std::wstring state = g.status == "online" ? L"OPEN" : g.status == "maintenance" ? L"CLOSED"
                            : g.status == "offline" ? L"DOWN" : upper(widen(g.status));
-        spaced(dc, state, rcx, rf.top + app.S(70), app.small, sc, app.S(3));
+        spaced(dc, state, rcx, rf.top + app.S(70), app.small_font, sc, app.S(3));
         // Population as a pewter gauge.
         RECT gauge = {rf.left + app.S(40), rf.top + app.S(94), rf.right - app.S(40), rf.top + app.S(100)};
         fill(dc, gauge, kField);
@@ -851,13 +851,13 @@ void paint(HDC target) {
             vgradient(dc, f, kHighlight, kPewterOn);
         }
         RECT pr = {rf.left + app.S(16), rf.top + app.S(102), rf.right - app.S(16), rf.top + app.S(122)};
-        SelectObject(dc, app.small);
+        SelectObject(dc, app.small_font);
         shadow_text(dc, std::to_wstring(g.players) + L" of " + std::to_wstring(g.capacity) + L" heroes in Albion", pr,
                     DT_CENTER | DT_SINGLELINE | DT_VCENTER, kMuted);
     } else {
         spaced(dc, app.status.regions.empty() ? L"REALM" : L"REALMS", rcx, rf.top + app.S(12), app.heading, kHighlight, app.S(4));
         if (!app.status.regions.empty()) {
-            SelectObject(dc, app.small);
+            SelectObject(dc, app.small_font);
             SetTextColor(dc, kPewter);
             SetTextCharacterExtra(dc, app.S(2));
             TextOutW(dc, app.S(560), app.S(388), L"REALM", 5);
@@ -874,7 +874,7 @@ void paint(HDC target) {
 
     // Hero panel.
     if (!app.logged_in()) {
-        SelectObject(dc, app.small);
+        SelectObject(dc, app.small_font);
         SetTextColor(dc, kMuted);
         SetTextCharacterExtra(dc, app.S(2));
         TextOutW(dc, app.S(560), app.S(150), L"NAME", 4);
@@ -883,7 +883,7 @@ void paint(HDC target) {
         field_box(dc, kUserBox);
         field_box(dc, kPassBox);
     } else {
-        spaced(dc, L"SIGNED IN AS", app.S(696), app.S(176), app.small, kMuted, app.S(3));
+        spaced(dc, L"SIGNED IN AS", app.S(696), app.S(176), app.small_font, kMuted, app.S(3));
         RECT nr = {app.S(556), app.S(198), app.S(836), app.S(244)};
         SelectObject(dc, app.subtitle);
         shadow_text(dc, app.text[ID_ACCOUNT], nr, DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS, kHighlight);
@@ -891,7 +891,7 @@ void paint(HDC target) {
 
     // Footer: game folder, status line and progress.
     RECT gr = {app.S(28), app.S(512), app.S(470), app.S(530)};
-    SelectObject(dc, app.small);
+    SelectObject(dc, app.small_font);
     shadow_text(dc, app.text[ID_GAMEDIR_LABEL], gr, DT_LEFT | DT_SINGLELINE | DT_PATH_ELLIPSIS, app.game_dir.empty() ? kWarn : kPewter);
     RECT st = {app.S(28), app.S(532), app.S(560), app.S(554)};
     SelectObject(dc, app.body);
@@ -959,7 +959,7 @@ void draw_button(const DRAWITEMSTRUCT* d) {
         return;
     }
     if (d->CtlID == ID_GAMEDIR || d->CtlID == ID_REGISTER) {
-        SelectObject(dc, d->CtlID == ID_GAMEDIR ? app.small : app.body);
+        SelectObject(dc, d->CtlID == ID_GAMEDIR ? app.small_font : app.body);
         shadow_text(dc, label, r, (d->CtlID == ID_GAMEDIR ? DT_RIGHT : DT_CENTER) | DT_SINGLELINE | DT_VCENTER,
                     pressed || hot ? kHighlight : kMuted);
         return;
@@ -1097,7 +1097,7 @@ void build() {
         ListView_InsertColumn(lv, i, &c);
     }
 
-    add(L"BUTTON", L"Change folder", BS_OWNERDRAW | WS_TABSTOP, ID_GAMEDIR, 474, 511, 86, 20, app.small);
+    add(L"BUTTON", L"Change folder", BS_OWNERDRAW | WS_TABSTOP, ID_GAMEDIR, 474, 511, 86, 20, app.small_font);
     add(L"BUTTON", L"Enter Albion", BS_OWNERDRAW | WS_TABSTOP, ID_PLAY, 576, 506, 288, 68, app.play);
 }
 
@@ -1202,7 +1202,7 @@ int run_ui(Config& cfg) {
     app.play = make_font(kDisplay, 19, FW_BOLD);
     app.body = make_font(kSerif, 17, FW_MEDIUM);
     app.news = make_font(kSerif, 17, FW_MEDIUM);
-    app.small = make_font(kSerif, 14, FW_MEDIUM);
+    app.small_font = make_font(kSerif, 14, FW_MEDIUM);
     app.field = make_font(kSerif, 18, FW_MEDIUM);
     app.field_brush = CreateSolidBrush(kField);
 
@@ -1238,7 +1238,7 @@ int run_ui(Config& cfg) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-    for (HFONT f : {app.title, app.subtitle, app.heading, app.button, app.play, app.body, app.news, app.small, app.field})
+    for (HFONT f : {app.title, app.subtitle, app.heading, app.button, app.play, app.body, app.news, app.small_font, app.field})
         DeleteObject(f);
     DeleteObject(app.field_brush);
     DeleteObject(app.backdrop);
