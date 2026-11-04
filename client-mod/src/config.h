@@ -40,7 +40,7 @@ struct Config {
     int vsync = -1;              // -1 = the game's setting, 0 = off, 1 = on
     bool low_latency = false;    // keep the CPU at most one frame ahead of the GPU (less mouse lag)
     bool camera_auto_center = false;  // Fable eases the camera pitch back while walking
-    bool camera_latch = true;        // turn the view with the mouse every frame between world updates
+    bool camera_latch = false;       // turn the view with the mouse every frame between world updates
     bool camera_assist = false;       // Fable swings the camera toward the hero's facing and target
     int mouse_smoothing = 0;     // mouse-look frames averaged: 0 = off, -1 = Fable's own, else N
     float hud_scale = -1;        // 0 = automatic (as on a 900-pixel-tall screen), -1 = off, else the factor

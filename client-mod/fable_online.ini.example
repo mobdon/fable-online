@@ -66,9 +66,9 @@ camera_auto_center=0
 ; target, or the way the hero faces) and makes it sway while you turn. 0 = only the mouse
 ; turns the camera.
 camera_assist=0
-; 1 = turn the view with the mouse on every frame. Fable moves its camera only 15 times a
+; 1 = turn the view with the mouse on every frame (experimental). Fable moves its camera only 15 times a
 ; second and blends the frames between, so without this the view trails the mouse.
-camera_latch=1
+camera_latch=0
 ; 1 = melee, spells and target lock pick the enemy you're looking at (the centre of the
 ; view) instead of the one in front of the hero. Experimental.
 aim_at_crosshair=0
