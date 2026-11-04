@@ -9,7 +9,7 @@ const BUILDING_REACH = 14;
 
 /**
  * One server shop per Fable shop building, stocked from that building's CShopDef. Items the
- * catalog doesn't know, or that vendors never sell (Resurrection Phials, staff gear), are left
+ * catalog doesn't know, or that vendors never sell (Resurrection Phials, plate armour, staff gear), are left
  * out rather than failing the boot.
  */
 export function shopsFromTown(town: TownData, catalog: ItemCatalog): ShopDef[] {

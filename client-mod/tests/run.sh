@@ -34,3 +34,15 @@ $cxx $flags -o "$out/fable_online_hud_test" "$here/hud_test.cpp" "$src/display/h
 $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_online_held_tests" \
   "$here/held_test.cpp" "$src/world/held.cpp" "$src/world/objects.cpp"
 "$out/fable_online_held_tests"
+# Shop stock filter (game.bin rewrite) and the zlib reader; the fixture and cross-check use the
+# server's own game.bin reader, so this part needs Node and server/node_modules.
+if command -v npx >/dev/null 2>&1 && [ -d "$here/../../server/node_modules" ]; then
+  fx="$out/fable_online_shop_fixture"
+  rm -rf "$fx"
+  (cd "$here/../../server" && npx tsx --disable-warning=ExperimentalWarning ../client-mod/tests/shop_stock_check.ts make "$fx")
+  $cxx $flags -o "$out/fable_online_shop_stock_test" "$here/shop_stock_test.cpp" "$src/game/shop_stock.cpp" "$src/util/inflate.cpp"
+  "$out/fable_online_shop_stock_test" "$fx"
+  (cd "$here/../../server" && npx tsx --disable-warning=ExperimentalWarning ../client-mod/tests/shop_stock_check.ts check "$fx")
+else
+  echo "shop_stock: skipped (needs Node and npm ci in server/)"
+fi

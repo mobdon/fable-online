@@ -15,6 +15,7 @@
 #include <thread>
 #include "config.h"
 #include "game/hero.h"
+#include "game/shop_stock_hook.h"
 #include "crash.h"
 #include "log.h"
 #include "net/chat_client.h"
@@ -149,6 +150,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         fo::config_load(module);
         fo::menu::set_module(module);
         g_online = read_mode() == Mode::Client;
+        // Import-table writes only; the filtered game.bin is built when the game first opens it.
+        if (g_online) fo::game::shop_stock::install(module);
         if (g_online) fo::overlay::install_early();
         if (g_online) fo::display::install();   // a few code bytes and a VirtualAlloc: fine here
         if (g_online) fo::display::hud::install();

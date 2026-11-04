@@ -63,3 +63,16 @@ Not found: a numeric armour or defence rating on hero clothing or on the ARMOUR_
 offset in the header). `.tng` files are plain text `NewThing ... EndThing` blocks.
 `tools/extractor/spawns.mjs` keeps `AICreature` things and `MARKER_CREATURE_GENERATOR`
 markers (families, radius, limits). Positions are level-local metres, z up.
+
+## Client: shop stock filter
+
+`client-mod/src/game/shop_stock.cpp` rewrites the player's own game.bin at launch so Fable's
+shops never stock Resurrection Phials or plate/platinum hero clothing (the server's catalog rule).
+Banned rows get Quantity and MaxStock set to 0.0, the retail encoding of an empty slot. Changed
+chunks are re-encoded as stored zlib blocks and the chunk table offsets are rebuilt; the u32
+before the chunk data is matched against what it measures in the original file (total data
+size, file remainder, or largest chunk) and kept true, and an unrecognised value leaves the
+game's file alone. The copy is written to `cache\game.bin` next to fable_online.dll and the
+game's CreateFile of `CompiledDefs\game.bin` is pointed at it. `[shops] filter = false` in
+fable_online.ini turns it off. Not yet checked in game: the log line `shops: ... stock rows
+emptied` says what it did.

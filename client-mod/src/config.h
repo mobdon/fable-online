@@ -24,6 +24,8 @@ struct Config {
     int up_axis = 2;             // x=0, y=1, z=2
     float tag_full = 25.0f;
     float tag_hidden = 55.0f;
+    // [shops]
+    bool shop_filter = true;     // take plate armour and Resurrection Phials out of Fable's shops
     // [menu]
     bool menu_enabled = true;    // the start-up menu over Fable's title screen
     // [overlay]
