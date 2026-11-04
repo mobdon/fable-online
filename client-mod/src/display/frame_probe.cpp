@@ -1,6 +1,7 @@
 #include "frame_probe.h"
 #include <d3dx9core.h>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -49,7 +50,7 @@ SetPixelShaderConstantF_t o_SetPixelShaderConstantF;
 // Render thread only.
 bool g_on = false;
 int g_lines = 0;
-constexpr int kMaxLines = 12000;
+constexpr int kMaxLines = 30000;
 IDirect3DVertexShader9* g_vs = nullptr;
 std::vector<IDirect3DVertexShader9*> g_shaders;   // seen this capture, in order
 std::vector<IDirect3DVertexDeclaration9*> g_decls;
@@ -132,7 +133,24 @@ void dump_shaders() {
 
 void draw_line(const char* kind, unsigned prims, const void* up, UINT stride, void* caller) {
     if (!g_on) return;
-    line("  from %p", caller);
+    // The draw's caller plus the next few return addresses into Fable.exe found on the stack:
+    // enough to tell which game code drew it (HUD, minimap, loading screen, highlights).
+    char chain[200];
+    int n = snprintf(chain, sizeof chain, "%p", caller);
+    const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (VirtualQuery(sp, &mbi, sizeof mbi) && mbi.State == MEM_COMMIT) {
+        const uint32_t* end = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(mbi.BaseAddress) + mbi.RegionSize);
+        int found = 0;
+        for (const uint32_t* p = sp; p < end && p < sp + 160 && found < 5 && n < 180; ++p) {
+            const uint32_t v = *p;
+            if (v > 0x00401000 && v < 0x00E00000 && v != reinterpret_cast<uintptr_t>(caller)) {
+                n += snprintf(chain + n, sizeof chain - n, " %08X", v);
+                ++found;
+            }
+        }
+    }
+    line("  from %s", chain);
     char extra[160] = "";
     if (up && stride >= 16) {
         const float* f = static_cast<const float*>(up);
