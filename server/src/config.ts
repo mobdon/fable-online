@@ -112,6 +112,14 @@ export interface ServerConfig {
   questDefaultMaxGold: number;
   /** Most quest gold one hero can be paid in 24 hours, across all quests. */
   questDailyGoldCap: number;
+  /** 'reward': each kill pays the creature's reward value. 'tables': Fable's drop tables, gold only. */
+  lootMode: 'reward' | 'tables';
+  /** Most gold one hero can earn from monster kills per hour (0 = no cap). */
+  lootGoldPerHour: number;
+  /** Seconds before a dead monster comes back (once no hero is near its spot). */
+  monsterRespawnSec: number;
+  /** Generators keep this many times Fable's monster count alive with one hero; more heroes add more. */
+  monsterDensity: number;
 
   /** server/data/town-data.json from `npm run extract-town` ('' or missing = built-in test village). */
   townDataPath: string;
@@ -191,6 +199,10 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     pvpEverywhere: flag('FO_PVP_ALL', false),
     questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
+    lootMode: str('FO_LOOT_MODE', 'reward') === 'tables' ? 'tables' : 'reward',
+    lootGoldPerHour: num('FO_LOOT_GOLD_PER_HOUR', 3_000),
+    monsterRespawnSec: num('FO_RESPAWN_SEC', 300),
+    monsterDensity: num('FO_MONSTER_DENSITY', 1.5),
     townDataPath: str('FO_TOWN_DATA', 'data/town-data.json'),
     town: str('FO_TOWN', '1') !== '0',
     dayMinutes: num('FO_DAY_MINUTES', 48),

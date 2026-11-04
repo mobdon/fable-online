@@ -309,6 +309,7 @@ export class CombatSim implements RegionSim {
     }
     this.combat.step(dtMs, this.charging);
     this.ai?.step?.(dtMs);
+    this.spawns.setHeroes([...this.heroes.values()].map((h) => h.hero.pos));
     this.spawns.step(dtMs);
     if (this.law) this.stepGuards(dtMs);
   }

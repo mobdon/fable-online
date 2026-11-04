@@ -103,7 +103,7 @@ export function createApp(
   const economy = new Economy(db, events, catalog);
   const trades = new TradeSessions(economy);
   const progress = new Progress(db);
-  const loot = new LootService(economy, data);
+  const loot = new LootService(economy, data, { mode: cfg.lootMode, hourlyGoldCap: cfg.lootGoldPerHour });
   const clock = opts.clock ?? new WorldClock({ dayMs: cfg.dayMinutes * 60_000, weatherSlotMs: cfg.weatherMinutes * 60_000, seed: cfg.weatherSeed });
   const town = opts.town ?? loadTownData(cfg.townDataPath);
   const shops = Shops.load(economy, cfg.contentDir && path.join(cfg.contentDir, 'shops.json'), shopsFromTown(town, catalog), {
@@ -150,6 +150,11 @@ export function createApp(
             staff: staffHero(heroId),
             pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),
+          spawnOptions: {
+            respawnMs: cfg.monsterRespawnSec * 1000,
+            generatorRespawnMs: cfg.monsterRespawnSec * 1000,
+            soloDensity: cfg.monsterDensity,
+          },
           ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
           law: lawServices,
         })

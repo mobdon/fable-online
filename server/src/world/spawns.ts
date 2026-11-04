@@ -81,19 +81,59 @@ export interface SpawnOptions {
   generatorDefaultActive: number;
   /** A body stays in the world this long before it is removed. */
   corpseMs: number;
+  /** Generators keep this many times Fable's count alive even with one hero (the shared map is small). */
+  soloDensity: number;
+  /** Each hero in the channel beyond the first adds this share of a generator's count, and of a placed camp. */
+  perHeroDensity: number;
+  /** Most a spawn point's count can grow to, as a multiple of Fable's. */
+  maxDensity: number;
+  /** Each hero in the channel beyond the first adds this share to a new monster's health. */
+  healthPerHero: number;
+  /** Most extra health a monster can get from the hero count (0.75 = +75%). */
+  maxHealthBonus: number;
+  /** When more heroes arrive, the extra monsters come in after this long. */
+  fillDelayMs: number;
+  /** Extra copies of a placed creature stand within this many metres of its spot. */
+  placedSpread: number;
+  /**
+   * A monster only comes back while no hero is this close to its spawn spot (plus the
+   * generator's radius), so nothing pops into being in front of a player. 0 = always.
+   */
+  hiddenRadius: number;
   rng: () => number;
   /** Optional: snap a spawn point to walkable ground (navmesh). Return null to skip that spot. */
   place?: (p: Vec3) => Vec3 | null;
 }
 
 export const DEFAULT_SPAWN_OPTIONS: SpawnOptions = {
-  respawnMs: 120_000,
-  generatorRespawnMs: 60_000,
+  respawnMs: 300_000,
+  generatorRespawnMs: 300_000,
   jitter: 0.25,
   generatorDefaultActive: 3,
   corpseMs: 8_000,
+  soloDensity: 1.5,
+  perHeroDensity: 0.5,
+  maxDensity: 3,
+  healthPerHero: 0.15,
+  maxHealthBonus: 0.75,
+  fillDelayMs: 10_000,
+  placedSpread: 3,
+  hiddenRadius: 30,
   rng: Math.random,
 };
+
+/** How many monsters a spawn point keeps alive for this many heroes in the channel. */
+export function scaledLimit(base: number, generator: boolean, heroes: number, o: Pick<SpawnOptions, 'soloDensity' | 'perHeroDensity' | 'maxDensity'>): number {
+  const extra = o.perHeroDensity * Math.max(0, heroes - 1);
+  if (generator) return Math.ceil(base * Math.min(o.maxDensity, o.soloDensity * (1 + extra)));
+  // Placed camps are laid out by hand in Fable: only extra heroes add copies.
+  return Math.floor(base * Math.min(o.maxDensity, 1 + extra));
+}
+
+/** Health multiplier for a monster spawned with this many heroes in the channel. */
+export function healthScale(heroes: number, o: Pick<SpawnOptions, 'healthPerHero' | 'maxHealthBonus'>): number {
+  return 1 + Math.min(o.maxHealthBonus, o.healthPerHero * Math.max(0, heroes - 1));
+}
 
 interface Point {
   id: string;
@@ -101,6 +141,10 @@ interface Point {
   at: Vec3;
   yaw: number;
   radius: number;
+  generator: boolean;
+  /** Fable's own count for this point. */
+  baseLimit: number;
+  /** What it keeps alive now, after scaling for the heroes in the channel. */
   limit: number;
   totalLimit: number;
   made: number;
@@ -124,6 +168,8 @@ export class SpawnManager {
   private live = new Map<number, Creature>();
   private corpses = new Map<number, number>();
   private opts: SpawnOptions;
+  private heroes = 0;
+  private heroPos: Vec3[] = [];
 
   constructor(
     table: SpawnTable | undefined,
@@ -135,13 +181,13 @@ export class SpawnManager {
     this.opts = { ...DEFAULT_SPAWN_OPTIONS, ...opts };
     for (const c of table?.creatures ?? []) {
       if (!serverRunsPlaced(c, this.data)) continue;
-      this.points.set(`c:${c.uid}`, this.point(`c:${c.uid}`, [c.def], c, c.yaw, 0, 1, -1, this.opts.respawnMs));
+      this.points.set(`c:${c.uid}`, this.point(`c:${c.uid}`, [c.def], c, c.yaw, 0, false, 1, -1, this.opts.respawnMs));
     }
     for (const g of table?.generators ?? []) {
       const pool = generatorPool(g, this.data);
       if (!pool.length) continue;
       const limit = g.activeLimit > 0 ? g.activeLimit : this.opts.generatorDefaultActive;
-      this.points.set(`g:${g.uid}`, this.point(`g:${g.uid}`, pool, g, 0, g.radius, limit, g.totalLimit, this.opts.generatorRespawnMs));
+      this.points.set(`g:${g.uid}`, this.point(`g:${g.uid}`, pool, g, 0, g.radius, true, limit, g.totalLimit, this.opts.generatorRespawnMs));
     }
   }
 
@@ -151,6 +197,42 @@ export class SpawnManager {
 
   creatures(): IterableIterator<Creature> {
     return this.live.values();
+  }
+
+  get heroCount(): number {
+    return this.heroes;
+  }
+
+  /**
+   * Tell the spawns how many heroes are in the channel. More heroes means more monsters
+   * (they come in after fillDelayMs) and tougher new ones. When heroes leave, the extras
+   * still alive stay until killed; they just aren't replaced.
+   */
+  setHeroCount(n: number): void {
+    if (n === this.heroes) return;
+    this.heroes = n;
+    for (const p of this.points.values()) {
+      p.limit = scaledLimit(p.baseLimit, p.generator, n, this.opts);
+      const missing = p.limit - p.live.size - p.timers.length;
+      for (let i = 0; i < missing; i++) p.timers.push(this.opts.fillDelayMs);
+    }
+  }
+
+  /**
+   * Where the channel's heroes stand (every step). Sets the hero count for scaling and
+   * holds respawns back while a hero is near a spawn spot.
+   */
+  setHeroes(positions: Vec3[]): void {
+    this.heroPos = positions;
+    this.setHeroCount(positions.length);
+  }
+
+  /** True while any hero is close enough to see this point's monsters appear. */
+  private watched(p: Point): boolean {
+    const r = this.opts.hiddenRadius;
+    if (r <= 0) return false;
+    const rr = (r + p.radius) ** 2;
+    return this.heroPos.some((h) => (h.x - p.at.x) ** 2 + (h.y - p.at.y) ** 2 <= rr);
   }
 
   /** Fill every point up to its limit. */
@@ -163,6 +245,10 @@ export class SpawnManager {
       for (let i = p.timers.length - 1; i >= 0; i--) {
         p.timers[i]! -= dtMs;
         if (p.timers[i]! <= 0) {
+          if (this.watched(p)) {
+            p.timers[i] = 0; // due, but waits until nobody is looking
+            continue;
+          }
           p.timers.splice(i, 1);
           if (p.live.size < p.limit && this.canMake(p)) this.spawn(p);
         }
@@ -215,8 +301,9 @@ export class SpawnManager {
     this.points.clear();
   }
 
-  private point(id: string, pool: string[], at: Vec3, yaw: number, radius: number, limit: number, totalLimit: number, respawnMs: number): Point {
-    return { id, pool, at: { x: at.x, y: at.y, z: at.z }, yaw, radius, limit, totalLimit, made: 0, live: new Set(), timers: [], respawnMs };
+  private point(id: string, pool: string[], at: Vec3, yaw: number, radius: number, generator: boolean, baseLimit: number, totalLimit: number, respawnMs: number): Point {
+    const limit = scaledLimit(baseLimit, generator, this.heroes, this.opts);
+    return { id, pool, at: { x: at.x, y: at.y, z: at.z }, yaw, radius, generator, baseLimit, limit, totalLimit, made: 0, live: new Set(), timers: [], respawnMs };
   }
 
   private canMake(p: Point): boolean {
@@ -227,9 +314,11 @@ export class SpawnManager {
     const r = this.opts.rng;
     const def = p.pool[Math.floor(r() * p.pool.length)]!;
     let at: Vec3 = { ...p.at };
-    if (p.radius > 0) {
+    // Extra copies of a placed creature stand near its spot, not inside it.
+    const radius = p.radius > 0 ? p.radius : p.live.size > 0 ? this.opts.placedSpread : 0;
+    if (radius > 0) {
       const a = r() * Math.PI * 2;
-      const d = Math.sqrt(r()) * p.radius;
+      const d = Math.sqrt(r()) * radius;
       at = { x: p.at.x + Math.cos(a) * d, y: p.at.y + Math.sin(a) * d, z: p.at.z };
     }
     if (this.opts.place) {
@@ -241,7 +330,8 @@ export class SpawnManager {
       at = snapped;
     }
     const c = creatureFromDef(allocCreatureId(), def, at, this.data, p.id);
-    c.yaw = p.radius > 0 ? r() * Math.PI * 2 - Math.PI : p.yaw;
+    c.maxHealth = c.health = Math.round(c.health * healthScale(this.heroes, this.opts));
+    c.yaw = radius > 0 ? r() * Math.PI * 2 - Math.PI : p.yaw;
     p.made++;
     p.live.add(c.id);
     this.live.set(c.id, c);
