@@ -37,3 +37,25 @@ fix needs to know how the 2D layer reaches Direct3D (`[display] frame_probe=1`, 
 The in-game Options have a "Screen Aspect Ratio" setting (4:3 or 16:9, profile field
 `ScreenAspectRatio`, text `PC_OPTIONS_SCREEN_ASPECT_RATIO_TEXT_SLIDER`). Its effect isn't
 mapped yet.
+
+## HUD scaling: what broke on the front end (to fix before turning hud_scale back on)
+
+A front-end capture with hud_scale on showed the layout using the virtual size, but three
+renderer-side primitive managers turn layout pixels into clip space with the real size, so
+their output landed in the top-left 1/scale of the screen:
+
+| caller of GetScreenSize | class (from the vtable's RTTI)            | what it does                       |
+|-------------------------|-------------------------------------------|------------------------------------|
+| 0xBB047A (vt slot 13)   | CEnginePrimitiveManager2DSprites          | x*2/W-1, 1-y*2/H for sprite quads  |
+| 0xBB1286 (vt slot 14)   | CEnginePrimitiveManager2DSprites          | same                               |
+| 0xBC6E59 (vt slot 5)    | CEnginePrimitiveManagerText               | passes 2/W, 2/H to 0x989B00        |
+| 0xBE1C94 (vt slot 5)    | CEngineInternalPrimitive2DViewport        | viewport rect to clip space        |
+| 0xBE1FA5                | CEngineInternalPrimitive2DViewport        | (sets a 2D viewport)               |
+
+The front end also called SetViewport(0,0,1601,901), i.e. the virtual size + 1. Scaled up,
+that exceeds the back buffer, so a SetViewport hook must clamp to the real size.
+
+Next attempt: send the virtual size to those return addresses as well (a list in the code
+block, next to the 0x9E1D00-0x9E2430 range), scale and clamp 2D viewports, and test the
+front end, the intro video and the pause menu before the in-game HUD. 3D-projected screen
+positions (camera code at 0xB327A1, 0xB4A881, 0xB8E315) must keep the real size.
