@@ -81,6 +81,7 @@ void log_status() {
     fo::log("display: %s", g_status);
     hud::log_status();
     fo::log("display: %s", mouse_look::status());
+    fo::log("display: %s", mouse_look::center_status());
     if (g_w && g_h) {
         const float a = static_cast<float>(g_w) / static_cast<float>(g_h);
         fo::log("display: back buffer %ux%u (aspect %.3f)%s", g_w, g_h, a,

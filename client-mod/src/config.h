@@ -37,6 +37,7 @@ struct Config {
     int refresh_hz = 0;          // -1 = the monitor's highest at that resolution, 0 = the game's, else Hz
     int vsync = -1;              // -1 = the game's setting, 0 = off, 1 = on
     bool low_latency = false;    // keep the CPU at most one frame ahead of the GPU (less mouse lag)
+    bool camera_auto_center = false;  // Fable eases the camera pitch back while walking
     int mouse_smoothing = 0;     // mouse-look frames averaged: 0 = off, -1 = Fable's own, else N
     float hud_scale = -1;        // 0 = automatic (as on a 900-pixel-tall screen), -1 = off, else the factor
 };

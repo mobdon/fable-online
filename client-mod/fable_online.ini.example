@@ -58,6 +58,8 @@ low_latency=0
 ; Mouse-look smoothing: off = the camera follows each mouse movement; game = Fable's own
 ; (averages the last few frames, so the view trails the mouse); or a number of frames.
 mouse_smoothing=off
+; 1 = Fable pulls the camera back to level while you walk (faster at high frame rates).
+camera_auto_center=0
 ; HUD, minimap and menu size. auto = as big as on a 900-pixel-tall screen (x1.6 at 1440p,
 ; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4. Experimental: menus
 ; aren't stretched to fill the screen yet.
