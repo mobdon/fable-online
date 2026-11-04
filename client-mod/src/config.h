@@ -20,7 +20,7 @@ struct Config {
     int open_key = VK_RETURN;
     // [tags]
     bool tags_enabled = true;
-    bool tags_self = false;      // also tag your own hero, to check placement alone
+    bool tags_self = true;       // your own name tag (gold plate, server renown)
     float tag_height = 2.1f;
     int up_axis = 2;             // x=0, y=1, z=2
     float tag_full = 25.0f;
