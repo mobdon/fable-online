@@ -48,13 +48,14 @@ window=fullscreen
 ; 1024x768 in 16-bit colour from userst.ini); game = Fable's; or a size such as 2560x1440.
 resolution=desktop
 ; max = the monitor's highest refresh rate at Fable's resolution; game = Fable's choice;
-; or a number such as 144. Full screen only (a window follows the desktop).
-refresh=max
+; or a number such as 144. Full screen only (a window follows the desktop). Experimental.
+refresh=game
 ; game = Fable's own setting; on; off (more frames, may tear).
 vsync=game
 ; 1 = keep the CPU at most one frame ahead of the graphics card, so the camera follows
-; the mouse sooner.
-low_latency=1
+; the mouse sooner. Experimental.
+low_latency=0
 ; HUD, minimap and menu size. auto = as big as on a 900-pixel-tall screen (x1.6 at 1440p,
-; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4.
-hud_scale=auto
+; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4. Experimental: menus
+; aren't stretched to fill the screen yet.
+hud_scale=off
