@@ -82,6 +82,7 @@ class PuppetPool {
         bool described = false;
         bool animOk = false;  // the last animation was taken
         uint32_t flinchUntilMs = 0;
+        uint32_t retryAtMs = 0;  // a refused animation is tried again from this time
         uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
     };
 

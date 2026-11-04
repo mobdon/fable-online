@@ -90,6 +90,8 @@ void describe_for_anims(ThingRef& t, const char* label);
 
 /** True when the thing's scripted-control queue is empty (or the thing has none). */
 bool scripted_queue_empty(ThingRef& t);
+/** Why the last play_* call returned false ("" after a success). */
+const char* last_anim_refusal();
 /** Drops everything queued on the thing's scripted-control component. */
 void clear_scripted(ThingRef& t);
 

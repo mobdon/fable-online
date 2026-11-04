@@ -18,6 +18,8 @@ constexpr uint32_t kClearCommandsAnimatedMs = 4000;
 constexpr uint32_t kAnimateAfterMs = 2000;
 // How long a reported hit shows as a flinch.
 constexpr uint32_t kFlinchMs = 350;
+// After a refused animation, how soon it is tried again.
+constexpr uint32_t kRetryRefusedMs = 100;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
 constexpr float kSpawnRadius = 6.0f;
 /** Parked puppets kept per def. Beyond this they are released. */
@@ -224,6 +226,7 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
     // Fable an animation to play while it is moved, through the same scripted-control
     // queue a quest's `.PlayLoopingAnim` and `.PlayAnimation` use.
     if (nowMs - p.createdMs < kAnimateAfterMs) return;
+    if (p.retryAtMs && static_cast<int32_t>(p.retryAtMs - nowMs) > 0) return;
     if (!p.described && stats_.described < 4) {
         p.described = true;
         ++stats_.described;
@@ -254,8 +257,9 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
         // A repeating swing gets one short follow loop, so the queue runs dry and the next
         // swing starts while the server still says it is attacking.
         if (sp.once) {
-            ok = script::play_anim_once(p.ref, sp.first, change, seq) &&
-                 script::play_looping_anim(p.ref, sp.follow, sp.repeat ? 1 : kGaitLoops, false, ++p.animSeq);
+            // The one-off is what matters; if its follow loop is refused, the refresh adds it.
+            ok = script::play_anim_once(p.ref, sp.first, change, seq);
+            if (ok) script::play_looping_anim(p.ref, sp.follow, sp.repeat ? 1 : kGaitLoops, false, ++p.animSeq);
         } else {
             ok = script::play_looping_anim(p.ref, sp.first, kGaitLoops, change, seq);
         }
@@ -268,10 +272,16 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
         if (change && stats_.animsPlayed < 40)
             fo::log("puppet: %s now %s", p.scriptName.c_str(), sp.first);
         ++stats_.animsPlayed;
-    } else if (stats_.animsRefused++ == 0) {
-        fo::log("puppet: %s refused an animation; it is moved without animations", p.scriptName.c_str());
+        p.gait = next;
+        p.retryAtMs = 0;
+        return;
     }
-    p.gait = next;  // also on a refusal: the refresh check retries it slowly
+    // A refusal is usually brief (Fable has the creature in a stagger or similar mode), so
+    // the gait is left unplayed and tried again shortly, rather than given up on.
+    if (stats_.animsRefused++ < 30)
+        fo::log("puppet: %s refused %s (%s); trying again", p.scriptName.c_str(), sp.first,
+                script::last_anim_refusal());
+    p.retryAtMs = nowMs + kRetryRefusedMs;
 }
 
 void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
