@@ -130,7 +130,7 @@ export class GameSocket {
       if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
     }
     if (mode === 'trusted') {
-      ch.placeHero(heroId, at, msg.yaw);
+      if (ch.placeHero(heroId, at, msg.yaw)) this.followRegion(heroId, at, false);
       return;
     }
     const before = ch.sim.position(heroId);
@@ -143,12 +143,28 @@ export class GameSocket {
         if (before)
           app.events.emit({ type: 'move_anchor', heroId, channelId: ch.id, distance: Math.round(Math.hypot(at.x - before.x, at.y - before.y, at.z - before.z)) });
       }
+      // Last: this may move the hero to another channel.
+      this.followRegion(heroId, at, verdict.anchored);
       return;
     }
     if (verdict.reason === 'loading' || verdict.reason === 'not_here') return;
     // One event per run of refusals, not one per packet.
     if (g && g.rejected === 1) app.events.emit({ type: 'move_rejected', heroId, channelId: ch.id, reason: verdict.reason, count: g.rejected });
     if (correct) this.send({ t: 'pos_correct', x: correct.x, y: correct.y, z: correct.z, reason: verdict.reason, area: ch.areaOf(heroId) });
+  }
+
+  private lastFollowAt = 0;
+
+  /**
+   * Keep the hero's server region in step with the region the client's Fable has loaded,
+   * worked out from the position (Director.follow). Checked straight after a jump the guard
+   * let through, and otherwise about once a second.
+   */
+  private followRegion(heroId: number, at: { x: number; y: number; z: number }, jumped: boolean): void {
+    const now = Date.now();
+    if (!jumped && now - this.lastFollowAt < 1000) return;
+    this.lastFollowAt = now;
+    this.app.director.follow(heroId, at);
   }
 
   private law(heroId: number, m: LawRequest): void {

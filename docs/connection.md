@@ -93,8 +93,11 @@ has. The launcher accepts plain http only for loopback, home networks (10/8, 172
 
 ## Not done yet
 
-- The server cannot tell which region the client's Fable has loaded (the mod only has a hash
-  of the area anchor). An area change is let through and tracked by hash, but the server's
-  region (and so its creatures, exits and the region chat channel) stays the one it had.
-  Mapping hashes to region names is what moves the hero to the right channel.
+- Regions are followed by position: Fable's coordinates are Albion map coordinates (a
+  level's MapX/MapY plus the local position), so `tools/extractor/regions.mjs` records each
+  level's rectangle (size from its .lev header) and region (`ContainsMap`), and
+  `Director.follow` moves the hero's server side to the region that holds an accepted report
+  (`region_follow`, via `client`, no load on the client). It does not check that the regions
+  border each other yet, and some server data (nav, spawns) is keyed by level script name
+  where the graph uses region names (`RegionTable.canonical`).
 - Moves are checked against speed, not walls: the navmesh (`FO_NAV_DIR`) is the next check.

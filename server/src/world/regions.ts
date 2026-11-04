@@ -16,11 +16,49 @@ export const STAGE_REGIONS = {
   world: 'HeroGuildComplex',
 } as const;
 
+/** One level's rectangle on the world map (metres), and the region it belongs to. */
+export interface LevelRect {
+  region: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export class RegionTable {
   private byName = new Map<string, RegionDef>();
+  private rects: LevelRect[] = [];
+  /** Level script name -> the region (graph name) it belongs to, where they differ. */
+  private regionOfScript = new Map<string, string>();
 
-  constructor(defs: RegionDef[]) {
+  constructor(defs: RegionDef[], rects: LevelRect[] = [], scripts: [string, string][] = []) {
     for (const d of defs) this.byName.set(d.name, d);
+    for (const [script, region] of scripts) if (script !== region) this.regionOfScript.set(script, region);
+    // Only levels of regions the server runs; filler and sea levels are scenery.
+    this.rects = rects.filter((r) => this.byName.has(r.region) && r.w > 0 && r.h > 0);
+  }
+
+  /**
+   * The region whose level holds this world position (x, y on Albion's map, which is where
+   * Fable's own coordinates are), or undefined when it is in none the server knows. Levels
+   * don't overlap in the retail world file, so the first match is the only one.
+   */
+  locate(x: number, y: number): string | undefined {
+    for (const r of this.rects) if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return r.region;
+    return undefined;
+  }
+
+  /**
+   * The region graph's name for a region or level script name. Some server names are level
+   * scripts (HeroGuildComplex) where the graph says HeroGuildComplexInside: same place.
+   */
+  canonical(name: string): string {
+    return this.regionOfScript.get(name) ?? name;
+  }
+
+  /** True when locate() can answer (regions.json was extracted with level sizes). */
+  get canLocate(): boolean {
+    return this.rects.length > 0;
   }
 
   /**
@@ -31,7 +69,7 @@ export class RegionTable {
   static load(file: string): RegionTable {
     if (!fs.existsSync(file)) return RegionTable.fallback();
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as {
-      maps: { uid: number; script: string; sea: boolean }[];
+      maps: { uid: number; script: string; sea: boolean; region?: string; x?: number; y?: number; w?: number; h?: number }[];
       graph: Record<string, string[]>;
     };
     const defs = new Map<string, RegionDef>();
@@ -42,7 +80,13 @@ export class RegionTable {
     for (const [name, n] of Object.entries(raw.graph)) {
       if (!defs.has(name)) defs.set(name, { name, uid: 0, sea: false, neighbours: n });
     }
-    return new RegionTable([...defs.values()]);
+    const rects: LevelRect[] = [];
+    for (const m of raw.maps)
+      // Only the playable regions (the ones in the region graph), never filler or sea.
+      if (m.region && raw.graph[m.region] && !m.sea && m.w && m.h && Number.isFinite(m.x) && Number.isFinite(m.y))
+        rects.push({ region: m.region, x: m.x!, y: m.y!, w: m.w, h: m.h });
+    const scripts: [string, string][] = raw.maps.filter((m) => m.script && m.region).map((m) => [m.script, m.region!]);
+    return new RegionTable([...defs.values()], rects, scripts);
   }
 
   static fallback(): RegionTable {

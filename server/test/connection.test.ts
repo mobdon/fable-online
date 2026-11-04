@@ -367,3 +367,42 @@ test('a load the mod saw lets one jump through, at most every few seconds', () =
   assert.equal(g.noteLoad(11_000), 'too_soon');
   assert.equal(g.check(at(2500), at(0), 11_100).ok, false);
 });
+
+test('the server follows a hero into the region their own Fable loaded', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fo-regions-')), 'regions.json');
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      maps: [
+        { uid: 1, script: 'HeroGuildComplex', sea: false, region: 'HeroGuildComplexInside', x: 4576, y: 3552, w: 256, h: 224 },
+        { uid: 2, script: 'BowerstoneSlums_v2', sea: false, region: 'BowerstoneSlums', x: 3744, y: 4224, w: 256, h: 160 },
+        { uid: 3, script: 'Filler_X', sea: false, region: 'Filler_X', x: 0, y: 0, w: 100, h: 100 },
+      ],
+      graph: { HeroGuildComplexInside: ['LookoutPoint'], BowerstoneSlums: ['LookoutPoint'], LookoutPoint: ['HeroGuildComplex', 'BowerstoneSlums'] },
+    }),
+  );
+  const app = testApp({ regionsPath: file });
+  assert.equal(app.regions.locate(3947, 4286), 'BowerstoneSlums');
+  assert.equal(app.regions.locate(50, 50), undefined, 'scenery levels are not regions');
+  const { hero } = makeHero(app);
+  const frames: string[] = [];
+  const ch = app.director.join(app.heroes.get(hero.id)!, link(hero.id, 'Mob', frames));
+  assert.equal(ch.region.name, 'HeroGuildComplex');
+  assert.equal(app.director.follow(hero.id, at(4600, 3600)), undefined, 'the Guild by its level name is the same place');
+  // The save loaded in Bowerstone: the server moves the hero there, with no load on the client.
+  const to = app.director.follow(hero.id, at(3947, 4286, 20));
+  assert.equal(to?.region.name, 'BowerstoneSlums');
+  assert.equal(app.director.channelOf(hero.id)?.region.name, 'BowerstoneSlums');
+  const enter = frames.map((f) => JSON.parse(f)).filter((f) => f.t === 'enter_region').pop();
+  assert.equal(enter.region, 'BowerstoneSlums');
+  assert.equal(enter.loading, false);
+  assert.equal(app.heroes.get(hero.id)!.region, 'BowerstoneSlums', 'saved for the next login');
+  // Reports go on from there without a correction.
+  const next = to!.reportPosition(hero.id, at(3947.5, 4286, 20), 0, Date.now() + 100);
+  assert.ok(next.verdict.ok);
+  assert.equal(app.director.follow(hero.id, at(3948, 4286, 20)), undefined, 'same region: nothing to do');
+  app.close();
+});

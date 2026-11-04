@@ -12,7 +12,8 @@ const SKY_RESYNC_MS = 60_000;
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
-export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law';
+/** `client`: the client's own Fable already loaded the region (see Director.follow). */
+export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law' | 'client';
 
 /** Extra detail for a region change, passed through to the client's enter_region. */
 export interface ArrivalInfo {
@@ -180,11 +181,36 @@ export class Director {
     this.hooks.onLeave?.(from, heroId);
     if (from.kind === 'private') this.closeChannel(from);
     this.persist(heroId, toRegion, at);
-    target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
+    // A client that loaded the region itself is already there: no wait, and the next report
+    // comes from where it just was.
+    if (via !== 'client') target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
     // An arrival at the origin means "anywhere" (the law's moves); otherwise allow the
     // difference between the server's entrance and where the client's Fable puts the hero.
     this.place(target, link, at, { ...info, via, from: from.region.name }, isOrigin(at) ? Infinity : target.moveRules.arrivalSlack);
     return target;
+  }
+
+  /**
+   * The client's Fable loaded another region by itself (the hero walked out of town) and the
+   * server did not send it there. If the reported position lies in a region the server runs,
+   * move the hero's server side to that region's shared channel, with no load on the client.
+   * Returns the new channel, or undefined when nothing changed. Until the client's exits are
+   * hooked this is how the server keeps up; the move guard has already accepted the position.
+   */
+  follow(heroId: number, at: Vec3): Channel | undefined {
+    const ch = this.where.get(heroId);
+    if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
+    const region = this.regions.locate(at.x, at.y);
+    if (!region || region === this.regions.canonical(ch.region.name)) return undefined;
+    const from = ch.region.name;
+    try {
+      const to = this.transfer(heroId, region, at, 'client');
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, channelId: to.id });
+      return to;
+    } catch (e) {
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, refused: (e as Error).message });
+      return undefined;
+    }
   }
 
   /** The client finished loading the region it was sent to. */
@@ -276,7 +302,7 @@ export class Director {
     if (change) {
       msg.from = change.from;
       msg.via = change.via;
-      msg.loading = true;
+      msg.loading = change.via !== 'client';
       if (change.entrance) msg.entrance = change.entrance;
       if (change.thing) msg.thing = change.thing;
       if (change.yaw !== undefined) msg.yaw = change.yaw;
