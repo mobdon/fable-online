@@ -75,7 +75,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
             std::string g = narrow(argv[++i]);
             while (!g.empty() && g.back() == '/') g.pop_back();
             if (!http::url_allowed(g)) {
-                MessageBoxW(nullptr, L"The gateway must be an https:// URL (plain http only for localhost).",
+                MessageBoxW(nullptr, L"The gateway must be an https:// URL (plain http only for localhost or a home/VPN network).",
                             L"Chapters of the Lost", MB_ICONERROR);
                 return 1;
             }

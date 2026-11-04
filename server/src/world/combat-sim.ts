@@ -229,13 +229,14 @@ export class CombatSim implements RegionSim {
     return h && { ...h.hero.pos };
   }
 
-  /** Dev only (trustClientPositions): put the hero where the mod says it is. */
-  placeHero(heroId: number, at: Vec3, yaw?: number): void {
+  /** Put the hero where the mod says it is (checked by Channel.reportPosition). Not while dead. */
+  placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
     const slot = this.heroes.get(heroId);
-    if (!slot) return;
+    if (!slot || !slot.hero.alive) return false;
     slot.hero.pos = { x: at.x, y: at.y, z: at.z };
     if (yaw !== undefined) slot.hero.yaw = yaw;
     slot.move = [0, 0];
+    return true;
   }
 
   applyInput(heroId: number, input: PlayerInput): void {

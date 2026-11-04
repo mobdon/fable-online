@@ -32,6 +32,7 @@ import { loadTownData, type TownData } from './world/town/town-data.js';
 import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
 import { Scoreboard } from './scoreboard/scoreboard.js';
+import { ResumeTokens } from './net/resume.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -54,6 +55,8 @@ export interface App {
   clock: WorldClock;
   town: TownData;
   scoreboard: Scoreboard;
+  /** Lets a dropped game connection come back without a new launcher ticket. */
+  resume: ResumeTokens;
   close(): void;
 }
 
@@ -65,7 +68,7 @@ export function createApp(
   const db = new Database(cfg.dbPath);
   const events = opts.events ?? (cfg.eventsPath ? new JsonlSink(cfg.eventsPath) : new NullSink());
   const accounts = new Accounts(db, events, cfg.sessionTtlMs);
-  const heroes = new Heroes(db, events, cfg.maxHeroesPerAccount);
+  const heroes = new Heroes(db, events, cfg.maxHeroesPerAccount, cfg.newHeroPhase);
   const data = opts.data ?? loadGameData(cfg.gameDataPath);
   const starterIds = new Set(STARTER_ITEMS.map((i) => i.id));
   const catalog = new ItemCatalog([...STARTER_ITEMS, ...catalogFromGameData(data.items, BALANCE.staffArmour).filter((i) => !starterIds.has(i.id))]);
@@ -161,6 +164,7 @@ export function createApp(
     clock,
     town,
     scoreboard,
+    resume: new ResumeTokens(cfg.resumeMs),
     close() {
       director.stop();
       law.flush();

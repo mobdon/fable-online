@@ -185,6 +185,8 @@ FrameType frame_type(const std::string& json) {
     if (tag == "welcome") return FrameType::Welcome;
     if (tag == "enter_region") return FrameType::EnterRegion;
     if (tag == "error") return FrameType::Error;
+    if (tag == "pos_correct") return FrameType::PosCorrect;
+    if (tag == "pong") return FrameType::Pong;
     return FrameType::Unknown;
 }
 
@@ -237,7 +239,43 @@ bool parse_welcome(const std::string& json, Welcome& out) {
         Reader r(json);
         if (seek_key(r, "tick_rate") && r.read_number(n) && n > 0 && n <= 120) out.tickRate = static_cast<uint32_t>(n);
     }
+    {
+        Reader r(json);
+        if (seek_key(r, "resume")) r.read_string(out.resume);
+        if (out.resume.size() > 256) out.resume.clear();
+    }
+    {
+        Reader r(json);
+        std::string mode;
+        if (seek_key(r, "client_move") && r.read_string(mode) && (mode == "off" || mode == "checked" || mode == "trusted"))
+            out.clientMove = mode;
+    }
     return out.playerId != 0;
+}
+
+bool parse_pos_correct(const std::string& json, PosCorrect& out) {
+    if (frame_type(json) != FrameType::PosCorrect) return false;
+    out = PosCorrect{};
+    const char* keys[3] = {"x", "y", "z"};
+    float* dst[3] = {&out.x, &out.y, &out.z};
+    for (int i = 0; i < 3; ++i) {
+        Reader r(json);
+        double n = 0;
+        if (!seek_key(r, keys[i]) || !r.read_number(n) || !std::isfinite(n) || std::fabs(n) > 1e6) return false;
+        *dst[i] = static_cast<float>(n);
+    }
+    Reader r(json);
+    if (seek_key(r, "reason")) r.read_string(out.reason);
+    Reader ra(json);
+    double area = 0;
+    if (seek_key(ra, "area") && ra.read_number(area) && area >= 0 && area <= 4294967295.0) out.area = static_cast<uint32_t>(area);
+    return true;
+}
+
+bool parse_pong(const std::string& json, double& n) {
+    if (frame_type(json) != FrameType::Pong) return false;
+    Reader r(json);
+    return seek_key(r, "n") && r.read_number(n);
 }
 
 bool parse_enter_region(const std::string& json, std::string& region, float& x, float& y, float& z) {

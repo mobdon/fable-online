@@ -33,6 +33,8 @@ bool looks_like_hero(uintptr_t a) {
            read(phys, &pvt, 4) && pvt == kPhysicsVtable;
 }
 
+constexpr size_t kScanPiece = 64 * 1024;
+
 /** Walks the process's own private, writable, committed memory. */
 template <typename Fn>
 void each_region(Fn&& fn) {
@@ -45,8 +47,11 @@ void each_region(Fn&& fn) {
         if (!VirtualQuery(reinterpret_cast<LPCVOID>(p), &mbi, sizeof(mbi))) break;
         uintptr_t lo = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         bool rw = (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD);
+        // Handed out in 64 KB pieces, so a caller's buffer stays small: one the size of a
+        // large region could not be allocated in Fable's crowded 32-bit address space.
         if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && rw && mbi.RegionSize < (256u << 20))
-            fn(lo, mbi.RegionSize);
+            for (size_t off = 0; off < mbi.RegionSize; off += kScanPiece)
+                fn(lo + off, mbi.RegionSize - off < kScanPiece ? mbi.RegionSize - off : kScanPiece);
         if (mbi.RegionSize == 0) break;
         p = lo + mbi.RegionSize;
     }
@@ -58,6 +63,10 @@ uintptr_t physics_of(uintptr_t thing) {
     uint32_t phys = 0, pvt = 0;
     if (!read(thing + kPhysicsPtr, &phys, 4) || !phys) return 0;
     if (!read(phys, &pvt, 4)) return 0;
+    // Only a physics component has a position at +0x0C. Right after a creature is made, or
+    // for a def built another way, +0x60 can hold something else whose +0x0C is a pointer:
+    // writing coordinates there corrupted the engine and crashed its renderer.
+    if (pvt != kPhysicsVtable && pvt != kPhysicsStandardVtable) return 0;
     return phys;
 }
 
@@ -97,6 +106,16 @@ bool read_pos(uintptr_t thing, Pos& out) {
     if (!read(phys + kPosOffset, p, sizeof(p))) return false;
     if (!sane(p[0]) || !sane(p[1]) || !sane(p[2])) return false;
     out = Pos{p[0], p[1], p[2]};
+    return true;
+}
+
+bool read_yaw(uintptr_t thing, float& yaw) {
+    uintptr_t phys = physics_of(thing);
+    if (!phys) return false;
+    float f[2];
+    if (!read(phys + kForwardOffset, f, sizeof(f))) return false;
+    if (!sane(f[0]) || !sane(f[1]) || (f[0] == 0 && f[1] == 0)) return false;
+    yaw = std::atan2(-f[0], f[1]);
     return true;
 }
 

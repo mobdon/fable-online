@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "crash_exit.h"
 #include "game/hook.h"
 #include "game/puppet.h"
 #include "game/spawns.h"
@@ -17,14 +18,17 @@
 #include "net/world_client.h"
 #include "world/entities.h"
 #include "world/objects.h"
+#include "world/reporter.h"
 #include "world/snapshot.h"
 
 namespace fo::sync {
 namespace {
 
 constexpr unsigned kTickMs = 33;        // the puppets are driven about 30 times a second
-constexpr unsigned kReportPosMs = 100;  // how often the hero's position goes to the server
 constexpr unsigned kStatusMs = 10000;
+constexpr unsigned kLoadStallMs = 1500;  // no tick for this long: the game thread was busy loading
+constexpr float kFarCorrection = 150.0f;
+constexpr uint32_t kHoldAfterLoadMs = 3000;  // no new stand-ins this soon after an area load  // metres; a correction this far is from another map
 
 std::string env(const char* name, const char* fallback = "") {
     char buf[512] = {};
@@ -44,11 +48,23 @@ struct State {
     world::WorldObjects objects;
     /** The hero's area when a region change began, to see the local load finish. */
     uint32_t areaBeforeLoad = 0;
+    /** The hero's area at the last report, to notice Fable loading another area by itself. */
+    uint32_t lastArea = 0;
+    /** When tick last ran; a long gap is Fable loading an area on the game thread. */
+    uint32_t lastTickMs = 0;
+    /** Fable stalled like an area load since the last report: tell the server with it. */
+    bool loadSeen = false;
+    /** The local hero object last tick; a new one means Fable rebuilt the area. */
+    uintptr_t lastHero = 0;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
+    /** What the server said it does with position reports ("off" until the welcome says). */
+    std::string serverMove = "off";
+    world::PositionReporter reporter;
+    uint32_t corrections = 0;
+    uint32_t lastCorrectionLogMs = 0;
     bool suppressSpawns = true;
     bool dev = false;
-    uint32_t lastReportMs = 0;
     uint32_t lastStatusMs = 0;
     uint32_t ownId = 0;
     std::string ownName;
@@ -61,6 +77,7 @@ State* g_state = nullptr;
 
 void on_connected() {
     if (!g_state) return;
+    g_state->reporter.reset();
     g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
@@ -88,7 +105,52 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.ownId = w.playerId;
         s.ownName = w.name;
         s.table.set_local_id(w.playerId);
-        fo::log("sync: joined as %s (entity %u), server ticks %u a second", w.name.c_str(), w.playerId, w.tickRate);
+        s.serverMove = w.clientMove;
+        s.reporter.reset();
+        // Kept for the next connection: a dropped link comes back without a new ticket.
+        if (!w.resume.empty()) net::world_set_resume(w.resume);
+        fo::log("sync: joined as %s (entity %u), server ticks %u a second, position reports %s%s", w.name.c_str(),
+                w.playerId, w.tickRate, w.clientMove.c_str(), w.resume.empty() ? "" : ", can resume");
+        return;
+    }
+    case world::FrameType::PosCorrect: {
+        world::PosCorrect c;
+        if (!world::parse_pos_correct(json, c)) return;
+        // The server refused a move (too fast, through a wall, while dead): put the local hero
+        // back where the server has it, so both agree and the next report starts from there.
+        uintptr_t hero = game::local_hero();
+        // A correction sent before Fable loaded another area holds the last area's coordinates.
+        // Applying it would drop the hero somewhere in the new map, so it is skipped.
+        if (hero && c.area && game::area_id(hero) != c.area) {
+            fo::log("sync: skipped a correction meant for the last area");
+            return;
+        }
+        // A correction from far away means the server has not followed a map change. Snapping
+        // across the map would put the hero inside a wall or a gate, so leave it and let the
+        // server catch up (it accepts a hero that keeps moving normally from the new spot).
+        game::Pos here;
+        if (hero && game::read_pos(hero, here) &&
+            std::hypot(here.x - c.x, here.y - c.y) > kFarCorrection) {
+            if (nowMs - s.lastCorrectionLogMs > 5000) {
+                s.lastCorrectionLogMs = nowMs;
+                fo::log("sync: skipped a correction %.0f m away (%s)", std::hypot(here.x - c.x, here.y - c.y), c.reason.c_str());
+            }
+            s.loadSeen = true;
+            return;
+        }
+        bool moved = hero && game::write_pos(hero, game::Pos{c.x, c.y, c.z}, false, 0);
+        s.reporter.reset();
+        ++s.corrections;
+        if (nowMs - s.lastCorrectionLogMs > 5000) {
+            s.lastCorrectionLogMs = nowMs;
+            fo::log("sync: server corrected the hero to %.1f, %.1f, %.1f (%s)%s; %u corrections so far", c.x, c.y, c.z,
+                    c.reason.c_str(), moved ? "" : ", could not move it", s.corrections);
+        }
+        return;
+    }
+    case world::FrameType::Pong: {
+        double n = 0;
+        if (world::parse_pong(json, n)) s.reporter.pong(nowMs, n);
         return;
     }
     case world::FrameType::Tick: {
@@ -118,6 +180,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.table.clear();
         s.puppets->clear_all();
         game::forget_hero();
+        s.reporter.reset();
+        s.lastArea = 0;
         return;
     }
     case world::FrameType::Error: {
@@ -132,16 +196,41 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
 
 void report_position(uint32_t nowMs) {
     State& s = *g_state;
-    if (!s.reportPos || nowMs - s.lastReportMs < kReportPosMs) return;
-    s.lastReportMs = nowMs;
+    if (!net::world_connected()) return;
+    if (s.reporter.ping_due(nowMs)) {
+        char ping[64];
+        std::snprintf(ping, sizeof(ping), "{\"t\":\"ping\",\"n\":%u}", nowMs);
+        net::world_send(ping);
+    }
+    // While the next region loads the hero's coordinates still belong to the last one.
+    if (!s.reportPos || s.serverMove == "off" || s.objects.loading()) return;
     uintptr_t hero = game::local_hero();
     if (!hero) return;
     game::Pos p;
     if (!game::read_pos(hero, p)) return;
-    char frame[192];
-    std::snprintf(frame, sizeof(frame),
-                  "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x, p.y, p.z,
-                  game::area_id(hero));
+    uint32_t area = game::area_id(hero);
+    if (area && area != s.lastArea) {
+        // Walking out of a town, into a house or through a Cullis Gate loads another area
+        // locally. Tell the server straight away: its new coordinates belong to that area.
+        if (s.lastArea) {
+            fo::log("sync: Fable loaded another area (%08x), telling the server", area);
+            s.reporter.reset();
+        }
+        s.lastArea = area;
+    }
+    float yaw = 0;
+    bool haveYaw = game::read_yaw(hero, yaw);
+    if (!s.reporter.due(nowMs, p.x, p.y, p.z, yaw)) return;
+    s.reporter.sent(nowMs, p.x, p.y, p.z, yaw);
+    char frame[224];
+    const char* load = s.loadSeen ? ",\"load\":1" : "";
+    s.loadSeen = false;
+    if (haveYaw)
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"yaw\":%.3f,\"area\":%u%s}",
+                      p.x, p.y, p.z, yaw, area, load);
+    else
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u%s}", p.x,
+                      p.y, p.z, area, load);
     net::world_send(frame);
 }
 
@@ -186,6 +275,18 @@ void tick() {
     if (!g_state) return;
     State& s = *g_state;
     uint32_t now = GetTickCount();
+    crash_exit::game_alive(now);
+    if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
+        fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
+        s.loadSeen = true;
+        s.reporter.reset();
+        s.puppets->hold(now, kHoldAfterLoadMs);
+    }
+    s.lastTickMs = now;
+    // No local hero means Fable is between areas or in a menu: making creatures then crashes it.
+    uintptr_t heroNow = game::local_hero();
+    if (!heroNow || heroNow != s.lastHero) s.puppets->hold(now, kHoldAfterLoadMs);
+    s.lastHero = heroNow;
 
     for (net::WorldEvent& e : net::world_poll()) {
         switch (e.kind) {
@@ -208,8 +309,8 @@ void tick() {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
         const game::PuppetStats& st = s.puppets->stats();
-        fo::log("sync: %s, %u entities, puppets live %u spawned %u reused %u failed %u lost %u, frames in %llu out %llu, stale %u",
-                net::world_connected() ? "online" : "offline", static_cast<unsigned>(s.table.size()), st.live,
+        fo::log("sync: %s (ping %d ms, %u corrections), %u entities, puppets live %u spawned %u reused %u failed %u lost %u, frames in %llu out %llu, stale %u",
+                net::world_connected() ? "online" : "offline", s.reporter.rtt_ms(), s.corrections, static_cast<unsigned>(s.table.size()), st.live,
                 st.spawned, st.reused, st.spawnFailed, st.lost, static_cast<unsigned long long>(received),
                 static_cast<unsigned long long>(sent), s.table.stale_frames());
     }
@@ -230,6 +331,7 @@ void start() {
     fo::log("sync: stand-in heroes use %s, local spawning %s, position reports %s", heroDef.c_str(),
             s.suppressSpawns ? "suppressed in server regions" : "left alone", s.reportPos ? "on" : "off");
 
+    crash_exit::install();
     game::hook::install();
     game::hook::on_tick(tick, kTickMs);
     if (s.dev) game::hook::on_key(dev_key);
@@ -268,8 +370,9 @@ void dev_key(int vk) {
     case VK_F7: {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
-        fo::log("sync: %s as %s (entity %u); %u entities, %u puppets; frames in %llu out %llu; local spawning %s",
-                net::world_connected() ? "online" : "offline", s.ownName.c_str(), s.ownId,
+        fo::log("sync: %s as %s (entity %u), ping %d ms, position reports %s; %u entities, %u puppets; frames in %llu out %llu; local spawning %s",
+                net::world_connected() ? "online" : "offline", s.ownName.c_str(), s.ownId, s.reporter.rtt_ms(),
+                s.serverMove.c_str(),
                 static_cast<unsigned>(s.table.size()), static_cast<unsigned>(s.puppets->live_count()),
                 static_cast<unsigned long long>(received), static_cast<unsigned long long>(sent),
                 game::spawns::suppressed() ? "off" : "on");

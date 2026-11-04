@@ -64,11 +64,31 @@ export interface ServerConfig {
    */
   interestRadius: number;
   /**
-   * Dev only: accept the mod's own hero position instead of deriving it from inputs.
-   * Needed until Fable's input is mapped. With this on, a client can put its hero
-   * anywhere in the region, so it must never be on for a server players can reach.
+   * What the server does with the mod's own hero position reports (`hero_pos`):
+   * - 'off': ignore them; heroes move only from `input`.
+   * - 'checked' (default): accept a report only if the hero could have got there (speed,
+   *   climb and fall limits from server/src/world/movement.ts). Anything else is refused and
+   *   the client is told where the server has its hero, so it snaps back.
+   * - 'trusted': accept every report. Dev machines only.
+   * Needed until Fable's own input is mapped and the server can move heroes from intent alone.
+   * FO_TRUST_CLIENT_POS=1, the older switch, still means 'trusted'.
    */
-  trustClientPositions: boolean;
+  clientMovement: 'off' | 'checked' | 'trusted';
+  /**
+   * On join, accept the first position report wherever it is in the region. The client's
+   * Fable loads its own save, which is not where the server last had the hero, and the mod
+   * cannot yet make Fable load a given spot. Costs a fresh launcher ticket per use.
+   */
+  joinAnchor: boolean;
+  /** How long a dropped connection may come back with its resume token instead of a new ticket. */
+  resumeMs: number;
+  /** The life stage new heroes start in. 'world' lets test heroes skip the private instances. */
+  newHeroPhase: 'childhood' | 'guild_training' | 'world';
+  /**
+   * Make a hero on the first join of an account that has none, named after the account
+   * ("mob" plays as "Mob"). The launcher has no hero screen yet.
+   */
+  autoHero: boolean;
 
   /** Max heroes per account. */
   maxHeroesPerAccount: number;
@@ -124,7 +144,11 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     channelIdleMs: num('FO_CHANNEL_IDLE_MS', 120_000),
     persistEveryMs: num('FO_PERSIST_MS', 30_000),
     interestRadius: num('FO_INTEREST_RADIUS', 80),
-    trustClientPositions: flag('FO_TRUST_CLIENT_POS', false),
+    clientMovement: movementMode(),
+    joinAnchor: flag('FO_JOIN_ANCHOR', true),
+    resumeMs: num('FO_RESUME_MS', 5 * 60_000),
+    newHeroPhase: heroPhase(str('FO_NEW_HERO_PHASE', 'childhood')),
+    autoHero: flag('FO_AUTO_HERO', false),
     maxHeroesPerAccount: num('FO_MAX_HEROES', 3),
     sessionTtlMs: num('FO_SESSION_TTL_MS', 7 * 24 * 3600_000),
     gameDataPath: str('FO_GAME_DATA', 'data/game-data.json'),
@@ -140,4 +164,16 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     weatherSeed: num('FO_WEATHER_SEED', 1),
     ...overrides,
   };
+}
+
+function movementMode(): ServerConfig['clientMovement'] {
+  if (flag('FO_TRUST_CLIENT_POS', false)) return 'trusted';
+  const v = str('FO_CLIENT_MOVE', 'checked');
+  if (v === 'off' || v === 'checked' || v === 'trusted') return v;
+  throw new Error(`FO_CLIENT_MOVE must be off, checked or trusted, got "${v}"`);
+}
+
+function heroPhase(v: string): ServerConfig['newHeroPhase'] {
+  if (v === 'childhood' || v === 'guild_training' || v === 'world') return v;
+  throw new Error(`FO_NEW_HERO_PHASE must be childhood, guild_training or world, got "${v}"`);
 }

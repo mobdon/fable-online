@@ -59,7 +59,12 @@ void online_thread() {
     bool was_connected = false;
     while (g_running.load()) {
         Sleep(200);
-        fo::game::HeroPos p = fo::game::hero_read();
+        fo::game::HeroPos p;
+        try {
+            p = fo::game::hero_read();
+        } catch (...) {
+            fo::log("hero: read failed; trying again");
+        }
         fo::overlay::set_hero(p);
         // Interim (dev servers only): report our position so others see our name tag.
         // Production servers ignore this; the region server owns positions.

@@ -12,7 +12,8 @@ const SKY_RESYNC_MS = 60_000;
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
-export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law';
+/** `client`: the client's own Fable already loaded the region (see Director.follow). */
+export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law' | 'client';
 
 /** Extra detail for a region change, passed through to the client's enter_region. */
 export interface ArrivalInfo {
@@ -115,7 +116,8 @@ export class Director {
   }
 
   /** Put a hero into the world. Region and position come from the database, never the client. */
-  join(hero: Hero, link: PlayerLink): Channel {
+  /** `resumed`: the same game session reconnecting, so its Fable still has the hero where the server does. */
+  join(hero: Hero, link: PlayerLink, resumed = false): Channel {
     if (this.where.has(hero.id)) throw new GameError('already_online', 'That hero is already in the world', 409);
     let region: string = hero.phase === 'world' ? hero.region : STAGE_REGIONS[hero.phase];
     let solo = hero.phase !== 'world';
@@ -130,7 +132,10 @@ export class Director {
     const def = this.regions.get(region) ?? this.regions.get(STAGE_REGIONS.world);
     if (!def) throw new GameError('no_region', `Unknown region ${region}`, 500);
     const ch = solo ? this.openPrivate(def.name, hero.id) : this.pickShared(def.name);
-    this.place(ch, link, { x: hero.x, y: hero.y, z: hero.z });
+    const at = { x: hero.x, y: hero.y, z: hero.z };
+    // The client's Fable loads its own save, which need not be where the server last had the
+    // hero, so the first position report may re-anchor them (see ServerConfig.joinAnchor).
+    this.place(ch, link, at, undefined, isOrigin(at) || (this.cfg.joinAnchor && !resumed) ? Infinity : 0);
     return ch;
   }
 
@@ -176,9 +181,36 @@ export class Director {
     this.hooks.onLeave?.(from, heroId);
     if (from.kind === 'private') this.closeChannel(from);
     this.persist(heroId, toRegion, at);
-    target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
-    this.place(target, link, at, { ...info, via, from: from.region.name });
+    // A client that loaded the region itself is already there: no wait, and the next report
+    // comes from where it just was.
+    if (via !== 'client') target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
+    // An arrival at the origin means "anywhere" (the law's moves); otherwise allow the
+    // difference between the server's entrance and where the client's Fable puts the hero.
+    this.place(target, link, at, { ...info, via, from: from.region.name }, isOrigin(at) ? Infinity : target.moveRules.arrivalSlack);
     return target;
+  }
+
+  /**
+   * The client's Fable loaded another region by itself (the hero walked out of town) and the
+   * server did not send it there. If the reported position lies in a region the server runs,
+   * move the hero's server side to that region's shared channel, with no load on the client.
+   * Returns the new channel, or undefined when nothing changed. Until the client's exits are
+   * hooked this is how the server keeps up; the move guard has already accepted the position.
+   */
+  follow(heroId: number, at: Vec3): Channel | undefined {
+    const ch = this.where.get(heroId);
+    if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
+    const region = this.regions.locate(at.x, at.y);
+    if (!region || region === this.regions.canonical(ch.region.name)) return undefined;
+    const from = ch.region.name;
+    try {
+      const to = this.transfer(heroId, region, at, 'client');
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, channelId: to.id });
+      return to;
+    } catch (e) {
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, refused: (e as Error).message });
+      return undefined;
+    }
   }
 
   /** The client finished loading the region it was sent to. */
@@ -259,8 +291,8 @@ export class Director {
 
   // ---------------------------------------------------------------- internals
 
-  private place(ch: Channel, link: PlayerLink, at: Vec3, change?: ArrivalInfo & { via: TransferVia; from: string }): void {
-    ch.add(link, at);
+  private place(ch: Channel, link: PlayerLink, at: Vec3, change?: ArrivalInfo & { via: TransferVia; from: string }, anchor = 0): void {
+    ch.add(link, at, anchor);
     this.where.set(link.heroId, ch);
     if (!change) this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
     this.events.emit({ type: 'region_enter', heroId: link.heroId, region: ch.region.name, channelId: ch.id, private: ch.kind === 'private' });
@@ -270,7 +302,7 @@ export class Director {
     if (change) {
       msg.from = change.from;
       msg.via = change.via;
-      msg.loading = true;
+      msg.loading = change.via !== 'client';
       if (change.entrance) msg.entrance = change.entrance;
       if (change.thing) msg.thing = change.thing;
       if (change.yaw !== undefined) msg.yaw = change.yaw;
@@ -344,3 +376,5 @@ export class Director {
     return this.channels.size - this.privateCount;
   }
 }
+
+const isOrigin = (p: Vec3) => p.x === 0 && p.y === 0 && p.z === 0;

@@ -25,6 +25,8 @@ uintptr_t local_hero();
 void forget_hero();
 
 bool read_pos(uintptr_t thing, Pos& out);
+/** Facing in radians, the same convention write_pos uses (forward = -sin, cos). */
+bool read_yaw(uintptr_t thing, float& yaw);
 /** Writes position and facing straight into the physics component. */
 bool write_pos(uintptr_t thing, const Pos& p, bool have_yaw, float yaw);
 /** The thing's physics component, or 0 when it has none yet. */
@@ -38,6 +40,7 @@ std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);
 /** Vtables used by the mod (fixed: Fable.exe has no ASLR). */
 constexpr uint32_t kHeroVtable = 0x012457FC;      // CThingPlayerCreature
 constexpr uint32_t kPhysicsVtable = 0x0126616C;   // CTCPhysicsControlled
+constexpr uint32_t kPhysicsStandardVtable = 0x01265F84;  // CTCPhysicsStandard
 constexpr uint32_t kCreatureVtable = 0x0125AC0C;  // CThingCreatureBase
 
 }  // namespace fo::game

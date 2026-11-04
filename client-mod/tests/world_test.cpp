@@ -5,6 +5,7 @@
 #include <string>
 
 #include "world/entities.h"
+#include "world/reporter.h"
 #include "world/snapshot.h"
 
 namespace {
@@ -193,6 +194,64 @@ void test_real_frame() {
     CHECK(t.entities[1].anim == Anim::Walk);
 }
 
+void test_connection_frames() {
+    Welcome w;
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9,\"name\":\"Mob\",\"tick_rate\":20,"
+                        "\"resume\":\"resume.abcDEF_-123\",\"resume_ms\":300000,\"client_move\":\"checked\"}", w));
+    CHECK(w.resume == "resume.abcDEF_-123");
+    CHECK(w.clientMove == "checked");
+    // An old server says nothing about either: no resume, no reports.
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9}", w));
+    CHECK(w.resume.empty());
+    CHECK(w.clientMove == "off");
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9,\"client_move\":\"everything\"}", w));
+    CHECK(w.clientMove == "off");
+
+    PosCorrect c;
+    CHECK(frame_type("{\"t\":\"pos_correct\",\"x\":1,\"y\":2,\"z\":3}") == FrameType::PosCorrect);
+    CHECK(parse_pos_correct("{\"t\":\"pos_correct\",\"x\":32.5,\"y\":-4,\"z\":0.25,\"reason\":\"too_fast\"}", c));
+    CLOSE(c.x, 32.5f);
+    CLOSE(c.y, -4.0f);
+    CLOSE(c.z, 0.25f);
+    CHECK(c.reason == "too_fast");
+    CHECK(c.area == 0);
+    CHECK(parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2,\"z\":3,\"reason\":\"too_fast\",\"area\":2147483000}", c));
+    CHECK(c.area == 2147483000u);
+    CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2}", c));
+    CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1e30,\"y\":2,\"z\":3}", c));
+
+    double n = 0;
+    CHECK(parse_pong("{\"t\":\"pong\",\"n\":123456}", n));
+    CHECK(n == 123456);
+    CHECK(!parse_pong("{\"t\":\"tick\",\"n\":1}", n));
+}
+
+void test_reporter() {
+    PositionReporter r;
+    CHECK(r.due(1000, 0, 0, 0, 0));  // first report goes straight out
+    r.sent(1000, 0, 0, 0, 0);
+    CHECK(!r.due(1050, 5, 0, 0, 0));  // too soon, however far
+    CHECK(r.due(1100, 0.5f, 0, 0, 0));  // moving: every 100 ms
+    CHECK(!r.due(1100, 0.01f, 0, 0, 0));  // standing still...
+    CHECK(!r.due(1900, 0.01f, 0, 0, 0));
+    CHECK(r.due(2000, 0.01f, 0, 0, 0));  // ...only a heartbeat a second
+    CHECK(r.due(1200, 0, 0, 0, 0.3f));  // turning on the spot counts
+    CHECK(!r.due(1200, 0, 0, 0, 6.2831853f));  // a full turn is no turn
+    r.reset();
+    CHECK(r.due(1010, 0, 0, 0, 0));  // after a correction, straight away
+
+    CHECK(r.rtt_ms() == -1);
+    CHECK(r.ping_due(5000));
+    CHECK(!r.ping_due(6000));
+    CHECK(r.ping_due(7000));
+    r.pong(5080, 5000);
+    CHECK(r.rtt_ms() == 80);
+    r.pong(7180, 7000);
+    CHECK(r.rtt_ms() == 100);  // smoothed: 80 * 0.8 + 180 * 0.2
+    r.pong(9000, 1e12);  // junk is ignored
+    CHECK(r.rtt_ms() == 100);
+}
+
 }  // namespace
 
 int main() {
@@ -205,6 +264,8 @@ int main() {
     test_table_removal_and_stale();
     test_death_and_angles();
     test_real_frame();
+    test_connection_frames();
+    test_reporter();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;
 }

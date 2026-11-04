@@ -52,10 +52,11 @@ export interface RegionSim {
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
   /**
-   * Dev only: put a hero where the client says it is. The mod needs this until Fable's
-   * own input is mapped, and the server only calls it when trustClientPositions is on.
+   * Put a hero where the client says it is. The mod needs this until Fable's own input is
+   * mapped; the server only calls it after Channel.reportPosition checked the move (or with
+   * clientMovement 'trusted' on a dev machine). Returning false refuses it (a dead hero).
    */
-  placeHero?(heroId: number, at: Vec3, yaw?: number): void;
+  placeHero?(heroId: number, at: Vec3, yaw?: number): boolean | void;
   step(dtMs: number): void;
   snapshot(): EntityState[];
   position(heroId: number): Vec3 | undefined;

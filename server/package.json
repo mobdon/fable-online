@@ -17,7 +17,10 @@
     "ai-bench": "tsx --disable-warning=ExperimentalWarning scripts/ai-bench.ts",
     "extract": "tsx --disable-warning=ExperimentalWarning scripts/extract-defs.ts",
     "extract-town": "tsx --disable-warning=ExperimentalWarning scripts/extract-town.ts",
-    "scoreboard-setup": "tsx --disable-warning=ExperimentalWarning scripts/scoreboard-setup.ts"
+    "scoreboard-setup": "tsx --disable-warning=ExperimentalWarning scripts/scoreboard-setup.ts",
+    "admin": "tsx --disable-warning=ExperimentalWarning scripts/admin.ts",
+    "walkers": "tsx --disable-warning=ExperimentalWarning scripts/walkers.ts",
+    "link-test": "tsx --disable-warning=ExperimentalWarning scripts/link-test.ts"
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",
