@@ -1,4 +1,7 @@
 import { test } from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { MemorySink } from '../src/analytics/events.js';
@@ -43,9 +46,9 @@ const sim: SimFactory = () => {
   return s;
 };
 
-function setup() {
+function setup(regionsPath = '/nonexistent', extra: Record<string, unknown> = {}) {
   const sink = new MemorySink();
-  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', thingsPath: '' }, { events: sink, things: new WorldThings(fixture()), sim });
+  const app = createApp({ dbPath: ':memory:', eventsPath: '', regionsPath, thingsPath: '', ...extra }, { events: sink, things: new WorldThings(fixture()), sim });
   return Object.assign(app, { sink });
 }
 type TestApp = ReturnType<typeof setup>;
@@ -245,4 +248,71 @@ test('death respawns the hero at the nearest Cullis Gate, in another region if n
   assert.equal(app.travel.respawn(b.id), 'LookoutPoint:5');
   assert.equal(regionOf(app, b.id), 'LookoutPoint');
   assert.ok(app.sink.events.some((e) => e.type === 'gate_travel' && e.heroId === b.id && (e as { via?: string }).via === 'respawn'));
+});
+
+/**
+ * A regions.json with level rectangles, so Director.follow can tell regions apart:
+ * the Guild and Lookout Point are joined by an exit, Greatwood is joined to Lookout Point only.
+ */
+function regionsFile(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fo-travel-regions-'));
+  const file = path.join(dir, 'regions.json');
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      maps: [
+        { uid: 1, script: 'HeroGuildComplex', sea: false, region: 'HeroGuildComplexInside', x: 4000, y: 4000, w: 256, h: 256 },
+        { uid: 2, script: 'LookoutPoint', sea: false, region: 'LookoutPoint', x: 4256, y: 4000, w: 256, h: 256 },
+        { uid: 3, script: 'Greatwood', sea: false, region: 'Greatwood', x: 3000, y: 3000, w: 256, h: 256 },
+      ],
+      graph: { HeroGuildComplexInside: ['LookoutPoint'], LookoutPoint: ['HeroGuildComplexInside', 'Greatwood'], Greatwood: ['LookoutPoint'] },
+    }),
+  );
+  return file;
+}
+const world = (x: number, y: number, z = 0) => ({ x, y, z });
+
+test('a jump to a gate the server did not approve is refused and unlocks nothing there', () => {
+  const app = setup(regionsFile());
+  const h = join(app, 'HeroGuildComplex', [100, 100, 0]);
+  // Greatwood's gate is at (100, 100) in its region, (3100, 3100) on Albion; no exit joins it to the Guild.
+  const next = app.director.followCheck(h.id, world(3102, 3101));
+  assert.equal(next?.region, 'Greatwood');
+  assert.equal(next?.error?.code, 'teleport_refused');
+  assert.equal(app.director.follow(h.id, world(3102, 3101)), undefined);
+  assert.equal(regionOf(app, h.id), 'HeroGuildComplex', 'the server keeps the hero where it was');
+  tick(app);
+  assert.ok(!app.travel.unlockedOf(h.id).has('Greatwood:7'));
+  assert.ok(app.sink.events.some((e) => e.type === 'region_follow' && e.refused));
+  app.close();
+});
+
+test('walking through an exit, and jumps that land nowhere near a gate, are still followed', () => {
+  const app = setup(regionsFile());
+  const h = join(app, 'HeroGuildComplex', [250, 100, 0]);
+  // Out of the Guild into Lookout Point: an exit joins them, so even next to a gate it is fine.
+  assert.equal(app.director.follow(h.id, world(4256 + 52, 4000 + 49))?.region.name, 'LookoutPoint');
+  // A client-side quest moving the hero far from any gate is not a gate jump.
+  const g = join(app, 'HeroGuildComplex', [100, 100, 0]);
+  assert.equal(app.director.follow(g.id, world(3200, 3220))?.region.name, 'Greatwood');
+  app.close();
+});
+
+test('strict teleports refuse every unapproved jump between regions no exit joins', () => {
+  const app = setup(regionsFile(), { strictTeleports: true });
+  const g = join(app, 'HeroGuildComplex', [100, 100, 0]);
+  assert.equal(app.director.followCheck(g.id, world(3200, 3220))?.error?.code, 'teleport_refused');
+  assert.equal(app.director.follow(g.id, world(4256 + 10, 4000 + 10))?.region.name, 'LookoutPoint', 'exits still work');
+  app.close();
+});
+
+test('an approved gate jump is not refused when the client reports from the far end', () => {
+  const app = setup(regionsFile(), { gatesOpen: true });
+  const h = join(app, 'HeroGuildComplex', [100, 100, 0]);
+  const r = app.travel.travel(h.id, { gate: 'Greatwood:7' });
+  assert.equal(r.ok, true);
+  assert.equal(regionOf(app, h.id), 'Greatwood');
+  arrived(app, h.id);
+  assert.equal(app.director.followCheck(h.id, world(3102, 3101)), undefined, 'already there: nothing to follow');
+  app.close();
 });

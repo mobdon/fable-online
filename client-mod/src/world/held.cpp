@@ -97,10 +97,11 @@ bool HeldActions::refusal_blocks(HeldKind kind, const std::string& code) {
     // region, still arriving) means the server could not check, and the game goes ahead so
     // nobody is stuck at a door; the server's ledger stays the record of what was taken.
     if (code == "demon_door_closed" || code == "locked" || code == "jailed") return true;
-    if (kind == HeldKind::Teleport || kind == HeldKind::TeleportBack)
-        return code == "in_combat" || code == "cooldown" || code == "barred" || code == "wanted" || code == "in_prison" ||
-               code == "kicked_out" || code == "not_graduated" || code == "dead" || code == "no_return" ||
-               code == "already_here" || code == "region_full" || code == "instances_full" || code == "rate";
+    // A teleport only happens when the server moved the hero: whatever the reason it said no
+    // (a rule, or that it couldn't check), the jump is dropped. A jump the server didn't make
+    // would be refused at the far end anyway (the server won't follow a hero to a gate it
+    // didn't send them to), leaving the hero out of step with the server.
+    if (kind == HeldKind::Teleport || kind == HeldKind::TeleportBack) return true;
     if (kind == HeldKind::Give)
         return code == "gone" || code == "need_keys" || code == "need_spade" || code == "for_sale";
     return false;
@@ -134,7 +135,11 @@ std::vector<Decision> HeldActions::drain(uint32_t nowMs) {
         uint32_t wait = h.second.kind == HeldKind::Exit ? kExitWaitMs : h.second.kind == HeldKind::Give ? kGiveWaitMs : kTeleportWaitMs;
         if (nowMs - h.second.since >= wait) late.push_back(h.first);
     }
-    for (uintptr_t t : late) decide(t, Verdict::Release, "timeout");
+    // Exits and pickups go ahead when the server is slow; a teleport waits for the server's yes.
+    for (uintptr_t t : late) {
+        HeldKind k = held_.at(t).kind;
+        decide(t, k == HeldKind::Teleport || k == HeldKind::TeleportBack ? Verdict::Drop : Verdict::Release, "timeout");
+    }
     std::vector<Decision> out;
     out.swap(out_);
     return out;

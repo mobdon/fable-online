@@ -118,6 +118,8 @@ export interface ServerConfig {
   trustClientGear: boolean;
   /** Test servers: every Cullis Gate counts as found, so heroes from older saves can travel. */
   gatesOpen: boolean;
+  /** Refuse every unapproved jump between regions no exit joins (FO_STRICT_TELEPORTS), not only jumps to a gate. */
+  strictTeleports: boolean;
   /** Gold a quest script with no quest card may pay when content/quest-rewards.json has no entry for it (default 0). */
   questDefaultMaxGold: number;
   /** Most quest gold one hero can be paid in 24 hours, across all quests. */
@@ -218,6 +220,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     pvpEverywhere: flag('FO_PVP_ALL', false),
     trustClientGear: flag('FO_TRUST_CLIENT_GEAR', false),
     gatesOpen: flag('FO_GATES_OPEN', false),
+    strictTeleports: flag('FO_STRICT_TELEPORTS', false),
     questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 0),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
     renownImportMax: num('FO_RENOWN_IMPORT_MAX', 5_000),

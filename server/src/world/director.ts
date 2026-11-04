@@ -55,8 +55,11 @@ export const REGION_LOAD_TIMEOUT_MS = 30_000;
 export interface DirectorPolicy {
   /** Where this hero must appear on login instead of their saved region. */
   placement?(hero: Hero): { region: string; private: boolean } | undefined;
-  /** Refuse a region change by returning an error. 'law' moves are the law's own. */
-  canEnter?(heroId: number, from: string, to: string, via: TransferVia): GameError | null;
+  /**
+   * Refuse a region change by returning an error. 'law' moves are the law's own. `at` is the
+   * arrival point in the new region's frame, when there is one.
+   */
+  canEnter?(heroId: number, from: string, to: string, via: TransferVia, at?: Vec3): GameError | null;
   /** After every frame, with every hero in the world. */
   tick?(dtMs: number, heroIds: Iterable<number>): void;
   left?(heroId: number): void;
@@ -183,7 +186,7 @@ export class Director {
     if (via === 'exit' && !this.regions.areNeighbours(from.region.name, toRegion))
       throw new GameError('not_adjacent', `${from.region.name} does not lead to ${toRegion}`);
     for (const p of this.policies) {
-      const err = p.canEnter?.(heroId, from.region.name, toRegion, via);
+      const err = p.canEnter?.(heroId, from.region.name, toRegion, via, at);
       if (err) throw err;
     }
     const link = from.players.get(heroId)!;
@@ -213,22 +216,54 @@ export class Director {
    */
   /** `at` is the client's world position (Fable's own coordinates). */
   follow(heroId: number, at: Vec3): Channel | undefined {
+    const next = this.followCheck(heroId, at);
+    if (!next) return undefined;
+    const from = next.from;
+    if (next.error) {
+      this.events.emit({ type: 'region_follow', heroId, from, to: next.region, refused: next.error.message });
+      return undefined;
+    }
+    try {
+      const to = this.transfer(heroId, next.region, next.local, 'client');
+      this.events.emit({ type: 'region_follow', heroId, from, to: next.region, channelId: to.id });
+      return to;
+    } catch (e) {
+      this.events.emit({ type: 'region_follow', heroId, from, to: next.region, refused: (e as Error).message });
+      return undefined;
+    }
+  }
+
+  /**
+   * The region follow() would move this hero to for a reported world position, and whether a
+   * policy refuses it, without moving anyone. Undefined when the hero would stay. The socket
+   * checks this before it accepts a far report, so a refused jump (a faked teleport) never
+   * moves the server's copy of the hero.
+   */
+  followCheck(heroId: number, at: Vec3): { from: string; region: string; local: Vec3; error: GameError | null } | undefined {
     const ch = this.where.get(heroId);
     if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
     const region = this.regions.locate(at.x, at.y);
     // Compare graph names on both sides: a channel can be named by a level script whose graph
     // region is another name, and following it to "itself" would loop (one move every report).
     if (!region || this.regions.canonical(region) === this.regions.canonical(ch.region.name)) return undefined;
-    const from = ch.region.name;
-    try {
-      const o = this.regions.origin(region);
-      const to = this.transfer(heroId, region, { ...at, x: at.x - o.x, y: at.y - o.y }, 'client');
-      this.events.emit({ type: 'region_follow', heroId, from, to: region, channelId: to.id });
-      return to;
-    } catch (e) {
-      this.events.emit({ type: 'region_follow', heroId, from, to: region, refused: (e as Error).message });
-      return undefined;
+    const o = this.regions.origin(region);
+    const local = { ...at, x: at.x - o.x, y: at.y - o.y };
+    let error: GameError | null = null;
+    for (const p of this.policies) {
+      error = p.canEnter?.(heroId, ch.region.name, region, 'client', local) ?? null;
+      if (error) break;
     }
+    return { from: ch.region.name, region, local, error };
+  }
+
+  /** True when an exit joins the two regions (level script or graph names). */
+  adjacent(a: string, b: string): boolean {
+    return this.regions.areNeighbours(this.regions.canonical(a), this.regions.canonical(b));
+  }
+
+  /** The region graph's name for a region or level script name. */
+  canonical(name: string): string {
+    return this.regions.canonical(name);
   }
 
   /**

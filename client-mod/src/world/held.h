@@ -41,7 +41,7 @@ uint64_t runtime_uid(const std::string& id, const LevelNames& levels);
 enum class HeldKind : uint8_t { Exit, Give, Teleport, TeleportBack };
 enum class Verdict : uint8_t { Release, Drop };
 
-/** How long a held action waits for the server before the game is let go anyway. */
+/** How long a held action waits for the server before the game is let go anyway (a teleport is dropped instead). */
 constexpr uint32_t kExitWaitMs = 3000;
 constexpr uint32_t kGiveWaitMs = 5000;
 constexpr uint32_t kTeleportWaitMs = 4000;
