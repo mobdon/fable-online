@@ -19,10 +19,9 @@ set FO_AUTO_HERO=1
 rem The server checks every position the mod reports (speed, climbs, falls) and corrects cheats.
 set FO_CLIENT_MOVE=checked
 rem Region map with level sizes, so the server knows which region your Fable has loaded.
-rem Older setups lack the sizes; this re-reads them from your Fable folder (a second or two).
-findstr /c:"\"w\":" "..\shared\defs\regions.json" >nul 2>&1 || (
-  if exist "C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters\Fable.exe" node ..\tools\extractor\regions.mjs "C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters"
-)
+rem Re-read from your Fable folder on every start (a second or two), so older setups get it.
+set "FABLE=C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters"
+if exist "%FABLE%\Fable.exe" node ..\tools\extractor\regions.mjs "%FABLE%"
 echo Players connect to %FO_PUBLIC_HOST% port 7777. Press Ctrl+C to stop (heroes are saved).
 call npm run dev
 pause
