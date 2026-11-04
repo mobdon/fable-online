@@ -276,6 +276,11 @@ void dev_key(int vk) {
         return;
     }
     case VK_F8: {
+        // The stand-in froze the game on its first run, so it needs an explicit opt-in.
+        if (!s.testId && !env_flag("FABLE_ONLINE_STANDIN_TEST", false)) {
+            fo::log("sync: F8 stand-in test is off (set FABLE_ONLINE_STANDIN_TEST=1 to allow it)");
+            return;
+        }
         if (s.testId) {
             fo::log("sync: removing the test puppet");
             s.puppets->sync({}, {s.testId}, {}, now);
