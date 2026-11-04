@@ -57,6 +57,7 @@ void config_load(HMODULE self) {
     std::wstring f = module_dir(self) + L"\\fable_online.ini";
     g_ini = f;
     c.chat_enabled = ini_bool(f, L"chat", L"enabled", c.chat_enabled);
+    c.chat_hide_hud = ini_bool(f, L"chat", L"hide_hud", c.chat_hide_hud);
     set_server(c, narrow(ini_str(f, L"chat", L"server", L"")));
     c.name = narrow(ini_str(f, L"chat", L"name", L""));
     std::wstring key = ini_str(f, L"chat", L"open_key", L"");

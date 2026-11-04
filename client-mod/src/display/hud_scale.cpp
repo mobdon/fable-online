@@ -35,12 +35,55 @@ std::atomic<unsigned> g_c20_fixed{0}, g_scissor_fixed{0}, g_viewport_fixed{0}, g
 
 bool active() { return g_virtual && g_virtual[0] != 0 && g_scale.load() > 1.001f; }
 
+// The rectangle (back-buffer pixels) where Fable's HUD is not drawn; width 0 = none.
+std::atomic<float> g_hide_x{0}, g_hide_y{0}, g_hide_w{0}, g_hide_h{0};
+std::atomic<unsigned> g_hidden{0};
+// The last 2D constant upload set the pixel-to-clip transform, so the next draws' positions
+// are in layout pixels (Fable's HUD text and other pixel-space 2D).
+bool g_pixel_2d = false;
+float g_pixel_sx = 1, g_pixel_sy = 1;   // layout pixels -> back-buffer pixels
+
+bool hiding() { return g_hide_w.load() > 0; }
+
+// True when a draw spanning [x0,x1]x[y0,y1] (back-buffer pixels) overlaps the hidden rectangle.
+bool overlaps_hidden(float x0, float y0, float x1, float y1) {
+    const float hx = g_hide_x.load(), hy = g_hide_y.load(), hw = g_hide_w.load(), hh = g_hide_h.load();
+    return hw > 0 && x1 > hx && x0 < hx + hw && y1 > hy && y0 < hy + hh;
+}
+
+// Vertices whose first two floats are positions; `to_px` maps one to back-buffer pixels.
+template <class F>
+bool hide_draw(const void* data, UINT first, UINT count, UINT stride, F to_px) {
+    if (!data || !count || stride < 8 || count > 65536) return false;
+    const uint8_t* src = static_cast<const uint8_t*>(data) + static_cast<size_t>(first) * stride;
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    for (UINT i = 0; i < count; ++i) {
+        const float* p = reinterpret_cast<const float*>(src + static_cast<size_t>(i) * stride);
+        float x, y;
+        to_px(p, x, y);
+        if (!(x > -1e6f && x < 1e6f && y > -1e6f && y < 1e6f)) return false;
+        x0 = std::fmin(x0, x); x1 = std::fmax(x1, x);
+        y0 = std::fmin(y0, y); y1 = std::fmax(y1, y);
+    }
+    if (!overlaps_hidden(x0, y0, x1, y1)) return false;
+    ++g_hidden;
+    return true;
+}
+
 HWND g_window = nullptr;
 HWND game_window() { return g_window; }
 
 // The game's 2D shader turns pixels into clip space with c20 = (2/w, 2/h, -1, 1). When it was
 // built from the real size, swap in the virtual one so the layout fills the screen.
 HRESULT WINAPI hk_SetVertexShaderConstantF(IDirect3DDevice9* d, UINT start, const float* c, UINT n) {
+    if (c && start <= 20 && start + n > 20 && g_w && g_h) {
+        // Note when the 2D pixel transform goes in, for hide_under: the real size, or the
+        // virtual one that HUD scaling swaps in below (either way the draws are in layout pixels).
+        const float* r = c + (20 - start) * 4;
+        g_pixel_2d = r[2] == -1.0f && r[3] == 1.0f && r[0] > 0 && r[1] > 0 && r[0] < 0.1f && r[1] < 0.1f;
+        // With HUD scaling, every 2D layout is in virtual pixels (the swap below makes sure).
+        if (g_pixel_2d) g_pixel_sx = g_pixel_sy = active() ? g_scale.load() : 1.0f;
+    }
     if (c && active() && start <= 20 && start + n > 20 && g_w && g_h) {
         const float* r = c + (20 - start) * 4;
         const float rx = 2.0f / static_cast<float>(g_w), ry = 2.0f / static_cast<float>(g_h);
@@ -219,9 +262,32 @@ const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT c
     return buf.data();
 }
 
+// Fable's own 2D, in screen or layout pixels, that falls under the hidden rectangle.
+bool hidden_pixels(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
+    if (!hiding() || !mouse_look::in_game()) return false;
+    DWORD fvf = 0;
+    const bool rhw = SUCCEEDED(d->GetFVF(&fvf)) && (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
+    if (!rhw && !g_pixel_2d) return false;
+    const float s = rhw ? (active() ? g_scale.load() : 1.0f) : g_pixel_sx;
+    if (!drawing_to_screen(d)) return false;
+    return hide_draw(data, first, count, stride, [s](const float* p, float& x, float& y) { x = p[0] * s; y = p[1] * s; });
+}
+
+// HUD sprites in clip space under the hidden rectangle.
+bool hidden_sprites(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
+    if (!hiding() || !mouse_look::in_game() || stride < 12 || !drawing_to_screen(d)) return false;
+    const float w = static_cast<float>(g_w), h = static_cast<float>(g_h);
+    return hide_draw(data, first, count, stride, [w, h](const float* p, float& x, float& y) {
+        x = (p[0] + 1.0f) * 0.5f * w;
+        y = (1.0f - p[1]) * 0.5f * h;
+    });
+}
+
 HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT prims, const void* data, UINT stride) {
-    if (from_fable(__builtin_return_address(0)))
+    if (from_fable(__builtin_return_address(0))) {
+        if (hidden_pixels(d, data, 0, vertex_count(t, prims), stride)) return D3D_OK;
         if (const void* v = scaled_rhw(d, data, 0, vertex_count(t, prims), stride)) return o_DrawPrimitiveUP(d, t, prims, v, stride);
+    }
     return o_DrawPrimitiveUP(d, t, prims, data, stride);
 }
 
@@ -229,9 +295,11 @@ HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t
                                          const void* idx, D3DFORMAT fmt, const void* data, UINT stride) {
     void* ret = __builtin_return_address(0);
     if (reinterpret_cast<uintptr_t>(ret) == kSpriteDraw) {
+        if (hidden_sprites(d, data, min_index, verts, stride)) return D3D_OK;
         if (const void* v = bottom_sprites(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
     } else if (from_fable(ret)) {
+        if (hidden_pixels(d, data, min_index, verts, stride)) return D3D_OK;
         if (const void* v = scaled_rhw(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
     }
@@ -330,10 +398,11 @@ void install() {
 
 void set_screen(UINT w, UINT h, HWND window) {
     if (window) g_window = window;
-    if (!g_virtual || !w || !h) return;
-    const float s = hud_scale_for(config().hud_scale, h);
+    if (!w || !h) return;
     g_w = w;
     g_h = h;
+    if (!g_virtual) return;
+    const float s = hud_scale_for(config().hud_scale, h);
     g_vw = static_cast<UINT>(std::lround(w / s));
     g_vh = static_cast<UINT>(std::lround(h / s));
     g_scale = static_cast<float>(w) / static_cast<float>(g_vw);   // exact for x; y is within a pixel
@@ -346,7 +415,7 @@ void set_screen(UINT w, UINT h, HWND window) {
 }
 
 void hook_device(IDirect3DDevice9* dev) {
-    if (!g_virtual) return;
+    // Hooked with or without HUD scaling: hide_under needs the same draws.
     if (auto o = fo::patch::vtable(dev, kSetVertexShaderConstantF, reinterpret_cast<void*>(hk_SetVertexShaderConstantF)))
         o_SetVertexShaderConstantF = reinterpret_cast<SetVertexShaderConstantF_t>(o);
     if (auto o = fo::patch::vtable(dev, kSetScissorRect, reinterpret_cast<void*>(hk_SetScissorRect)))
@@ -371,11 +440,19 @@ LPARAM map_mouse(UINT msg, LPARAM l) {
 
 float scale() { return active() ? g_scale.load() : 1.0f; }
 
+void hide_under(float x, float y, float w, float h) {
+    g_hide_x = x;
+    g_hide_y = y;
+    g_hide_h = h;
+    g_hide_w = w > 0 ? w : 0;
+}
+
 void log_status() {
     fo::log("display: %s", g_status);
     if (active())
         fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u, screen-space draws %u",
                 g_vw, g_vh, g_w, g_h, static_cast<double>(g_scale.load()), g_c20_fixed.load(), g_scissor_fixed.load(),
                 g_viewport_fixed.load(), g_rhw_fixed.load());
+    fo::log("display: HUD pieces left out under Realm chat so far: %u", g_hidden.load());
 }
 }  // namespace fo::display::hud
