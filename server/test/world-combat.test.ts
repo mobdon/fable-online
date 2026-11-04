@@ -234,7 +234,7 @@ test('combat sim: a staff dev spawn puts a hostile creature in front of the hero
   // Facing the hero: its forward (-sin yaw, cos yaw) points back at the hero.
   const fx = -Math.sin(wolf.yaw), fy = Math.cos(wolf.yaw);
   assert.ok(fx * (10 - wolf.pos.x) + fy * (20 - wolf.pos.y) > 14.9, 'looking at the hero');
-  assert.ok(sim.snapshot().some((e) => e.id === r.id), 'sent to clients like any monster');
+  assert.equal(sim.snapshot().find((e) => e.id === r.id)?.def, 'CREATURE_WOLF', 'sent with its def name, so the mod shows a wolf and not a hero');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_TRADER_TEST', 4), 'traders are not spawned');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_NOT_REAL', 4));
   // Removing: nearest only, then everything near; nothing far away is touched.
