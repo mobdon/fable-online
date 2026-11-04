@@ -112,7 +112,20 @@ struct Smooth {
     double raw_dz = 0, shown_dz = 0;   // summed frame-to-frame look-at height change, Fable's vs shown
     float last_raw_z = 0;
     float shown_pos[3] = {};
-} sm;
+    uint32_t site = 0;          // return address of the SetCamera call this state follows
+    unsigned calls = 0;
+};
+// Fable sets the engine camera several times a frame (the main view and other passes), and
+// more than one of them sits near the hero. Each call site keeps its own smoothing state, so
+// one camera is never eased toward another.
+Smooth g_sm[6];
+Smooth g_sm_other;   // when all slots are taken
+
+Smooth& state_for(uint32_t site) {
+    for (Smooth& s : g_sm) if (s.site == site) return s;
+    for (Smooth& s : g_sm) if (!s.site) { s.site = site; return s; }
+    return g_sm_other;
+}
 
 void normalize(float* v) {
     const double l = std::sqrt(static_cast<double>(v[0]) * v[0] + static_cast<double>(v[1]) * v[1] + static_cast<double>(v[2]) * v[2]);
@@ -130,7 +143,7 @@ double hero_distance(const float* desc, double fallback) {
 }
 
 // Writes the camera to show this frame into out[9]; false = show Fable's as it is.
-bool smooth(const float* desc, double now, float* out) {
+bool smooth(Smooth& sm, const float* desc, double now, float* out) {
     if (sm.have) {
         const double dt = now - sm.at;
         const double dx = desc[0] - sm.shown_pos[0], dy = desc[1] - sm.shown_pos[1], dz = desc[2] - sm.shown_pos[2];
@@ -182,6 +195,7 @@ bool g_swapped = false;   // kept for the stats line; always false
 float shoulder_now() { return config().camera_shoulder; }
 
 void __fastcall hk_set_camera(void* self, void*, float* desc) {
+    const uint32_t site = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__builtin_return_address(0)));
     if (!desc || !readable(desc, 0x24)) { o_set_camera(self, desc); return; }
     const double now = now_s();
     const double h = heading(desc + 3);
@@ -208,9 +222,11 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
     float saved[9];
     std::memcpy(saved, desc, sizeof saved);
     bool changed = false;
+    Smooth& sm = state_for(site);
+    ++sm.calls;
     if (mouse_look && config().camera_smooth) {
         float out[9];
-        if (smooth(desc, now, out)) { std::memcpy(desc, out, sizeof out); changed = true; }
+        if (smooth(sm, desc, now, out)) { std::memcpy(desc, out, sizeof out); changed = true; }
     } else {
         sm.have = false;
     }
@@ -293,12 +309,25 @@ void log_stats() {
             config().camera_latch ? "on" : "off", g.turns_per_count, g.s_cc > 0 ? g.s_jc / g.s_cc : 0.0, fit_r2, g.fit_samples,
             rad_per_count() != 0 ? "" : " (not trusted yet)", g.moved_between > 2 * g.still_between ? "blend" : "hold", g.turned,
             g.frames, g.max_lead);
-    fo::log("camera: smoothing %s: %u frames eased, %u cuts; look-at height moved %.2f by Fable, %.2f on screen, distance %.2f; "
-            "shoulder offset on %u frames (%.2f)",
-            config().camera_smooth ? "on" : "off", sm.frames, sm.snaps, sm.raw_dz, sm.shown_dz, sm.dist, g_shoulder_frames,
-            static_cast<double>(g_swapped ? -config().camera_shoulder : config().camera_shoulder));
-    sm.frames = sm.snaps = 0;
-    sm.raw_dz = sm.shown_dz = 0;
+    char sites[300];
+    int n = 0;
+    sites[0] = 0;
+    unsigned frames = 0, snaps = 0;
+    double raw_dz = 0, shown_dz = 0;
+    for (Smooth& sm : g_sm) {
+        if (!sm.site) continue;
+        if (n < 260) n += std::snprintf(sites + n, sizeof sites - n, " %08X:%u/%u", static_cast<unsigned>(sm.site), sm.frames, sm.calls);
+        frames += sm.frames;
+        snaps += sm.snaps;
+        raw_dz += sm.raw_dz;
+        shown_dz += sm.shown_dz;
+        sm.frames = sm.snaps = sm.calls = 0;
+        sm.raw_dz = sm.shown_dz = 0;
+    }
+    fo::log("camera: smoothing %s: %u frames eased, %u cuts; look-at height moved %.2f by Fable, %.2f on screen; "
+            "shoulder offset on %u frames (%.2f); call sites (eased/calls):%s",
+            config().camera_smooth ? "on" : "off", frames, snaps, raw_dz, shown_dz, g_shoulder_frames,
+            static_cast<double>(g_swapped ? -config().camera_shoulder : config().camera_shoulder), sites);
     g_shoulder_frames = 0;
     g.frames = g.turned = 0;
     g.max_lead = 0;
