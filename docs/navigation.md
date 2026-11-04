@@ -11,7 +11,14 @@ node tools/extractor/navmesh.mjs "C:\Program Files (x86)\Steam\steamapps\common\
 # 130 regions, 252517 walkable cells -> shared/defs/nav (268 backdrop levels with no ground)
 ```
 
-Then start the server with `FO_NAV_DIR=../shared/defs/nav` to run those regions on
+It also writes `shared/defs/nav-regions/<Region>.json`: every level of a server region
+joined into the region's frame (the anchor level's, the frame spawns and things use), with
+cells of neighbouring levels linked where they meet. A region file carries `originX/originY`,
+the region-frame position of its heightmap corner. `ops/local-host` builds these on setup and
+points the server at them (`FO_NAV_DIR=../shared/defs/nav-regions`), so server monsters
+path round Fable's own walls and stand on its ground.
+
+Start the server with `FO_NAV_DIR=../shared/defs/nav` to run those regions on
 `NavSim` (heroes held to the ground, creatures run by the AI). Without it every region
 stays on the kinematic `StubSim`. `npm run ai-bench -- HeroGuildComplex 300 64` is a load
 test: 300 creatures and 64 heroes tick in about 1 ms (p50) and 7.5 ms (p99).

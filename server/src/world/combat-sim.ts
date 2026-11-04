@@ -8,7 +8,7 @@ import type { Economy } from '../economy/economy.js';
 import type { LootService } from '../economy/loot.js';
 import { GameError } from '../errors.js';
 import type { Progress } from '../heroes/progress.js';
-import type { AiHooks, Creature, Hero } from './entities.js';
+import type { AiHooks, AttackKind, Creature, Hero } from './entities.js';
 import type { RegionDef } from './regions.js';
 import type { EntityState, PlayerInput, RegionSim, SimFactory, SimHealing, Vec3 } from './sim.js';
 import { HOSTILE_FACTIONS, SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
@@ -37,6 +37,8 @@ export const DEATH = {
 /** Monster AI plugs in here (separate work). It gets the channel's combat and creatures. */
 export interface ChannelAi extends AiHooks {
   step?(dtMs: number): void;
+  /** Send a creature straight at a hero (a staff test spawn). */
+  pursue?(creatureId: number, heroId: number): void;
   dispose?(): void;
 }
 export interface AiContext {
@@ -85,6 +87,8 @@ interface HeroSlot {
   /** A swing or a flinch shown to other players for this many more ms (0: none). */
   actMs: number;
   actAnim: number;
+  /** A swing pressed just before the last one finished, fired when it does. */
+  queued: AttackKind | null;
 }
 
 /** How long other players see a hero's swing and flinch. */
@@ -223,7 +227,12 @@ export class CombatSim implements RegionSim {
     const at = { x: h.pos.x - s * distance + c0 * side, y: h.pos.y + c0 * distance + s * side, z: h.pos.z };
     // Turned round to face the hero.
     const c = this.spawns.spawnExtra(defName, at, h.yaw + Math.PI);
-    if (c) this.devSpawned.add(c.id);
+    if (c) {
+      this.devSpawned.add(c.id);
+      // A test monster is there to be fought: it comes for whoever spawned it at once,
+      // rather than waiting to spot them (it used to stand about for ten seconds).
+      this.ai?.pursue?.(c.id, heroId);
+    }
     return c ? { id: c.id } : { error: 'No walkable ground in front of you.' };
   }
 
@@ -270,7 +279,7 @@ export class CombatSim implements RegionSim {
     const hero = heroCombatant(heroId, at, this.s.data, l, (i) => {
       if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
     });
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0 });
+    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null });
     this.combat.add(hero);
   }
 
@@ -311,8 +320,10 @@ export class CombatSim implements RegionSim {
     else if (prev & BUTTONS.ATTACK) {
       this.charging.delete(heroId);
       const kind = h.weapon?.class === 'ranged' ? 'ranged' : h.chargeMs >= BALANCE.flourishChargeMs ? 'flourish' : 'light';
-      this.combat.attack(heroId, null, kind);
-      this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+      const r = this.combat.attack(heroId, null, kind);
+      // Fable queues a press made late in a swing; dropping it made most presses do nothing.
+      if (!r.ok && r.reason === 'cooldown' && h.attackCooldownMs <= BALANCE.swingBufferMs) slot.queued = kind === 'flourish' ? 'light' : kind;
+      else this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
     }
     if (b & BUTTONS.CAST && !(prev & BUTTONS.CAST)) {
       const spell = SPELL_SLOTS[((b >> SPELL_SHIFT) & 0xf) - 1];
@@ -343,6 +354,16 @@ export class CombatSim implements RegionSim {
       h.anim = this.actAnim(slot, 1);
     }
     this.combat.step(dtMs, this.charging);
+    for (const [id, slot] of this.heroes) {
+      const h = slot.hero;
+      if (!slot.queued) continue;
+      if (!h.alive || h.blocking) slot.queued = null;
+      else if (h.attackCooldownMs <= 0 && h.stunnedMs <= 0) {
+        this.combat.attack(id, null, slot.queued);
+        this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+        slot.queued = null;
+      }
+    }
     this.ai?.step?.(dtMs);
     this.spawns.setHeroes([...this.heroes.values()].map((h) => h.hero.pos));
     this.spawns.step(dtMs);

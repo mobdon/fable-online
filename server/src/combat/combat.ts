@@ -11,6 +11,7 @@ import {
   facingAngle,
   inReach,
   isSpell,
+  meleeArc,
   weaponClassKey,
   type SpellId,
 } from './rules.js';
@@ -239,8 +240,9 @@ export class CombatSystem implements CombatPort {
   private pickTarget(a: Combatant, ranged: boolean, range?: number, cone?: number): Combatant | undefined {
     let best: Combatant | undefined;
     let bestD = Infinity;
-    const r = (range ?? BALANCE.reach[ranged ? 'ranged' : weaponClassKey(a.weapon)] ?? 2) + BALANCE.bodyRadius;
-    const half = cone ?? (ranged ? BALANCE.rangedCone : BALANCE.meleeCone);
+    const arc = ranged ? { reach: (BALANCE.reach.ranged ?? 40) + BALANCE.bodyRadius, cone: BALANCE.rangedCone } : meleeArc(a);
+    const r = range !== undefined ? range + BALANCE.bodyRadius : arc.reach;
+    const half = cone ?? arc.cone;
     for (const t of this.all.values()) {
       if (t === a || !t.alive || !this.canHarm(a, t)) continue;
       const d = distance(a, t);

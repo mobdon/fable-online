@@ -19,6 +19,12 @@ export interface NavFile {
   script: string;
   mapX: number;
   mapY: number;
+  /**
+   * Region files (nav-regions/<Region>.json) join several levels in the region's frame; the
+   * heightmap's corner then sits here rather than at 0,0. Level files leave these out.
+   */
+  originX?: number;
+  originY?: number;
   width: number;
   height: number;
   /** base64 Float32Array of (width+1)*(height+1) ground heights, row-major, 1 m apart. */
@@ -54,6 +60,8 @@ export class NavMesh {
   readonly mapY: number;
   readonly width: number;
   readonly height: number;
+  readonly originX: number;
+  readonly originY: number;
   readonly cells: Cell[];
   private readonly heights: Float32Array;
   /** 1 m buckets -> indices of cells overlapping that square. */
@@ -67,6 +75,10 @@ export class NavMesh {
     this.mapY = f.mapY;
     this.width = f.width;
     this.height = f.height;
+    this.originX = f.originX ?? 0;
+    this.originY = f.originY ?? 0;
+    const ox = this.originX;
+    const oy = this.originY;
     const raw = Buffer.from(f.heights, 'base64');
     this.heights = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
     if (this.heights.length !== (f.width + 1) * (f.height + 1)) throw new Error(`${f.script}: heightmap size mismatch`);
@@ -88,10 +100,10 @@ export class NavMesh {
 
     const buckets: number[][] = Array.from({ length: f.width * f.height }, () => []);
     for (const c of this.cells) {
-      const x0 = Math.max(0, Math.floor(c.x - c.half));
-      const x1 = Math.min(f.width - 1, Math.ceil(c.x + c.half) - 1);
-      const y0 = Math.max(0, Math.floor(c.y - c.half));
-      const y1 = Math.min(f.height - 1, Math.ceil(c.y + c.half) - 1);
+      const x0 = Math.max(0, Math.floor(c.x - c.half - ox));
+      const x1 = Math.min(f.width - 1, Math.ceil(c.x + c.half - ox) - 1);
+      const y0 = Math.max(0, Math.floor(c.y - c.half - oy));
+      const y1 = Math.min(f.height - 1, Math.ceil(c.y + c.half - oy) - 1);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) buckets[y * f.width + x]!.push(c.index);
     }
     this.grid = buckets.map((b) => Int32Array.from(b));
@@ -121,8 +133,10 @@ export class NavMesh {
 
   /** The walkable cell under (x, y), or undefined over a wall, cliff or water. */
   cellAt(x: number, y: number): Cell | undefined {
-    if (!(x >= 0 && y >= 0 && x < this.width && y < this.height)) return undefined;
-    const b = this.grid[Math.floor(y) * this.width + Math.floor(x)]!;
+    const gx = x - this.originX;
+    const gy = y - this.originY;
+    if (!(gx >= 0 && gy >= 0 && gx < this.width && gy < this.height)) return undefined;
+    const b = this.grid[Math.floor(gy) * this.width + Math.floor(gx)]!;
     for (const i of b) {
       const c = this.cells[i]!;
       if (Math.abs(x - c.x) <= c.half && Math.abs(y - c.y) <= c.half) return c;
@@ -136,6 +150,8 @@ export class NavMesh {
 
   /** Ground height in metres, bilinear between the 1 m heightmap samples. */
   heightAt(x: number, y: number): number {
+    x -= this.originX;
+    y -= this.originY;
     const w = this.width;
     const fx = Math.min(Math.max(x, 0), w);
     const fy = Math.min(Math.max(y, 0), this.height);
@@ -159,8 +175,10 @@ export class NavMesh {
     let best: Cell | undefined;
     let bestD = maxDist * maxDist;
     const r = Math.ceil(maxDist);
-    for (let by = Math.max(0, Math.floor(y) - r); by <= Math.min(this.height - 1, Math.floor(y) + r); by++) {
-      for (let bx = Math.max(0, Math.floor(x) - r); bx <= Math.min(this.width - 1, Math.floor(x) + r); bx++) {
+    const gx = Math.floor(x - this.originX);
+    const gy = Math.floor(y - this.originY);
+    for (let by = Math.max(0, gy - r); by <= Math.min(this.height - 1, gy + r); by++) {
+      for (let bx = Math.max(0, gx - r); bx <= Math.min(this.width - 1, gx + r); bx++) {
         for (const i of this.grid[by * this.width + bx]!) {
           const c = this.cells[i]!;
           const px = clamp(x, c.x - c.half, c.x + c.half);
