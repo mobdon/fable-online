@@ -7,6 +7,7 @@
 #include "world/entities.h"
 #include "world/reporter.h"
 #include "world/snapshot.h"
+#include "world/spawn_filter.h"
 
 namespace {
 int g_failed = 0;
@@ -254,6 +255,32 @@ void test_reporter() {
 
 }  // namespace
 
+void test_spawn_filter() {
+    Welcome w;
+    CHECK(parse_welcome(R"({"t":"welcome","player_id":3,"spawn_defs":["CREATURE_WOLF","CREATURE_BANDIT_GRUNT_LEVEL1","bad name"],"tick_rate":20})", w));
+    CHECK(w.spawnDefs.size() == 3);
+    CHECK(w.tickRate == 20);
+    // An older server sends no list: nothing is filtered.
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":3}", w));
+    CHECK(w.spawnDefs.empty());
+
+    SpawnFilter f;
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", ""));
+    f.set_server_defs({"CREATURE_WOLF", "CREATURE_BANDIT_GRUNT_LEVEL1", "bad name", ""});
+    CHECK(f.active());
+    CHECK(f.def_count() == 2);
+    CHECK(f.should_drop(true, "CREATURE_WOLF", ""));
+    CHECK(f.should_drop(true, "CREATURE_WOLF", "NULL"));
+    // A creature a quest names, something that is not a creature, or a def the server
+    // does not run all stay in the level.
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", "QuestWolfLeader"));
+    CHECK(!f.should_drop(false, "CREATURE_WOLF", ""));
+    CHECK(!f.should_drop(true, "CREATURE_VILLAGER_FARMER", ""));
+    CHECK(!f.should_drop(true, "", ""));
+    f.clear();
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", ""));
+}
+
 int main() {
     std::printf("world tests\n");
     test_welcome();
@@ -265,6 +292,7 @@ int main() {
     test_death_and_angles();
     test_real_frame();
     test_connection_frames();
+    test_spawn_filter();
     test_reporter();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;

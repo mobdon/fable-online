@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CombatSystem } from '../src/combat/combat.js';
 import { FALLBACK_DATA as D } from '../src/data/game-data.js';
-import { SpawnManager, type SpawnTable } from '../src/world/spawns.js';
+import { SpawnManager, serverSpawnDefs, type SpawnTable } from '../src/world/spawns.js';
 import { BUTTONS, CombatSim, DEATH, SPELL_SHIFT } from '../src/world/combat-sim.js';
 import { MemorySink } from '../src/analytics/events.js';
 import { LootService } from '../src/economy/loot.js';
@@ -46,6 +46,19 @@ test('spawns: hostile placed creatures and generators fill up, respawn after dea
   sm.died(w1.id);
   sm.step(5000);
   assert.equal([...sm.creatures()].filter((c) => c.defName === 'CREATURE_WOLF' && c.alive).length, 1, 'total limit reached');
+});
+
+test('spawns: quest-named creatures stay with the client; the welcome lists the defs the server runs', () => {
+  const named: SpawnTable = {
+    creatures: [...TABLE.creatures, { uid: '4', def: 'CREATURE_WOLF', x: 9, y: 9, z: 0, yaw: 0, script: 'QuestWolf' }],
+    generators: TABLE.generators,
+  };
+  const sm = new SpawnManager(named, D, new CombatSystem(D));
+  assert.equal(sm.pointCount, 2, 'the scripted wolf is left to the quest');
+  // The bandit is placed, the wolf comes from the generator; the trader and the quest's own
+  // wolf placement do not add anything by themselves.
+  assert.deepEqual(serverSpawnDefs({ regions: { A: named } }, D), ['CREATURE_BANDIT_GRUNT_LEVEL1', 'CREATURE_WOLF']);
+  assert.deepEqual(serverSpawnDefs({ regions: {} }, D), []);
 });
 
 test('combat sim: a kill pays loot through the ledger and experience; replays never pay twice', () => {

@@ -106,6 +106,9 @@ class Reader {
     size_t p_ = 0;
 };
 
+/** More creature defs than game.bin has; a longer list is cut here. */
+constexpr size_t kMaxSpawnDefs = 4096;
+
 bool sane(float v) { return std::isfinite(v) && std::fabs(v) < 1.0e6f; }
 
 /** Reads the fields of one entity object. Position is left at the closing brace. */
@@ -249,6 +252,17 @@ bool parse_welcome(const std::string& json, Welcome& out) {
         std::string mode;
         if (seek_key(r, "client_move") && r.read_string(mode) && (mode == "off" || mode == "checked" || mode == "trusted"))
             out.clientMove = mode;
+    }
+    {
+        // A flat array of def names. Anything that is not a string ends the list.
+        Reader r(json);
+        if (seek_key(r, "spawn_defs") && r.eat('[')) {
+            std::string def;
+            while (out.spawnDefs.size() < kMaxSpawnDefs && r.read_string(def)) {
+                out.spawnDefs.push_back(def);
+                if (!r.eat(',')) break;
+            }
+        }
     }
     return out.playerId != 0;
 }

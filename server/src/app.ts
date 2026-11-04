@@ -12,7 +12,7 @@ import { Progress } from './heroes/progress.js';
 import { loadGameData, type GameData } from './data/game-data.js';
 import { BALANCE } from './combat/rules.js';
 import { combatSimFactory, type ChannelAi, type AiContext } from './world/combat-sim.js';
-import { loadSpawns } from './world/spawns.js';
+import { loadSpawns, serverSpawnDefs } from './world/spawns.js';
 import path from 'node:path';
 import { TradeSessions } from './economy/trade.js';
 import { RegionTable } from './world/regions.js';
@@ -57,6 +57,8 @@ export interface App {
   scoreboard: Scoreboard;
   /** Lets a dropped game connection come back without a new launcher ticket. */
   resume: ResumeTokens;
+  /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
+  spawnDefs: string[];
   close(): void;
 }
 
@@ -106,12 +108,14 @@ export function createApp(
   };
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
+  const spawns = loadSpawns(cfg.spawnsPath);
+  const spawnDefs = !opts.sim && cfg.combat ? serverSpawnDefs(spawns, data) : [];
   const baseSim =
     opts.sim ??
     (cfg.combat
       ? combatSimFactory({
           data,
-          spawns: loadSpawns(cfg.spawnsPath),
+          spawns,
           events,
           economy,
           loot,
@@ -165,6 +169,7 @@ export function createApp(
     town,
     scoreboard,
     resume: new ResumeTokens(cfg.resumeMs),
+    spawnDefs,
     close() {
       director.stop();
       law.flush();

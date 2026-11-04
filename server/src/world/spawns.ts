@@ -44,6 +44,32 @@ export function loadSpawns(file: string | undefined): SpawnsFile {
 /** Only these factions are spawned by the server. Villagers, traders and quest people stay with the client. */
 export const HOSTILE_FACTIONS = new Set(['FACTION_MONSTERS', 'FACTION_BANDITS']);
 
+/**
+ * A placed creature the server spawns: hostile, and not named by a quest script. Quests run
+ * in each player's own game and find their creatures by ScriptName, so those stay local.
+ */
+export function serverRunsPlaced(c: PlacedCreature, data: GameData): boolean {
+  return !c.script && HOSTILE_FACTIONS.has(data.creatures[c.def]?.faction ?? '');
+}
+
+/** The hostile defs a generator's families can make. */
+export function generatorPool(g: GeneratorDef, data: GameData): string[] {
+  return g.families.flatMap((f) => data.families[f] ?? []).filter((d) => HOSTILE_FACTIONS.has(data.creatures[d]?.faction ?? ''));
+}
+
+/**
+ * Every creature def the server spawns somewhere, sorted. Sent to the mod in its welcome so
+ * the local level loader leaves its own copies of these out (client-mod/src/game/spawns.cpp).
+ */
+export function serverSpawnDefs(spawns: SpawnsFile, data: GameData): string[] {
+  const defs = new Set<string>();
+  for (const t of Object.values(spawns.regions)) {
+    for (const c of t.creatures ?? []) if (serverRunsPlaced(c, data)) defs.add(c.def);
+    for (const g of t.generators ?? []) for (const d of generatorPool(g, data)) defs.add(d);
+  }
+  return [...defs].sort();
+}
+
 export interface SpawnOptions {
   /** A placed creature comes back this long after it dies. */
   respawnMs: number;
@@ -107,13 +133,12 @@ export class SpawnManager {
     opts: Partial<SpawnOptions> = {},
   ) {
     this.opts = { ...DEFAULT_SPAWN_OPTIONS, ...opts };
-    const hostile = (def: string) => HOSTILE_FACTIONS.has(this.data.creatures[def]?.faction ?? '');
     for (const c of table?.creatures ?? []) {
-      if (!hostile(c.def)) continue;
+      if (!serverRunsPlaced(c, this.data)) continue;
       this.points.set(`c:${c.uid}`, this.point(`c:${c.uid}`, [c.def], c, c.yaw, 0, 1, -1, this.opts.respawnMs));
     }
     for (const g of table?.generators ?? []) {
-      const pool = g.families.flatMap((f) => this.data.families[f] ?? []).filter(hostile);
+      const pool = generatorPool(g, this.data);
       if (!pool.length) continue;
       const limit = g.activeLimit > 0 ? g.activeLimit : this.opts.generatorDefaultActive;
       this.points.set(`g:${g.uid}`, this.point(`g:${g.uid}`, pool, g, 0, g.radius, limit, g.totalLimit, this.opts.generatorRespawnMs));

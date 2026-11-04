@@ -57,6 +57,11 @@ struct Welcome {
     std::string resume;
     /** What the server does with position reports: "off", "checked" or "trusted". */
     std::string clientMove = "off";
+    /**
+     * The creature defs the server spawns itself (spawn_defs). Empty when the server runs no
+     * monsters, or is older than this field: the local level loader then places its own.
+     */
+    std::vector<std::string> spawnDefs;
 };
 
 /** The server refused a position report and says where it has the hero. */

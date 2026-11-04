@@ -88,8 +88,38 @@ must do nothing, or every player sees a different set of monsters.
 | --- | --- | --- |
 | `CTCCreatureGenerator` | `0x01268C24` | slot +0x24 is its work slot (372 instructions), no arguments |
 | `CTCCreatureGeneratorCreator` | `0x0126EB3C` | the same slot, same shape |
-| `CTCActivationReceptorCreatureGenerator` | `0x012413EC` | generators a trigger switches on; not patched yet |
+| `CTCActivationReceptorCreatureGenerator` | `0x012413EC` | generators a trigger switches on; needs no patch (below) |
 
 `client-mod/src/game/spawns.cpp` points both +0x24 slots at a bare `ret` while suppression
-is on, and puts the originals back afterwards. Creatures already placed in the level's
-`.tng` are left alone for now: they are the next thing to handle.
+is on, and puts the originals back afterwards.
+
+The activation receptor only switches a generator on: its slot +0x70 (`0x007F7650`) looks up
+the owner's generator component (id 0x3D in the thing's component map at +0x44) and sets its
+active byte (+0x4F). The generator's work slot is already a `ret`, so nothing spawns.
+
+## Creatures placed in the level files
+
+The `.tng` `AICreature` entries do not come from a generator: the level loader builds each
+one. The loader registers its thing kinds at `0x00522A20` (`"AICreature"` -> factory
+`0x005272E0`, which allocates 0x1D8 bytes and runs the `CThingAICreature` constructor,
+vtable `0x0127293C`).
+
+| What | Address | Shape |
+| --- | --- | --- |
+| load one thing ("Load Single Thing") | `0x0051FD80` | `__thiscall (CThingManager*, parser*, int mode) -> CThing*`, `ret 8`; 0 when the entry is dropped |
+| its callers | `0x0052062E`, `0x00520BA1`, `0x00520F9A`, `0x00521155`, `0x00521521` | the three level loaders and two save loaders; all handle a 0 result |
+| read an entry's header | `0x004C81F0` | ecx = parser, edx = header; header +0 UID (64-bit), +8 `DefinitionType` (CCharString), +0xC `Player` |
+| its callers | `0x004C89A8`, `0x004C9252`, `0x0051FE07` | the first two run inside the load above |
+| `CThing::Remove(bool)` | `0x004C9B80` | `__thiscall (thing, bool)`, `ret 4`; the loader calls it with 1 on a thing it cannot keep, then returns 0 |
+| thing ScriptName | thing +0x74 | CCharString, set by the text parser at `0x004CAA00` |
+
+A CCharString is a pointer to a block whose first field is the `char*`.
+
+`spawns.cpp` points the five load calls at the mod and the three header reads at a small
+thunk that records the entry's def. When the thing that comes back is a `CThingAICreature`
+with no ScriptName and a def from the server's `spawn_defs` list, the mod removes it with
+`0x004C9B80(1)` and returns 0, which is the loader's own path for a dropped thing.
+Script-created creatures (`CreateNear` and friends) never pass through this loader.
+
+Not checked in game yet: whether Fable records a removed level creature as dead in the save,
+which would keep it gone in an offline game played later from the same save.

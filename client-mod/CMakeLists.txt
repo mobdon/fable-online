@@ -4,7 +4,7 @@ set(FO_MOD_SOURCES
   src/game/hero.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
-  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp
+  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/spawn_filter.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
@@ -23,7 +23,7 @@ add_custom_command(TARGET fable_online POST_BUILD
 
 # The parts with no Windows or game dependencies are tested on their own; see tests/run.sh.
 if(FO_BUILD_TESTS)
-  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp)
+  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/spawn_filter.cpp)
   target_include_directories(world_tests PRIVATE src)
   add_executable(objects_tests tests/objects_test.cpp src/world/objects.cpp)
   target_include_directories(objects_tests PRIVATE src)

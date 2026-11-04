@@ -109,6 +109,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.reporter.reset();
         // Kept for the next connection: a dropped link comes back without a new ticket.
         if (!w.resume.empty()) net::world_set_resume(w.resume);
+        // The monsters the server runs: the level files' own copies of those are left out.
+        if (s.suppressSpawns) game::spawns::set_server_defs(w.spawnDefs);
         fo::log("sync: joined as %s (entity %u), server ticks %u a second, position reports %s%s", w.name.c_str(),
                 w.playerId, w.tickRate, w.clientMove.c_str(), w.resume.empty() ? "" : ", can resume");
         return;
@@ -332,6 +334,8 @@ void start() {
             s.suppressSpawns ? "suppressed in server regions" : "left alone", s.reportPos ? "on" : "off");
 
     crash_exit::install();
+    // Before Fable loads its first level, so the level's own monsters can be left out.
+    if (s.suppressSpawns) game::spawns::install_level_hook();
     game::hook::install();
     game::hook::on_tick(tick, kTickMs);
     if (s.dev) game::hook::on_key(dev_key);
@@ -370,12 +374,12 @@ void dev_key(int vk) {
     case VK_F7: {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
-        fo::log("sync: %s as %s (entity %u), ping %d ms, position reports %s; %u entities, %u puppets; frames in %llu out %llu; local spawning %s",
+        fo::log("sync: %s as %s (entity %u), ping %d ms, position reports %s; %u entities, %u puppets; frames in %llu out %llu; local spawning %s, %u level monsters left out",
                 net::world_connected() ? "online" : "offline", s.ownName.c_str(), s.ownId, s.reporter.rtt_ms(),
                 s.serverMove.c_str(),
                 static_cast<unsigned>(s.table.size()), static_cast<unsigned>(s.puppets->live_count()),
                 static_cast<unsigned long long>(received), static_cast<unsigned long long>(sent),
-                game::spawns::suppressed() ? "off" : "on");
+                game::spawns::suppressed() ? "off" : "on", static_cast<unsigned>(game::spawns::dropped_count()));
         return;
     }
     case VK_F8: {

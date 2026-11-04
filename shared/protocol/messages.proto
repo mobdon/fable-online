@@ -24,7 +24,9 @@ message Ping         { uint32 n = 1; }
 message QuestComplete { string quest = 1; uint32 gold = 2; uint32 renown = 3; repeated string items = 4; }
 
 // ---- server -> client --------------------------------------------------
-message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6; }
+message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6;
+                       // Creature defs the server spawns; the mod drops the level files' own copies of them.
+                       repeated string spawn_defs = 10; }
 message EnterRegion  { uint32 region_uid = 1; float x = 2; float y = 3; float z = 4; string region = 5; string channel = 6; }
 // One entity in a region. `kind` is "hero" or "creature"; a creature carries the Fable def
 // name the mod spawns a stand-in from, a hero carries the name and renown for its tag.
