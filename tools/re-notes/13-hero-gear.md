@@ -37,15 +37,24 @@ manager), `0x009ACCC0` and `0x00415DD0`:
 - text = `[0x013CA83C] + offset + 4`, NUL-terminated (`0x009D49B0`, the symbol table at
   `0x013CA828`, buffer begin/end at `+0x14`/`+0x18`)
 
-## Not mapped yet
+## Worn clothing
 
-Worn clothing: `CTCInventoryClothing` (vtable `0x0124356C`) builds its list through a virtual
-(`+0x158`) rather than fixed fields, so armour is not read yet. The server still uses its own
-ledger for armour.
+Fable's clothing screen works out "total armour" (`TEXT_GUI_MENU_CLOTHING_TOTAL_ARMOUR`,
+`0x005B6881` -> `0x005B4A95`) from the hero's component of type `0x5E`,
+`CTCHeroAttachableAppearanceModifiers` (vtable `0x01264F0C`):
+
+- `+0x30` points at an array of `{begin, end, cap}` vectors, one per modifier category
+  (`0x00706800` copies category N, 12 bytes per vector).
+- Category 2 is the clothing worn now. Its entries are 8 bytes and the first dword is the
+  piece's def index (passed on to `0x009AD9E0`, the same `[defs + 0xA4][index]` table).
+
+`CTCInventoryClothing` (vtable `0x0124356C`) holds all clothing owned and is not needed here.
 
 ## Online
 
-`client-mod/src/game/gear.cpp` reads the two weapon slots twice a second and sends
-`{t:'gear', melee, ranged}` when they change. The server (`server/src/combat/client-gear.ts`)
-fights with a reported weapon only if it is a known weapon, not staff-only, and owned in the
-hero's ledger, or on a test realm with `FO_TRUST_CLIENT_GEAR=1`.
+`client-mod/src/game/gear.cpp` reads the two weapon slots and the worn clothing twice a second
+and sends `{t:'gear', melee, ranged, armour}` when they change (`armour` is left out when it
+could not be read). The server (`server/src/combat/client-gear.ts`) uses a reported piece only
+if it is a known weapon or clothing, not staff-only (platinum), and owned in the hero's ledger,
+or on a test realm with `FO_TRUST_CLIENT_GEAR=1`. Once an armour list arrives, the ledger's
+equipped clothing stops counting.

@@ -43,10 +43,11 @@ export type ClientMessage =
    */
   | { t: 'heal'; share: number; key: string }
   /**
-   * The weapons equipped in the client's Fable (def names, '' for an empty slot). A claim:
-   * the server only fights with ones it accepts (src/combat/client-gear.ts).
+   * The weapons equipped in the client's Fable (def names, '' for an empty slot) and the
+   * clothing worn (absent when the mod could not read it). A claim: the server only uses
+   * what it accepts (src/combat/client-gear.ts).
    */
-  | { t: 'gear'; melee: string; ranged: string }
+  | { t: 'gear'; melee: string; ranged: string; armour?: string[] }
   /**
    * Staff only (gm or admin account): spawn `count` hostile creatures next to the hero, in
    * the hero's own channel, run by the server like any other monster. `def` empty = random
@@ -201,7 +202,14 @@ export function decode(raw: string): ClientMessage {
         if (typeof v !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(v)) throw new ProtocolError('bad gear');
         return v;
       };
-      return { t: 'gear', melee: slot(m.melee), ranged: slot(m.ranged) };
+      if (m.armour === undefined || m.armour === null) return { t: 'gear', melee: slot(m.melee), ranged: slot(m.ranged) };
+      if (!Array.isArray(m.armour) || m.armour.length > 12) throw new ProtocolError('bad gear');
+      const armour = m.armour.map((a: unknown) => {
+        const d = slot(a);
+        if (!d) throw new ProtocolError('bad gear');
+        return d;
+      });
+      return { t: 'gear', melee: slot(m.melee), ranged: slot(m.ranged), armour };
     }
     case 'shop_buy': {
       if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');

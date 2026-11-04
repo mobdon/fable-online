@@ -332,20 +332,29 @@ void test_spawn_filter() {
 
 void test_gear_report() {
     using fo::world::GearReporter;
+    using fo::world::GearSeen;
     GearReporter g;
-    // The first read goes at once, empty slots included.
-    CHECK(g.update("OBJECT_SWORD_OF_AEONS", "", 1000) == "{\"t\":\"gear\",\"melee\":\"OBJECT_SWORD_OF_AEONS\",\"ranged\":\"\"}");
-    CHECK(g.update("OBJECT_SWORD_OF_AEONS", "", 1500).empty());
-    // A swap passes through "none": nothing is sent until the new weapon has held a moment.
-    CHECK(g.update("", "", 2000).empty());
-    CHECK(g.update("OBJECT_IRON_WARHAMMER", "", 2100).empty());
-    CHECK(g.update("OBJECT_IRON_WARHAMMER", "", 2100 + fo::world::kGearSettleMs).find("OBJECT_IRON_WARHAMMER") != std::string::npos);
-    // The same gear is sent again after a while; a bad name is sent as empty.
-    CHECK(!g.update("OBJECT_IRON_WARHAMMER", "", 2600 + fo::world::kGearResendMs).empty());
+    GearSeen aeons{"OBJECT_SWORD_OF_AEONS", "", {}, false};
+    // The first read goes at once, empty slots included; unreadable clothing is left out.
+    CHECK(g.update(aeons, 1000) == "{\"t\":\"gear\",\"melee\":\"OBJECT_SWORD_OF_AEONS\",\"ranged\":\"\"}");
+    CHECK(g.update(aeons, 1500).empty());
+    // A swap passes through "none": nothing is sent until the new gear has held a moment.
+    CHECK(g.update(GearSeen{}, 2000).empty());
+    GearSeen hammer{"OBJECT_IRON_WARHAMMER", "", {"OBJECT_HERO_SHIRT_CHAINMAIL", "bad name"}, true};
+    CHECK(g.update(hammer, 2100).empty());
+    CHECK(g.update(hammer, 2100 + fo::world::kGearSettleMs) ==
+          "{\"t\":\"gear\",\"melee\":\"OBJECT_IRON_WARHAMMER\",\"ranged\":\"\",\"armour\":[\"OBJECT_HERO_SHIRT_CHAINMAIL\"]}");
+    // The same gear is sent again after a while.
+    CHECK(!g.update(hammer, 2600 + fo::world::kGearResendMs).empty());
+    // Taking everything off is a report too: an empty, known list.
+    GearSeen naked{"", "", {}, true};
+    CHECK(g.update(naked, 40000).empty());
+    CHECK(g.update(naked, 40000 + fo::world::kGearSettleMs) == "{\"t\":\"gear\",\"melee\":\"\",\"ranged\":\"\",\"armour\":[]}");
     CHECK(!fo::world::valid_def_name("bad name"));
     CHECK(!fo::world::valid_def_name(""));
     g.reset();
-    CHECK(g.update("bad\"name", "OBJECT_YEW_LONGBOW", 50000) == "{\"t\":\"gear\",\"melee\":\"\",\"ranged\":\"OBJECT_YEW_LONGBOW\"}");
+    CHECK(g.update(GearSeen{"bad\"name", "OBJECT_YEW_LONGBOW", {}, false}, 50000) ==
+          "{\"t\":\"gear\",\"melee\":\"\",\"ranged\":\"OBJECT_YEW_LONGBOW\"}");
 }
 
 int main() {

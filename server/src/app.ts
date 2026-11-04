@@ -158,8 +158,8 @@ export function createApp(
           loot,
           progress,
           loadout: (heroId) => ({
-            // The weapon in the hero's own Fable comes first: heroCombatant fights with the first one.
-            equipped: [...clientGear.equipped(heroId), ...economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id)],
+            // What the hero has on in their own Fable, as far as the server accepts it (client-gear.ts).
+            equipped: clientGear.loadout(heroId, economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id)),
             staff: staffHero(heroId),
             pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),

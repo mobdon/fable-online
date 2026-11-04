@@ -17,6 +17,14 @@ constexpr uint32_t kRangedHandle = 0x141;   // handle to the active ranged weapo
 constexpr uint32_t kHandleRef = 0x004;      // handle -> ref block; ref block +0 -> thing
 constexpr uint32_t kThingDefIndex = 0x08C;  // uint16: the thing's def index
 
+// CTCHeroAttachableAppearanceModifiers (component type 0x5E, vtable 0x01264F0C): +0x30 points at
+// an array of {begin, end, cap} vectors by modifier category; category 2 is worn clothing, with
+// 8-byte entries whose first dword is the piece's def index. Fable's clothing screen adds up its
+// "total armour" from this list (0x005B4A95).
+constexpr uint32_t kAppearanceVtable = 0x01264F0C;
+constexpr uint32_t kModifierLists = 0x030;
+constexpr uint32_t kClothingCategory = 2;
+
 // Def index -> name: entry = [[defs]+0xA4][index]; [entry+4] is the name's offset in the
 // symbol table, whose buffer is at [0x13CA83C]; the text starts 4 bytes after the offset.
 constexpr uint32_t kDefManager = 0x013B879C;
@@ -67,7 +75,7 @@ bool weapon_at(uintptr_t comp, uint32_t handle, std::string& out) {
     return def_name(index, out);
 }
 
-uintptr_t weapons_component(uintptr_t hero) {
+uintptr_t component(uintptr_t hero, uint32_t vtable) {
     uint32_t range[2] = {};
     if (!read(hero + kComponentsBegin, range, sizeof(range))) return 0;
     if (range[1] < range[0] || range[1] - range[0] > 64 * 8 || (range[1] - range[0]) % 8) return 0;
@@ -76,20 +84,39 @@ uintptr_t weapons_component(uintptr_t hero) {
     if (!n || !read(range[0], pairs, n * 8)) return 0;
     for (size_t i = 0; i < n; ++i) {
         uint32_t comp = pairs[i * 2 + 1], vt = 0, owner = 0;
-        if (comp && u32(comp, vt) && vt == kInvWeaponsVtable && u32(comp + kCompOwner, owner) && owner == hero) return comp;
+        if (comp && u32(comp, vt) && vt == vtable && u32(comp + kCompOwner, owner) && owner == hero) return comp;
     }
     return 0;
 }
 
 }  // namespace
 
+bool worn_clothing(uintptr_t hero, std::vector<std::string>& out) {
+    out.clear();
+    const uintptr_t comp = component(hero, kAppearanceVtable);
+    uint32_t lists = 0, range[2] = {};
+    if (!comp || !u32(comp + kModifierLists, lists) || !lists) return false;
+    if (!read(lists + kClothingCategory * 12, range, sizeof(range))) return false;
+    if (range[1] < range[0] || (range[1] - range[0]) % 8 || (range[1] - range[0]) / 8 > 32) return false;
+    const size_t n = (range[1] - range[0]) / 8;
+    uint32_t items[32 * 2];
+    if (n && !read(range[0], items, n * 8)) return false;
+    for (size_t i = 0; i < n && out.size() < kMaxWorn; ++i) {
+        std::string name;
+        if (items[i * 2] && items[i * 2] < 0x10000 && def_name(static_cast<uint16_t>(items[i * 2]), name)) out.push_back(name);
+    }
+    return true;
+}
+
 bool read_gear(uintptr_t hero, HeroGear& out) {
     uint8_t flags = 0;
     if (!hero || !read(hero + kFlags91, &flags, 1) || (flags & 1)) return false;
-    const uintptr_t comp = weapons_component(hero);
+    const uintptr_t comp = component(hero, kInvWeaponsVtable);
     if (!comp) return false;
     HeroGear g;
     if (!weapon_at(comp, kMeleeHandle, g.melee) || !weapon_at(comp, kRangedHandle, g.ranged)) return false;
+    // Clothing that can't be read is left out of the report: the server then keeps the ledger's.
+    g.armourKnown = worn_clothing(hero, g.armour);
     out = g;
     return true;
 }
