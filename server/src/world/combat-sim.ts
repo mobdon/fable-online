@@ -11,7 +11,11 @@ import type { Progress } from '../heroes/progress.js';
 import type { AiHooks, Creature, Hero } from './entities.js';
 import type { RegionDef } from './regions.js';
 import type { EntityState, PlayerInput, RegionSim, SimFactory, Vec3 } from './sim.js';
-import { SpawnManager, type SpawnOptions, type SpawnsFile } from './spawns.js';
+import { SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
+import { creatureFromDef } from '../combat/loadout.js';
+import { AiDirector } from './ai/brain.js';
+import type { AiWorld, Creature as AiCreature } from './ai/types.js';
+import { ChannelLaw, type LawServices } from '../law/guards.js';
 
 /** Input button bits the mod sends. Spell slot = (buttons >> SPELL_SHIFT) & 0xF, 1-based. */
 export const BUTTONS = { ATTACK: 1 << 0, BLOCK: 1 << 1, CAST: 1 << 2 } as const;
@@ -55,7 +59,14 @@ export interface WorldServices {
   harm?: HarmPolicy;
   ai?: (ctx: AiContext) => ChannelAi;
   spawnOptions?: Partial<SpawnOptions>;
+  /** Crime and the town watch. Without it there are no guards and nothing is a crime. */
+  law?: LawServices;
 }
+
+/** Guard stats when game.bin has no entry for the def (test data, or an unread def). */
+const GUARD_FALLBACK = { health: 300, power: 1.2, armour: 20 };
+/** A dead guard is replaced at its post after this long. */
+export const GUARD_RESPAWN_MS = 60_000;
 
 interface HeroSlot {
   hero: Hero;
@@ -78,6 +89,11 @@ export class CombatSim implements RegionSim {
   private heroes = new Map<number, HeroSlot>();
   private ai: ChannelAi | undefined;
   private charging = new Set<number>();
+  /** The town watch: guard creatures, run by their own copy of the server's AI. */
+  readonly law?: ChannelLaw;
+  private guards = new Map<number, Creature>();
+  private guardPosts = new Map<number, { def: string; post: Vec3; downMs: number | null }>();
+  private guardAi?: AiDirector;
 
   constructor(
     readonly region: RegionDef,
@@ -100,6 +116,99 @@ export class CombatSim implements RegionSim {
       heroes: () => [...this.heroes.values()].map((h) => h.hero),
     });
     this.spawns.start();
+    if (s.law) this.law = this.startLaw(s.law);
+  }
+
+  // ---------------------------------------------------------------- the town watch
+
+  private startLaw(services: LawServices): ChannelLaw {
+    const self = this;
+    const port = {
+      // The AI's heavy swing is the monster profiles' word; heroes and guards share combat's kinds.
+      attack: (a: number, t: number, kind: string) => void this.combat.attack(a, t, kind === 'ranged' ? 'ranged' : 'light'),
+      setBlocking: (id: number, on: boolean) => this.combat.setBlocking(id, on),
+    };
+    let law: ChannelLaw | undefined;
+    const world: AiWorld = {
+      nav: undefined,
+      creatures: this.guards as unknown as ReadonlyMap<number, AiCreature>,
+      combat: port,
+      *targets() {
+        for (const { hero } of self.heroes.values()) yield { id: hero.id, pos: hero.pos, alive: hero.alive, faction: 'hero' };
+      },
+      isHostile: (c, t) => law?.guardHostile(c, t) ?? false,
+    };
+    this.guardAi = new AiDirector(world, this.channelId.length);
+    const out = services.out;
+    law = new ChannelLaw(
+      {
+        channelId: this.channelId,
+        region: this.region.name,
+        nav: undefined,
+        creatures: () => [...this.guards.values(), ...this.spawns.creatures()] as unknown as AiCreature[],
+        *heroes() {
+          for (const { hero } of self.heroes.values()) yield { id: hero.id, pos: hero.pos, alive: hero.alive };
+        },
+        ai: this.guardAi,
+        send: (heroId, msg) => out?.send(heroId, msg),
+        broadcast: (msg) => out?.broadcast(this.channelId, msg),
+      },
+      services,
+    );
+    this.combat.onHit((a, t, dmg, killed) => {
+      if (a.kind !== 'hero') return;
+      law!.onHarm(
+        a.id,
+        {
+          id: t.id,
+          kind: t.kind,
+          faction: t.faction,
+          maxHealth: t.maxHealth,
+          ...(t.kind === 'creature' ? { defName: (t as Creature).defName } : { pvp: (t as Hero).pvp }),
+        },
+        dmg,
+        killed,
+      );
+    });
+    return law;
+  }
+
+  /** Post a guard (the town layer places them at its villages). Returns its id. */
+  addGuard(defName: string, at: Vec3): number {
+    const id = allocCreatureId();
+    let c: Creature;
+    try {
+      c = creatureFromDef(id, defName, at, this.s.data);
+    } catch {
+      c = creatureFromDef(id, defName, at, {
+        ...this.s.data,
+        creatures: { [defName]: { health: GUARD_FALLBACK.health, attackScale: GUARD_FALLBACK.power, experience: 0 } as never },
+      });
+      c.armour = GUARD_FALLBACK.armour;
+    }
+    c.faction = 'guard';
+    c.experience = 0;
+    this.guards.set(id, c);
+    if (!this.guardPosts.has(id)) this.guardPosts.set(id, { def: defName, post: { ...at }, downMs: null });
+    this.combat.add(c);
+    this.guardAi?.onSpawn(c as unknown as AiCreature);
+    return id;
+  }
+
+  private stepGuards(dtMs: number): void {
+    for (const [id, g] of this.guardPosts) {
+      if (g.downMs === null || (g.downMs -= dtMs) > 0) continue;
+      this.guardPosts.delete(id);
+      const old = this.guards.get(id);
+      if (old) {
+        this.guards.delete(id);
+        this.combat.remove(id);
+        this.guardAi?.remove(id);
+      }
+      this.addGuard(g.def, g.post);
+    }
+    this.guardAi?.step(dtMs);
+    this.law?.step(dtMs);
   }
 
   addHero(heroId: number, at: Vec3): void {
@@ -114,6 +223,7 @@ export class CombatSim implements RegionSim {
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
     this.heroes.delete(heroId);
+    this.law?.heroLeft(heroId);
     this.charging.delete(heroId);
     this.combat.remove(heroId);
     return h && { ...h.hero.pos };
@@ -177,12 +287,14 @@ export class CombatSim implements RegionSim {
     this.combat.step(dtMs, this.charging);
     this.ai?.step?.(dtMs);
     this.spawns.step(dtMs);
+    if (this.law) this.stepGuards(dtMs);
   }
 
   snapshot(): EntityState[] {
     const out: EntityState[] = [];
     for (const { hero: h } of this.heroes.values()) out.push(state(h, 0));
     for (const c of this.spawns.creatures()) out.push(state(c, fableHash(c.defName)));
+    for (const c of this.guards.values()) out.push({ ...state(c, fableHash(c.defName)), def: c.defName });
     return out;
   }
 
@@ -208,6 +320,13 @@ export class CombatSim implements RegionSim {
     const v = d.victim;
     if (v.kind === 'creature') {
       const c = v as Creature;
+      const post = this.guardPosts.get(c.id);
+      if (post) {
+        // Killing the watch never pays: no loot, no experience. The post is filled again later.
+        this.guardAi?.onDeath(c.id);
+        post.downMs = GUARD_RESPAWN_MS;
+        return;
+      }
       this.spawns.died(c.id);
       // Credit goes to the hero who did the most damage, so kill-stealing a nearly dead monster doesn't pay.
       let best: number | null = null;
@@ -223,6 +342,11 @@ export class CombatSim implements RegionSim {
     }
     const slot = this.heroes.get(v.id);
     if (!slot) return;
+    // Felled by the watch: the law takes over (arrest and a cell), so no phial, penalty or respawn.
+    if (this.law?.onHeroDowned(v.id, d.killer?.id ?? null)) {
+      this.combat.revive(v.id, 0.5);
+      return;
+    }
     const pvp = d.killer?.kind === 'hero';
     if (pvp) {
       this.s.progress?.pvpKill(d.killer!.id);

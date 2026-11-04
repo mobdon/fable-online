@@ -46,6 +46,8 @@ export interface WireEntity extends EntityState {
 export interface RegionSim {
   /** The town watch for this channel, when the sim runs guards (see src/law/guards.ts). */
   readonly law?: import('../law/guards.js').ChannelLaw;
+  /** Post a town guard at a spot. Sims without a town watch leave this out. */
+  addGuard?(defName: string, at: Vec3): number;
   addHero(heroId: number, at: Vec3): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
