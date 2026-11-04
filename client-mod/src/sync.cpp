@@ -163,6 +163,10 @@ void mark_party(const std::vector<world::Pose>& poses, uint32_t nowMs) {
         }
     }
     overlay::set_party_marks(std::move(marks));
+    std::map<uint32_t, std::array<float, 3>> live;
+    for (const world::Pose& p : poses)
+        if (p.kind == world::Kind::Hero && p.id != s.ownId) live[p.id] = {p.x, p.y, p.z};
+    overlay::set_tag_positions(std::move(live));
     s.spirits.sync(poses, !s.puppets->holding(nowMs) && game::local_hero() != 0, nowMs);
 }
 

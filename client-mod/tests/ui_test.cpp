@@ -201,6 +201,13 @@ static void test_tags() {
     l = s.layout(vp, 800, 600, set);
     CHECK(l.size() == 1 && (l[0].name_color >> 24) < 0xFF && (l[0].name_color >> 24) > 0);  // fading with distance
 
+    // A stand-in's live position wins over the chat service's older one, with no easing.
+    s.set_live({{2, {3.0f, 10.0f, 0.0f}}});
+    s.step(0.001f);
+    l = s.layout(vp, 800, 600, set);
+    CHECK(l.size() == 1 && std::fabs(l[0].x - (400 + 3.0f / 10.0f * 400)) < 0.5f);
+    s.set_live({});
+
     s.apply(parse(R"({"t":"tags","region":8,"add":[],"upd":[],"move":[],"del":[]})"));
     CHECK(s.size() == 0);                              // new region: old tags gone
 

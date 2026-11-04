@@ -83,6 +83,8 @@ void TagStore::step(float dt) {
     // Server updates come 5 times a second; ease so tags glide instead of hopping.
     float k = 1.0f - std::exp(-dt * 12.0f);
     for (auto& [id, t] : tags_) {
+        auto l = live_.find(id);
+        if (l != live_.end()) { t.px = l->second[0]; t.py = l->second[1]; t.pz = l->second[2]; continue; }
         float dx = t.x - t.px, dy = t.y - t.py, dz = t.z - t.pz;
         if (dx * dx + dy * dy + dz * dz > 100.0f) { t.px = t.x; t.py = t.y; t.pz = t.z; continue; }  // teleport
         t.px += dx * k; t.py += dy * k; t.pz += dz * k;

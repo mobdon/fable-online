@@ -16,7 +16,7 @@
 namespace fo::world {
 
 /** Rendering runs this far behind the newest frame so jitter between frames is absorbed. */
-constexpr uint32_t kInterpDelayMs = 100;
+constexpr uint32_t kInterpDelayMs = 150;  // players report 10 times a second
 /** An entity missing from frames for this long is gone (a dropped frame must not despawn it). */
 constexpr uint32_t kRemoveAfterMs = 2000;
 /** Poses older than this are of no use for interpolation. */
