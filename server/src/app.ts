@@ -137,6 +137,8 @@ export function createApp(
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
   const spawns = loadSpawns(cfg.spawnsPath);
   const spawnDefs = !opts.sim && cfg.combat ? serverSpawnDefs(spawns, data) : [];
+  // One navmesh store for monsters, guards and town folk (shared/defs/nav-regions, region frames).
+  const navs = cfg.navDir ? new NavStore(cfg.navDir) : undefined;
   const baseSim =
     opts.sim ??
     (cfg.combat
@@ -157,13 +159,14 @@ export function createApp(
             generatorRespawnMs: cfg.monsterRespawnSec * 1000,
             soloDensity: cfg.monsterDensity,
           },
-          ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
+          ai: opts.ai ?? monsterAi(navs),
           law: lawServices,
+          ...(navs ? { nav: (r: string) => navs.get(r) } : {}),
         })
       : cfg.navDir
-        ? navSimFactory(new NavStore(cfg.navDir), lawServices)
+        ? navSimFactory(navs!, lawServices)
         : stubSimFactory);
-  const sim = cfg.town ? withTown(baseSim, { data: town, clock }) : baseSim;
+  const sim = cfg.town ? withTown(baseSim, { data: town, clock, ...(navs ? { ground: (r) => navs.get(r.name) } : {}) }) : baseSim;
   director = new Director(
     cfg,
     regions,

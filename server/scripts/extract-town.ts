@@ -6,6 +6,8 @@ import path from 'node:path';
 import { findDefs } from '../src/data/extract.js';
 import { extractTown } from '../src/data/town-extract.js';
 import { readTngFiles } from '../src/data/wad.js';
+// @ts-expect-error plain .mjs extractor
+import { parseWld, regionFrames } from '../../tools/extractor/things.mjs';
 
 const dir = process.argv[2];
 const out = process.argv[3] ?? 'data/town-data.json';
@@ -25,12 +27,16 @@ if (!wad || !wld) {
   process.exit(1);
 }
 const { game, names } = findDefs(dir);
-const town = extractTown(fs.readFileSync(game), fs.readFileSync(names), readTngFiles(wad), fs.readFileSync(wld, 'latin1'));
+const wldText = fs.readFileSync(wld, 'latin1');
+// Towns go into the region graph's names and frames, like spawns.json and the navmesh.
+const { levelInfo } = regionFrames(parseWld(wldText));
+const town = extractTown(fs.readFileSync(game), fs.readFileSync(names), readTngFiles(wad), wldText, levelInfo);
 fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
 fs.writeFileSync(out, JSON.stringify(town, null, 1));
 const regions = Object.values(town.regions);
 const sum = (f: (r: (typeof regions)[number]) => number) => regions.reduce((s, r) => s + f(r), 0);
 console.log(
   `wrote ${out}: ${Object.keys(town.shopTypes).length} shop types, ${Object.keys(town.villages).length} village types, ` +
-    `${sum((r) => r.shops.length)} shops, ${sum((r) => r.homes.length)} homes, ${sum((r) => r.villagers.length)} placed villagers in ${regions.length} regions`,
+    `${sum((r) => r.shops.length)} shops, ${sum((r) => r.homes.length)} homes, ${sum((r) => r.villagers.length)} placed villagers, ` +
+    `${sum((r) => r.villages.reduce((n, v) => n + (v.guardRoutes?.length ?? 0), 0))} guard patrols in ${regions.length} regions`,
 );

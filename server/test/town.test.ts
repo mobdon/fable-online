@@ -5,7 +5,8 @@ import { FALLBACK_TOWN } from '../src/world/town/town-data.js';
 import { NPC_ID_BASE, NpcAnim, TownLife, shopIdOf } from '../src/world/town/townsfolk.js';
 import { TownSim, townOf, withTown } from '../src/world/town/town-sim.js';
 import { StubSim } from '../src/world/sim.js';
-import { extractShopTypes, extractVillagePeople, parseTownTng } from '../src/data/town-extract.js';
+import { ZONE_MARGIN, ZONE_MIN_RADIUS, extractShopTypes, extractVillagePeople, parseTownTng, shiftTown } from '../src/data/town-extract.js';
+import { inZone } from '../src/world/town/zones.js';
 import { GameBin, NamesBin } from '../src/data/fable-bin.js';
 import { buildBins } from './fixtures/fable-bin-builder.js';
 import { seeded } from './town-helpers.js';
@@ -230,7 +231,10 @@ test('extract: shop stock rows and village roles from game.bin; towns from .tng 
     thing('AICreature', 'CREATURE_MAN_A', '107').replace('ScriptName NULL', 'ScriptName QuestMan'),
   ].join('');
   const r = parseTownTng(tng, (d) => (d === 'CREATURE_BANDIT' ? 'FACTION_BANDITS' : 'FACTION_VILLAGERS'));
-  assert.deepEqual(r.villages, [{ uid: '100', def: 'VILLAGE_A', x: 10.5, y: 20, z: 1 }]);
+  assert.deepEqual(
+    r.villages.map(({ zone: _z, ...v }) => v),
+    [{ uid: '100', def: 'VILLAGE_A', x: 10.5, y: 20, z: 1 }],
+  );
   assert.deepEqual(r.shops.map((s) => [s.uid, s.village]), [['101', '100']]);
   assert.deepEqual(r.homes.map((h) => h.uid), ['102']);
   assert.deepEqual(r.villagers.map((v) => v.uid), ['104']);
@@ -239,3 +243,54 @@ test('extract: shop stock rows and village roles from game.bin; towns from .tng 
 function shownIn(town: TownLife, id: number): boolean {
   return town.snapshot().some((e) => e.id === id);
 }
+
+test('extract: guard counts, guard beats from GuardTrack chains, and the town outline', () => {
+  const { game, names } = buildBins(
+    ['CVillagePeopleDef'],
+    [
+      { group: 'CREATURE', name: 'CREATURE_GUARD_A' },
+      { group: 'VILLAGE', name: 'VILLAGE_A', components: [{ type: 'CVillagePeopleDef', fields: [{ name: 'Guard', ref: 'CREATURE_GUARD_A' }, { name: 'NumGuards', i32: 3 }] }] },
+    ],
+  );
+  assert.equal(extractVillagePeople(new GameBin(game, new NamesBin(names))).VILLAGE_A?.numGuards, 3);
+
+  const at = (kind: string, def: string, uid: string, x: number, y: number, extra = '', script = 'NULL') =>
+    `NewThing ${kind};\nUID ${uid};\nDefinitionType "${def}";\nScriptName ${script};\nPositionX ${x};\nPositionY ${y};\nPositionZ 2.0;\n${extra}EndThing;\n`;
+  const member = 'StartCTCVillageMember;\nVillageUID 100;\nEndCTCVillageMember;\n';
+  const node = (uid: string, x: number, y: number, next: string, start: boolean, inVillage: boolean) =>
+    at('TrackNode', 'TRACK_NODE_BASIC', uid, x, y, `${inVillage ? member : ''}LinkedToUID1 0;\nLinkedToUID2 ${next};\nStart ${start ? 'TRUE' : 'FALSE'};\nEnd FALSE;\n`, 'GuardTrack');
+  const tng = [
+    at('Village', 'VILLAGE_A', '100', 100, 100),
+    at('Building', 'BUILDING_HOUSE_A', '101', 160, 100, `${member}IsResidential TRUE;\n`),
+    // A beat of three nodes: only the first is tied to the village, as in the retail levels.
+    node('201', 90, 90, '202', true, true),
+    node('202', 110, 90, '203', false, false),
+    node('203', 110, 120, '0', false, false),
+    // A chain tied to no village (scripted guards in a quest) is left out.
+    node('301', 0, 0, '302', true, false),
+    node('302', 5, 0, '0', false, false),
+    // A camera track is not a guard beat.
+    at('TrackNode', 'TRACK_NODE_BASIC', '401', 100, 100, `${member}LinkedToUID2 0;\n`, 'CameraTrack'),
+  ].join('');
+  const r = parseTownTng(tng, () => 'FACTION_VILLAGERS');
+  const v = r.villages[0]!;
+  assert.deepEqual(v.guardRoutes, [
+    [
+      { x: 90, y: 90, z: 2 },
+      { x: 110, y: 90, z: 2 },
+      { x: 110, y: 120, z: 2 },
+    ],
+  ]);
+  const zone = { village: v.uid, points: v.zone! };
+  assert.ok(inZone({ x: 100, y: 100 }, zone), 'the village itself');
+  assert.ok(inZone({ x: 160 + ZONE_MARGIN - 1, y: 100 }, zone), 'its furthest house, with the margin');
+  assert.ok(inZone({ x: 100 - ZONE_MIN_RADIUS, y: 100 }, zone), 'a small village still has some ground');
+  assert.ok(!inZone({ x: 220, y: 100 }, zone), 'the wilds beyond');
+  assert.ok(inZone({ x: 220, y: 100 }, zone, 60), 'a margin reaches further');
+
+  // Into the region frame: everything moves together.
+  const moved = shiftTown(r, -32, -160).villages[0]!;
+  assert.deepEqual([moved.x, moved.y], [68, -60]);
+  assert.deepEqual(moved.guardRoutes![0]![0], { x: 58, y: -70, z: 2 });
+  assert.ok(inZone({ x: 68, y: -60 }, { village: '100', points: moved.zone! }));
+});

@@ -18,7 +18,8 @@ export function monsterAi(nav?: NavStore): (ctx: AiContext) => ChannelAi {
       {
         nav: mesh,
         creatures,
-        targets: () => ctx.heroes() as Iterable<Combatant>,
+        // Heroes, and the town watch when guards take a monster on.
+        targets: () => [...ctx.heroes(), ...(ctx.guards?.() ?? [])] as Iterable<Combatant>,
         combat: {
           // Combat has no separate heavy swing: Fable's equivalent is the charged flourish.
           attack: (a, t, kind: AttackKind) => void ctx.combat.attack(a, t, kind === 'heavy' ? 'flourish' : kind),

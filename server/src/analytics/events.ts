@@ -28,6 +28,8 @@ export type GameEvent =
   | { type: 'gate_unlocked'; heroId: number; gate: string; region: string }
   | { type: 'gate_travel'; heroId: number; to: string; from?: string; gate?: string | null; via?: 'seal' | 'gate' | 'back'; leader?: number; refused?: string }
   | { type: 'kill'; heroId: number; creature: string; channelId: string; experience: number; gold: number; items: number }
+  /** A monster the town watch did most of the killing on: no loot or experience for the hero. */
+  | { type: 'kill_by_watch'; heroId: number; creature: string; channelId: string }
   | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }
   | { type: 'staff_item_blocked'; heroId: number; defId: string; action: string; actor: string }

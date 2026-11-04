@@ -53,6 +53,8 @@ interface Brain {
   strikeUntil: number;
   /** Going home because it was dragged off its patch (heals on arrival), not because the fight ended. */
   leashed: boolean;
+  /** A beat to walk instead of wandering (town guards), with the next point and direction. */
+  patrol: { route: Vec3[]; at: number; dir: 1 | -1 } | null;
 }
 
 /** How long the strike pose is held after a swing lands, so the next swing reads as a new one. */
@@ -128,6 +130,7 @@ export class AiDirector implements AiHooks {
       comboLeft: 0,
       strikeUntil: 0,
       leashed: false,
+      patrol: null,
     };
     c.anim = Anim.Idle;
     this.brains.set(c.id, b);
@@ -215,6 +218,25 @@ export class AiDirector implements AiHooks {
     this.goHome(b);
   }
 
+  /**
+   * Walk this beat when not busy: point to point, then back the way it came (Fable's guard
+   * tracks are open chains). The creature's home follows it along the beat, so its leash and
+   * the walk back after a fight are measured from where it was on its round.
+   */
+  setPatrol(creatureId: number, route: Vec3[]): void {
+    const b = this.brains.get(creatureId);
+    if (!b) return;
+    if (route.length < 2) {
+      b.patrol = null;
+      return;
+    }
+    // Start at the point nearest to where it stands.
+    let at = 0;
+    for (let i = 1; i < route.length; i++) if (dist(b.c.pos, route[i]!) < dist(b.c.pos, route[at]!)) at = i;
+    b.patrol = { route: route.map((p) => ({ ...p })), at, dir: at === route.length - 1 ? -1 : 1 };
+    b.home = { ...route[at]! };
+  }
+
   state(creatureId: number): AiState | undefined {
     return this.brains.get(creatureId)?.state;
   }
@@ -270,6 +292,7 @@ export class AiDirector implements AiHooks {
           this.callPack(b, t);
           return;
         }
+        if (b.patrol) return this.patrolStep(b);
         if (b.state === 'idle' && this.now >= b.stateUntil) {
           const nav = this.world.nav;
           const p = nav ? nav.randomPointNear(b.home, b.p.wanderRadius, this.rng) : jitter(b.home, b.p.wanderRadius, this.rng);
@@ -344,6 +367,34 @@ export class AiDirector implements AiHooks {
         return;
       case 'dead':
         return;
+    }
+  }
+
+  /** Idle or walking its beat: on to the next point, with a short look round at each end. */
+  private patrolStep(b: Brain): void {
+    const pt = b.patrol!;
+    if (b.state === 'wander' && b.goal) return;
+    if (b.state === 'idle' && this.now < b.stateUntil) return;
+    const atEnd = pt.at === 0 || pt.at === pt.route.length - 1;
+    if (b.state === 'wander' && atEnd && dist(b.c.pos, pt.route[pt.at]!) < 1.5) {
+      // Reached the end of the beat: stand a moment, then turn back.
+      b.state = 'idle';
+      b.c.anim = Anim.Idle;
+      b.stateUntil = this.now + this.between(b.p.idleMs) / 2;
+      pt.dir = pt.at === 0 ? 1 : -1;
+      return;
+    }
+    if (dist(b.c.pos, pt.route[pt.at]!) < 1.5) {
+      if (pt.at + pt.dir < 0 || pt.at + pt.dir >= pt.route.length) pt.dir = pt.dir === 1 ? -1 : 1;
+      pt.at += pt.dir;
+    }
+    const next = pt.route[pt.at]!;
+    b.home = { ...next };
+    b.state = 'wander';
+    this.goTo(b, next, b.p.walkSpeed, Anim.Walk);
+    if (!b.goal) {
+      // No way there on the ground: walk it straight rather than freeze.
+      this.goTo(b, next, b.p.walkSpeed, Anim.Walk, true);
     }
   }
 

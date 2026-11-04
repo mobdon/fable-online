@@ -31,6 +31,15 @@ export interface VillagePeople {
   /** Creature def per role; a role the village doesn't have is missing. */
   roles: Partial<Record<VillageRole, string>>;
   guard: string | null;
+  /** How many guards the village posts (CVillagePeopleDef NumGuards). Missing in old extracts. */
+  numGuards?: number;
+}
+
+/** A point on the ground (region frame). */
+export interface Point3 {
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface PlacedVillage {
@@ -39,6 +48,14 @@ export interface PlacedVillage {
   x: number;
   y: number;
   z: number;
+  /**
+   * The town's ground, where its guards keep the peace: the outline (convex, counter-
+   * clockwise) around everything the level designer tied to the village (buildings,
+   * markers, guard tracks), with a margin. Missing in old extracts.
+   */
+  zone?: { x: number; y: number }[];
+  /** The village's guard patrols, from its GuardTrack nodes in the .tng, in walking order. */
+  guardRoutes?: Point3[][];
 }
 
 export interface PlacedShop {
@@ -103,11 +120,36 @@ export const FALLBACK_TOWN: TownData = {
     VILLAGE_TEST: {
       roles: { MaleShopKeeper: 'CREATURE_TEST_SHOPKEEPER', MaleUnemployed: 'CREATURE_TEST_VILLAGER_MALE', FemaleUnemployed: 'CREATURE_TEST_VILLAGER_FEMALE' },
       guard: 'CREATURE_TEST_GUARD',
+      numGuards: 2,
     },
   },
   regions: {
     TestRegion: {
-      villages: [{ uid: 'v1', def: 'VILLAGE_TEST', x: 50, y: 50, z: 0 }],
+      villages: [
+        {
+          uid: 'v1',
+          def: 'VILLAGE_TEST',
+          x: 50,
+          y: 50,
+          z: 0,
+          zone: [
+            { x: 25, y: 25 },
+            { x: 75, y: 25 },
+            { x: 75, y: 75 },
+            { x: 25, y: 75 },
+          ],
+          guardRoutes: [
+            [
+              { x: 40, y: 45, z: 0 },
+              { x: 60, y: 45, z: 0 },
+            ],
+            [
+              { x: 50, y: 40, z: 0 },
+              { x: 50, y: 60, z: 0 },
+            ],
+          ],
+        },
+      ],
       shops: [
         { uid: 's1', building: 'BUILDING_TEST_GENERAL_STORE', village: 'v1', x: 40, y: 50, z: 0, yaw: 0 },
         { uid: 's2', building: 'BUILDING_TEST_SMITHY', village: 'v1', x: 60, y: 50, z: 0, yaw: 0 },

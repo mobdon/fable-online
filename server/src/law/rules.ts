@@ -282,7 +282,7 @@ export const DEFAULT_RULES: LawRules = {
       regions: ['BowerstoneSlums', 'BowerstoneSlums_v2', 'BowerstonePosh', 'BowerstoneBridge', 'BowerstoneTavernCellar', 'MayorsHouseHallway', 'MayorsHouseBedroom'],
       kickTo: 'LookoutPoint',
     },
-    { id: 'oakvale', regions: ['OakValeWest_v2', 'OakvaleMemorialGarden_v2'], kickTo: 'BarrowFields' },
+    { id: 'oakvale', regions: ['OakBay', 'OakvaleMemorialGarden', 'OakValeWest_v2', 'OakvaleMemorialGarden_v2'], kickTo: 'BarrowFields' },
     { id: 'knothole_glade', regions: ['KnotholeGlade', 'KnotholeGladeMainTown'], kickTo: 'Witchwood_4' },
     { id: 'hook_coast', regions: ['HookCoast'], kickTo: 'Darkwood' },
     { id: 'snowspire', regions: ['SnowspireVillage'], kickTo: 'NorthernWastes3' },

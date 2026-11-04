@@ -16,6 +16,8 @@ import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
 import { Anim, type AiWorld, type Creature as AiCreature } from './ai/types.js';
 import { ChannelLaw, type LawServices } from '../law/guards.js';
+import type { NavMesh } from './nav/navmesh.js';
+import { inAnyZone, type TownZone } from './town/zones.js';
 
 /** Input button bits the mod sends. Spell slot = (buttons >> SPELL_SHIFT) & 0xF, 1-based. */
 export const BUTTONS = { ATTACK: 1 << 0, BLOCK: 1 << 1, CAST: 1 << 2 } as const;
@@ -47,6 +49,8 @@ export interface AiContext {
   combat: CombatSystem;
   creatures: () => Iterable<Creature>;
   heroes: () => Iterable<Hero>;
+  /** The town watch: monsters fight back when a guard takes them on. */
+  guards?: () => Iterable<Creature>;
 }
 
 export interface WorldServices {
@@ -63,12 +67,29 @@ export interface WorldServices {
   spawnOptions?: Partial<SpawnOptions>;
   /** Crime and the town watch. Without it there are no guards and nothing is a crime. */
   law?: LawServices;
+  /** Walkable ground for the guards (the region's navmesh); without it they walk straight lines. */
+  nav?: (region: string) => NavMesh | undefined;
 }
 
 /** Guard stats when game.bin has no entry for the def (test data, or an unread def). */
 const GUARD_FALLBACK = { health: 300, power: 1.2, armour: 20 };
 /** A dead guard is replaced at its post after this long. */
 export const GUARD_RESPAWN_MS = 60_000;
+
+export const TOWN_WATCH = {
+  /** A monster this close to a town's outline counts as in town: the watch goes for it. */
+  zoneMargin: 10,
+  /** Guards this far from a monster in town come running (further than they can see). */
+  respondRadius: 45,
+  /** Most guards sent after one monster; the rest keep their beat. */
+  perMonster: 2,
+  thinkMs: 500,
+  /**
+   * A monster the watch did most of the killing on pays nothing: heroes must deal at least
+   * this share of its damage. Stops leading monsters into town for the guards to kill.
+   */
+  heroShareForLoot: 0.5,
+};
 
 interface HeroSlot {
   hero: Hero;
@@ -105,7 +126,10 @@ export class CombatSim implements RegionSim {
   /** The town watch: guard creatures, run by their own copy of the server's AI. */
   readonly law?: ChannelLaw;
   private guards = new Map<number, Creature>();
-  private guardPosts = new Map<number, { def: string; post: Vec3; downMs: number | null }>();
+  private guardPosts = new Map<number, { def: string; post: Vec3; route: Vec3[] | undefined; downMs: number | null }>();
+  private zones: TownZone[] = [];
+  private watchMs = 0;
+  private nav: NavMesh | undefined;
   /** Staff dev spawns: they never pay loot or experience, so they can't be farmed for gold. */
   private devSpawned = new Set<number>();
   private guardAi?: AiDirector;
@@ -120,7 +144,10 @@ export class CombatSim implements RegionSim {
       onDamaged: (id, by, n) => this.ai?.onDamaged?.(id, by, n),
       onDeath: (id, killer) => this.ai?.onDeath?.(id, killer),
     };
-    this.combat = new CombatSystem(s.data, hooks, s.harm ?? defaultHarmPolicy);
+    this.nav = s.nav?.(region.name);
+    const harm = s.harm ?? defaultHarmPolicy;
+    // Creatures don't fight each other, except the town watch and monsters.
+    this.combat = new CombatSystem(s.data, hooks, (a, t) => harm(a, t) || this.watchFight(a, t));
     this.combat.onDeath((d) => this.onDeath(d));
     this.combat.onHit((a, t, _dmg, killed) => {
       const now = Date.now();
@@ -136,6 +163,7 @@ export class CombatSim implements RegionSim {
       combat: this.combat,
       creatures: () => this.spawns.creatures(),
       heroes: () => [...this.heroes.values()].map((h) => h.hero),
+      guards: () => [...this.guards.values()].filter((g) => g.alive),
     });
     this.spawns.start();
     if (s.law) this.law = this.startLaw(s.law);
@@ -152,13 +180,15 @@ export class CombatSim implements RegionSim {
     };
     let law: ChannelLaw | undefined;
     const world: AiWorld = {
-      nav: undefined,
+      nav: this.nav,
       creatures: this.guards as unknown as ReadonlyMap<number, AiCreature>,
       combat: port,
       *targets() {
         for (const { hero } of self.heroes.values()) yield { id: hero.id, pos: hero.pos, alive: hero.alive, faction: 'hero' };
+        // Monsters too: the watch fights the ones that come into town.
+        for (const c of self.spawns.creatures()) if (c.alive && HOSTILE_FACTIONS.has(c.faction)) yield c;
       },
-      isHostile: (c, t) => law?.guardHostile(c, t) ?? false,
+      isHostile: (c, t) => (t.faction === 'hero' ? (law?.guardHostile(c, t) ?? false) : this.inTown(t)),
     };
     this.guardAi = new AiDirector(world, this.channelId.length);
     const out = services.out;
@@ -166,7 +196,7 @@ export class CombatSim implements RegionSim {
       {
         channelId: this.channelId,
         region: this.region.name,
-        nav: undefined,
+        nav: this.nav,
         creatures: () => [...this.guards.values(), ...this.spawns.creatures()] as unknown as AiCreature[],
         *heroes() {
           for (const { hero } of self.heroes.values()) yield { id: hero.id, pos: hero.pos, alive: hero.alive };
@@ -215,9 +245,55 @@ export class CombatSim implements RegionSim {
     return c ? { id: c.id } : { error: 'No walkable ground in front of you.' };
   }
 
-  /** Post a guard (the town layer places them at its villages). Returns its id. */
-  addGuard(defName: string, at: Vec3): number {
+  /**
+   * The region's towns. Guards fight monsters inside them, and a drawn weapon only gets a
+   * warning there. Without zones (old town data) the whole region counts as town.
+   */
+  setTownZones(zones: TownZone[]): void {
+    this.zones = zones;
+    this.law?.setZones(zones);
+  }
+
+  /** In one of the region's towns (or near enough that the watch steps in). */
+  inTown(p: { pos: { x: number; y: number }; alive?: boolean }): boolean {
+    if (p.alive === false) return false;
+    return !this.zones.length || inAnyZone(p.pos, this.zones, TOWN_WATCH.zoneMargin);
+  }
+
+  /** The watch against monsters, both ways. Never guards against townsfolk or each other. */
+  private watchFight(a: { kind: string; faction: string }, t: { kind: string; faction: string }): boolean {
+    if (a.kind !== 'creature' || t.kind !== 'creature') return false;
+    return (a.faction === 'guard' && HOSTILE_FACTIONS.has(t.faction)) || (t.faction === 'guard' && HOSTILE_FACTIONS.has(a.faction));
+  }
+
+  /**
+   * A monster fighting in town: send the nearest idle guards at it (up to perMonster each),
+   * even ones too far away to see it. They are pulled off again by the AI once the monster
+   * leaves town (isHostile turns false and they walk back to their beat).
+   */
+  private stepTownWatch(dtMs: number): void {
+    if ((this.watchMs -= dtMs) > 0 || !this.guardAi) return;
+    this.watchMs = TOWN_WATCH.thinkMs;
+    const busy = new Map<number, number>();
+    for (const g of this.guards.values()) if (g.alive && g.targetId !== null) busy.set(g.targetId, (busy.get(g.targetId) ?? 0) + 1);
+    for (const m of this.spawns.creatures()) {
+      if (!m.alive || !HOSTILE_FACTIONS.has(m.faction) || !this.inTown(m)) continue;
+      let need = TOWN_WATCH.perMonster - (busy.get(m.id) ?? 0);
+      if (need <= 0) continue;
+      const free = [...this.guards.values()]
+        .filter((g) => g.alive && g.targetId === null && dist2d(g.pos, m.pos) <= TOWN_WATCH.respondRadius)
+        .sort((a, b) => dist2d(a.pos, m.pos) - dist2d(b.pos, m.pos));
+      for (const g of free) {
+        if (need <= 0) break;
+        if (this.guardAi.pursue(g.id, m.id)) need--;
+      }
+    }
+  }
+
+  /** Post a guard (the town layer places them at its villages), walking `route` if given. Returns its id. */
+  addGuard(defName: string, at: Vec3, route?: Vec3[]): number {
     const id = allocCreatureId();
+    if (this.nav && !this.nav.walkable(at.x, at.y)) at = this.nav.snap(at, 8) ?? at;
     let c: Creature;
     try {
       c = creatureFromDef(id, defName, at, this.s.data);
@@ -231,9 +307,10 @@ export class CombatSim implements RegionSim {
     c.faction = 'guard';
     c.experience = 0;
     this.guards.set(id, c);
-    if (!this.guardPosts.has(id)) this.guardPosts.set(id, { def: defName, post: { ...at }, downMs: null });
+    if (!this.guardPosts.has(id)) this.guardPosts.set(id, { def: defName, post: { ...at }, route, downMs: null });
     this.combat.add(c);
     this.guardAi?.onSpawn(c as unknown as AiCreature);
+    if (route) this.guardAi?.setPatrol(id, route);
     return id;
   }
 
@@ -247,8 +324,9 @@ export class CombatSim implements RegionSim {
         this.combat.remove(id);
         this.guardAi?.remove(id);
       }
-      this.addGuard(g.def, g.post);
+      this.addGuard(g.def, g.post, g.route);
     }
+    this.stepTownWatch(dtMs);
     this.guardAi?.step(dtMs);
     this.law?.step(dtMs);
   }
@@ -418,8 +496,18 @@ export class CombatSim implements RegionSim {
       // Credit goes to the hero who did the most damage, so kill-stealing a nearly dead monster doesn't pay.
       let best: number | null = null;
       let most = 0;
-      for (const [id, n] of d.damageBy) if (n > most && this.heroes.has(id)) [best, most] = [id, n];
+      let heroDmg = 0;
+      let all = 0;
+      for (const [id, n] of d.damageBy) {
+        all += n;
+        if (this.heroes.has(id)) heroDmg += n;
+        if (n > most && this.heroes.has(id)) [best, most] = [id, n];
+      }
       if (best === null) return;
+      if (heroDmg < all * TOWN_WATCH.heroShareForLoot) {
+        this.s.events.emit({ type: 'kill_by_watch', heroId: best, creature: c.defName, channelId: this.channelId });
+        return;
+      }
       const killer = this.heroes.get(best)!.hero;
       const xp = Math.round(c.experience * (1 + Math.min(killer.combo, BALANCE.comboCap) * BALANCE.comboStep));
       this.s.progress?.kill(best, xp);
@@ -492,3 +580,5 @@ export const combatSimFactory =
   (s: WorldServices): SimFactory =>
   (region, channelId) =>
     new CombatSim(region, channelId, s);
+
+const dist2d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
