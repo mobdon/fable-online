@@ -9,7 +9,11 @@ npm install
 npm run dev          # http://localhost:7777, game socket ws://localhost:7777/play
 npm test             # economy invariants, accounts, channels, combat, spawns, loot, quests, end-to-end join
 npm run bots -- 1000 20   # 1,000 bots over real WebSockets for 20 s
+npm run walkers -- --near Mob   # bot players walking around a hero on a running server
+npm run admin -- list           # heroes and where they are
 ```
+
+To host a test server on a Windows PC, use `ops/local-host/` (README there).
 
 ### Game data from your own install
 
@@ -39,10 +43,10 @@ Needs Node 22.13 or newer (uses the built-in `node:sqlite`).
 ## The rules it enforces
 
 **The server owns everything.** A client can send exactly these things: `hello` (a one-time
-join ticket), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id of a door,
-chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server checks,
-below), and `ping`. It never sends a position,
-health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
+join ticket or resume token), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id
+of a door, chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server
+checks, below), `hero_pos` (where its Fable put the hero, accepted only if the hero could have
+got there: `docs/connection.md`), and `ping`. It never sends health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
 inputs are rate limited, and junk frames disconnect. The hero's region and position come
 from the database on join and are written back by the server.
 

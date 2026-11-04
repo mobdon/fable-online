@@ -119,8 +119,9 @@ export class TownSim implements RegionSim {
     return this.inner.addGuard(defName, at);
   }
 
-  placeHero(heroId: number, at: Vec3, yaw?: number): void {
-    this.inner.placeHero?.(heroId, at, yaw);
+  placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
+    if (!this.inner.placeHero) return false;
+    return this.inner.placeHero(heroId, at, yaw) !== false;
   }
 
   dispose(): void {

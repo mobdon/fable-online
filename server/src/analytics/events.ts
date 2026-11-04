@@ -18,6 +18,9 @@ export type GameEvent =
   | { type: 'item'; txId: number; action: string; itemId: string; defId: string; fromHero: number | null; toHero: number | null; quantity: number }
   | { type: 'trade'; txId: number; a: number; b: number }
   | { type: 'input_rejected'; heroId: number; reason: string }
+  | { type: 'move_rejected'; heroId: number; channelId: string; reason: string; count: number }
+  | { type: 'move_anchor'; heroId: number; channelId: string; distance: number }
+  | { type: 'player_resumed'; heroId: number }
   | { type: 'kill'; heroId: number; creature: string; channelId: string; experience: number; gold: number; items: number }
   | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }

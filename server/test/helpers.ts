@@ -20,3 +20,8 @@ export function makeHero(app: App, phase: 'childhood' | 'guild_training' | 'worl
 }
 
 export const key = () => `k-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+
+/** A player link that collects encoded frames, for tests that drive channels directly. */
+export function link(heroId: number, name: string, inbox: string[]): import('../src/world/channel.js').PlayerLink {
+  return { heroId, name, renown: 500, lastSeq: -1, joinedAt: Date.now(), send: (f) => inbox.push(f) };
+}

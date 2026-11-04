@@ -57,7 +57,7 @@ async function joinAs(app: any, base: string, name: string) {
 
 test('two players in a region see each other, named, and the mod can report its position', async () => {
   // Position reports are a dev path, so this test has to turn them on explicitly.
-  const app = testApp({ tickRate: 30, trustClientPositions: true, interestRadius: 80 });
+  const app = testApp({ tickRate: 30, clientMovement: 'trusted', interestRadius: 80 });
   const server = await listen(app, 0);
   const port = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${port}`;
@@ -103,7 +103,7 @@ test('two players in a region see each other, named, and the mod can report its 
 });
 
 test('with the dev path off, a client cannot move its own hero', async () => {
-  const app = testApp({ tickRate: 30, trustClientPositions: false });
+  const app = testApp({ tickRate: 30, clientMovement: 'off' });
   const server = await listen(app, 0);
   const port = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${port}`;

@@ -28,6 +28,8 @@ export class Heroes {
     private db: Database,
     private events: EventSink,
     private maxPerAccount: number,
+    /** Where new heroes start. 'world' is for test realms, so heroes skip the private instances. */
+    private startPhase: HeroPhase = 'childhood',
   ) {}
 
   create(accountId: number, name: string): Hero {
@@ -37,10 +39,11 @@ export class Heroes {
       if (n >= this.maxPerAccount) throw new GameError('hero_limit', `At most ${this.maxPerAccount} heroes per account`);
       if (this.db.get('SELECT 1 FROM heroes WHERE name = ?', name)) throw new GameError('name_taken', 'That name is taken', 409);
       const { lastInsertRowid: id } = this.db.run(
-        'INSERT INTO heroes (account_id, name, region, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO heroes (account_id, name, phase, region, created_at) VALUES (?, ?, ?, ?, ?)',
         accountId,
         name,
-        STAGE_REGIONS.childhood,
+        this.startPhase,
+        STAGE_REGIONS[this.startPhase],
         Date.now(),
       );
       // Every hero gets exactly one wallet, created with the hero, starting at 0.
