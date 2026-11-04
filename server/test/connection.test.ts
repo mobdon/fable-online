@@ -426,3 +426,14 @@ test('a banned account cannot come back on a resume token', async () => {
     s.stop();
   }
 });
+
+test('a refused exit the client takes anyway lets its one jump through, for a while', () => {
+  const g = new MoveGuard(0);
+  g.allowJump(1_000, 10_000);
+  assert.ok(g.check(at(0), at(0.5), 1_100).ok, 'small moves still checked as usual');
+  assert.ok(g.check(at(0.5), at(300), 3_000).ok, 'the jump into the next area');
+  assert.equal(g.check(at(300), at(900), 4_000).ok, false, 'only one');
+  const late = new MoveGuard(0);
+  late.allowJump(0, 10_000);
+  assert.equal(late.check(at(0), at(300), 11_000).ok, false, 'not after the window');
+});

@@ -84,7 +84,7 @@ export class GameSocket {
       case 'interact':
         if (!this.interacts.take()) return this.dropped('interact flood');
         if (this.app.travel.isGate(msg.thing)) return this.send(this.app.travel.useGate(this.heroId, msg.thing));
-        return this.send(this.app.objects.interact(this.heroId, msg.thing, msg.action));
+        return this.send(this.exitAware(msg.thing, this.app.objects.interact(this.heroId, msg.thing, msg.action)));
       case 'gates':
         if (!this.interacts.take()) return this.dropped('interact flood');
         return this.send(this.app.travel.list(this.heroId));
@@ -165,7 +165,7 @@ export class GameSocket {
       if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
     }
     if (mode === 'trusted') {
-      if (ch.placeHero(heroId, at, msg.yaw)) this.followRegion(heroId, at, false);
+      if (ch.placeHero(heroId, ch.toLocal(at), msg.yaw)) this.followRegion(heroId, at, false);
       return;
     }
     const before = ch.sim.position(heroId);
@@ -174,9 +174,10 @@ export class GameSocket {
       if (verdict.anchored) {
         // Save the anchored spot now rather than at the next persist, so a crash right after
         // joining does not put the hero back where the server last had them.
-        app.heroes.savePosition(heroId, ch.region.name, at.x, at.y, at.z);
+        const local = ch.toLocal(at);
+        app.heroes.savePosition(heroId, ch.region.name, local.x, local.y, local.z);
         if (before)
-          app.events.emit({ type: 'move_anchor', heroId, channelId: ch.id, distance: Math.round(Math.hypot(at.x - before.x, at.y - before.y, at.z - before.z)) });
+          app.events.emit({ type: 'move_anchor', heroId, channelId: ch.id, distance: Math.round(Math.hypot(local.x - before.x, local.y - before.y, local.z - before.z)) });
       }
       // Last: this may move the hero to another channel.
       this.followRegion(heroId, at, verdict.anchored);
@@ -189,6 +190,24 @@ export class GameSocket {
   }
 
   private lastFollowAt = 0;
+
+  /**
+   * A refused region exit that the mod lets Fable take anyway (it was not here, too far, or
+   * still arriving): Fable moves the hero into the next area regardless, so the move guard
+   * lets that one jump through and region following puts the hero where Fable did. Locked
+   * and gated exits are stopped by the mod, so they get nothing.
+   */
+  private exitAware(thingId: string, out: Record<string, unknown>): Record<string, unknown> {
+    if (this.heroId == null) return out;
+    if (out.t !== 'error' || !['not_here', 'too_far', 'loading'].includes(String(out.error))) return out;
+    const t = this.app.objects.things.get(thingId);
+    if (t && t.kind !== 'exit') return out;
+    if (!t && !/^[A-Za-z0-9_]+:\d+$/.test(thingId)) return out;
+    const heroId = this.heroId;
+    const g = this.app.director.channelOf(heroId)?.moves.get(heroId);
+    g?.allowJump(Date.now());
+    return out;
+  }
 
   /**
    * Keep the hero's server region in step with the region the client's Fable has loaded,
