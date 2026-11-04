@@ -516,7 +516,7 @@ void draw(IDirect3DDevice9* dev) {
     flush_outbox();
     draw_trade(now);
     modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
-    modsettings::draw_pause_button(g_r);
+    modsettings::draw_pause_button(g_r, g_hero.valid);
     modsettings::draw(g_r);
     g_r.end();
 }
@@ -670,6 +670,10 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             }
             ui::Key k;
             if (map_key(w, k)) g_chat.key(k, now);
+            if (g_chat.take_settings_request()) {
+                if (g_chat.is_open()) g_chat.close();
+                modsettings::open(modsettings::kExtras);
+            }
             if (!g_chat.is_open()) g_block_until = GetTickCount() + 200;
             flush_outbox();
             return 0;

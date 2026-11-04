@@ -77,6 +77,8 @@ public:
     const std::string& whisper_target() const { return whisper_to_; }
 
     bool tags_enabled() const { return tags_enabled_; }
+    /** True once after "/settings" (also /mod, /options): open the Mod settings screen. */
+    bool take_settings_request() { bool r = settings_requested_; settings_requested_ = false; return r; }
     const std::string& me() const { return me_; }
 
     // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
@@ -114,6 +116,7 @@ private:
     std::vector<std::pair<std::string, std::string>> local_;
     std::vector<std::string> world_outbox_;
     bool tags_enabled_ = true;
+    bool settings_requested_ = false;
     ChatTab tab_ = ChatTab::All;
     uint8_t unread_ = 0;
     std::deque<std::string> contacts_;

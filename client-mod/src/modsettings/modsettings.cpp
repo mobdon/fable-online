@@ -13,6 +13,8 @@
 #include "../display/frame_probe.h"
 #include "../game/hook.h"
 #include "../game/pause_menu.h"
+#include "../game/player_modes.h"
+#include "../display/mouse_look.h"
 #include "../game/spawns.h"
 #include "../log.h"
 #include "../overlay/renderer.h"
@@ -380,8 +382,26 @@ void notify(const std::string& text) {
 
 // On Fable's pause screen: one of its pewter buttons at the bottom left, clear of Fable's own
 // list. Fable draws its own pointer there, so the button follows the Windows cursor and button.
-void draw_pause_button(Renderer& r) {
-    const bool show = !g_open && game::pause_menu::open() && g_window;
+void draw_pause_button(Renderer& r, bool hero_valid) {
+    game::player_modes::poll();
+    // Fable's menus: the pause screen (mode 23), or any time the hero is loaded but the
+    // mouse-look camera has stopped (the in-game menu with Inventory ... Options stops it).
+    static bool played = false;
+    const bool camera = display::mouse_look::in_game();
+    if (camera) played = true;
+    const bool pause = game::pause_menu::open();
+    const bool stopped = played && hero_valid && !camera;
+    const bool paused = pause || stopped;
+    const bool show = !g_open && paused && g_window;
+    static bool was_paused = false;
+    static int logged = 0;
+    if (paused != was_paused && logged < 40) {
+        ++logged;
+        fo::log("modsettings: Fable menu %s (pause screen %d, camera stopped %d, player modes %08X%08X)%s", paused ? "up" : "gone",
+                pause, stopped, static_cast<unsigned>(game::player_modes::running_mask() >> 32),
+                static_cast<unsigned>(game::player_modes::running_mask()), paused && show ? "; MOD SETTINGS button drawn" : "");
+    }
+    was_paused = paused;
     if (!show) { g_pause_mouse_was_down = false; return; }
     const float line = r.line_height(Face::Chat);
     const float h = std::round(line * 2.0f), w = std::round(std::fmax(200.0f, line * 13));

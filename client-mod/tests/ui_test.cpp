@@ -45,6 +45,11 @@ static void test_chat_commands() {
     c.key(ui::Key::Escape, 0);
     CHECK(!c.is_open());
 
+    CHECK(!c.take_settings_request());
+    type(c, U"/settings");
+    CHECK(c.take_settings_request() && !c.take_settings_request());  // once, and nothing sent
+    CHECK(c.take_outbox().empty());
+
     type(c, U"hello there");
     auto out = c.take_outbox();
     CHECK(out.size() == 1);
