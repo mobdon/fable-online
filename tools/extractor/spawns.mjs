@@ -10,6 +10,7 @@
 // Positions are in the level's local frame (metres, z up), the same frame as the navmesh.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** WAD index: 32-byte header, then entries at entriesOffset. */
 export function readWadIndex(fd) {
@@ -108,7 +109,7 @@ function main() {
     ng += generators.length;
   }
   fs.closeSync(fd);
-  const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const out = path.join(here, '..', '..', 'shared', 'defs', 'spawns.json');
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify({ source: 'FinalAlbion.wad', regions }, null, 1));

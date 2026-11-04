@@ -13,6 +13,7 @@
 // Format notes are in docs/world-objects.md.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------- archive
 
@@ -269,7 +270,7 @@ function main() {
   }
 
   const doc = build(wld, levels, gtgEntrances);
-  const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const out = path.join(here, '..', '..', 'shared', 'defs', 'world-things.json');
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(doc));
@@ -281,4 +282,4 @@ function main() {
   );
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))) main();
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main();
