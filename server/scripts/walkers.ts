@@ -18,7 +18,7 @@ for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i]!;
   if (a.startsWith('--')) args.set(a.slice(2), process.argv[i + 1] ?? '');
 }
-const target = args.get('near') ?? '';
+let target = args.get('near') ?? '';
 const count = Math.max(1, Math.min(20, Number(args.get('count') ?? 3)));
 const base = (args.get('server') ?? 'http://127.0.0.1:7777').replace(/\/+$/, '');
 const NAMES = ['Wanderer', 'Rambler', 'Strider', 'Roamer', 'Drifter', 'Pilgrim', 'Nomad', 'Ranger', 'Tramper', 'Hiker'];
@@ -26,12 +26,19 @@ const STEP_HZ = 10;
 /** Metres per report: 7 m/s at 10 Hz, inside the server's checks. */
 const MAX_STEP = 0.7;
 
-if (!target) {
-  console.log('Usage: npm run walkers -- --near <YourHeroName> [--count 3] [--server http://127.0.0.1:7777]');
-  process.exit(1);
-}
-
 const db = new Database(process.env.FO_DB || 'data/fable-online.sqlite');
+if (!target) {
+  // No name given: walk around whoever played last (not a walker).
+  const last = db.get<{ name: string }>(
+    "SELECT h.name FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE a.username NOT LIKE 'walker\\_%' ESCAPE '\\' ORDER BY h.last_played_at DESC NULLS LAST, h.id DESC LIMIT 1",
+  );
+  if (!last) {
+    console.log('No heroes on this server yet. Log in once through the launcher, then run this again.');
+    process.exit(1);
+  }
+  target = last.name;
+  console.log(`Walking around ${target} (the hero who played last). Pass --near <Name> for someone else.`);
+}
 const home = db.get<{ id: number; region: string; x: number; y: number; z: number; phase: string }>(
   'SELECT id, region, x, y, z, phase FROM heroes WHERE name = ?',
   target,
