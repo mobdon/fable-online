@@ -54,6 +54,16 @@ uint64_t runtime_uid(const std::string& id, const LevelNames& levels) {
     return 0;
 }
 
+std::string travel_frame(const std::string& to) {
+    std::string out = "{\"t\":\"travel\",\"to\":\"";
+    for (char c : to)
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == ':') out.push_back(c);
+    out += "\"}";
+    return out;
+}
+
+static bool moves_hero(HeldKind k) { return k == HeldKind::Exit || k == HeldKind::Teleport || k == HeldKind::TeleportBack; }
+
 bool HeldActions::hold(uintptr_t token, HeldKind kind, const std::string& id, uint32_t nowMs) {
     if (held_.count(token)) return false;
     held_[token] = Entry{kind, id, nowMs};
@@ -70,7 +80,7 @@ void HeldActions::decide(uintptr_t token, Verdict v, const std::string& why) {
 void HeldActions::on_region_change() {
     std::vector<uintptr_t> exits;
     for (const auto& h : held_)
-        if (h.second.kind == HeldKind::Exit) exits.push_back(h.first);
+        if (moves_hero(h.second.kind)) exits.push_back(h.first);
     for (uintptr_t t : exits) decide(t, Verdict::Release, "moved");
 }
 
@@ -87,6 +97,10 @@ bool HeldActions::refusal_blocks(HeldKind kind, const std::string& code) {
     // region, still arriving) means the server could not check, and the game goes ahead so
     // nobody is stuck at a door; the server's ledger stays the record of what was taken.
     if (code == "demon_door_closed" || code == "locked" || code == "jailed") return true;
+    if (kind == HeldKind::Teleport || kind == HeldKind::TeleportBack)
+        return code == "in_combat" || code == "cooldown" || code == "barred" || code == "wanted" || code == "in_prison" ||
+               code == "kicked_out" || code == "not_graduated" || code == "dead" || code == "no_return" ||
+               code == "already_here" || code == "region_full" || code == "instances_full" || code == "rate";
     if (kind == HeldKind::Give)
         return code == "gone" || code == "need_keys" || code == "need_spade" || code == "for_sale";
     return false;
@@ -104,7 +118,7 @@ void HeldActions::on_ok(const std::string& id) {
     // An accepted exit is followed by enter_region; release on whichever comes first.
     std::vector<uintptr_t> hit;
     for (const auto& h : held_)
-        if (h.second.id == id && h.second.kind == HeldKind::Exit) hit.push_back(h.first);
+        if (h.second.id == id && moves_hero(h.second.kind)) hit.push_back(h.first);
     for (uintptr_t t : hit) decide(t, Verdict::Release, "ok");
 }
 
@@ -117,7 +131,7 @@ void HeldActions::release_all(const char* why) {
 std::vector<Decision> HeldActions::drain(uint32_t nowMs) {
     std::vector<uintptr_t> late;
     for (const auto& h : held_) {
-        uint32_t wait = h.second.kind == HeldKind::Exit ? kExitWaitMs : kGiveWaitMs;
+        uint32_t wait = h.second.kind == HeldKind::Exit ? kExitWaitMs : h.second.kind == HeldKind::Give ? kGiveWaitMs : kTeleportWaitMs;
         if (nowMs - h.second.since >= wait) late.push_back(h.first);
     }
     for (uintptr_t t : late) decide(t, Verdict::Release, "timeout");

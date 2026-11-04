@@ -91,6 +91,10 @@ test('a hero can only travel to gates they have found; the Guild is always open'
   const a = join(app, 'LookoutPoint', [52, 48, 0]);
   assert.equal(app.travel.travel(a.id, { gate: 'Greatwood:7' }).error, 'locked');
   assert.equal(app.travel.travel(a.id, { gate: 'Nowhere:1' }).error, 'no_gate');
+  // A test server can open every gate (FO_GATES_OPEN).
+  app.travel.rules.allOpen = true;
+  assert.equal((app.travel.list(a.id).gates as unknown[]).length, 4);
+  app.travel.rules.allOpen = false;
   tick(app); // unlocks Lookout Point
   const r = app.travel.travel(a.id, { guild: true });
   assert.equal(r.ok, true);

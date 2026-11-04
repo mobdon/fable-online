@@ -126,6 +126,54 @@ void test_ok_frame() {
     CHECK(o.drain_acks().empty());
 }
 
+void test_teleports() {
+    HeldActions h;
+    // A gate jump waits; enter_region (the server moved the hero) lets it go.
+    CHECK(h.hold(0x2000, HeldKind::Teleport, "LookoutPoint:5", 0));
+    CHECK(h.hold(0x3000, HeldKind::Give, "LookoutPoint:30", 0));
+    h.on_region_change();
+    auto d = h.drain(10);
+    CHECK(d.size() == 1 && d[0].token == 0x2000 && d[0].verdict == Verdict::Release && d[0].why == "moved");
+    h.release_all("x");
+    h.drain(10);
+    // A rule refusal stops the jump; "the server can't check" lets Fable go ahead.
+    h.hold(1, HeldKind::Teleport, "Greatwood:7", 0);
+    h.hold(2, HeldKind::TeleportBack, "back", 0);
+    h.hold(3, HeldKind::Teleport, "Witchwood:9", 0);
+    h.on_refusal({"Greatwood:7", "in_combat", ""});
+    h.on_refusal({"back", "no_return", ""});
+    h.on_refusal({"Witchwood:9", "no_gate", ""});
+    d = h.drain(10);
+    CHECK(d.size() == 3);
+    for (const auto& x : d) CHECK(x.verdict == (x.token == 3 ? Verdict::Release : Verdict::Drop));
+    // Accepted, before enter_region arrives.
+    h.hold(4, HeldKind::Teleport, "LookoutPoint:5", 0);
+    h.on_ok("LookoutPoint:5");
+    d = h.drain(10);
+    CHECK(d.size() == 1 && d[0].verdict == Verdict::Release);
+    // No answer: Fable goes ahead after the wait.
+    h.hold(5, HeldKind::Teleport, "LookoutPoint:5", 100);
+    CHECK(h.drain(100 + kTeleportWaitMs - 1).empty());
+    CHECK(h.drain(100 + kTeleportWaitMs).size() == 1);
+    CHECK(HeldActions::refusal_blocks(HeldKind::Teleport, "locked"));
+    CHECK(HeldActions::refusal_blocks(HeldKind::Teleport, "cooldown"));
+    CHECK(!HeldActions::refusal_blocks(HeldKind::Teleport, "offline"));
+    CHECK(!HeldActions::refusal_blocks(HeldKind::Exit, "in_combat"));
+    // The request frame keeps only id characters.
+    CHECK(travel_frame("LookoutPoint:5") == "{\"t\":\"travel\",\"to\":\"LookoutPoint:5\"}");
+    CHECK(travel_frame("back\",\"x") == "{\"t\":\"travel\",\"to\":\"backx\"}");
+}
+
+void test_travel_result_frame() {
+    WorldObjects o;
+    CHECK(o.on_frame("{\"t\":\"travel_result\",\"ok\":true,\"to\":\"LookoutPoint:5\",\"region\":\"LookoutPoint\"}", 0) == ObjectFrame::Ok);
+    auto acks = o.drain_acks();
+    CHECK(acks.size() == 1 && acks[0] == "LookoutPoint:5");
+    CHECK(o.on_frame("{\"t\":\"travel_result\",\"ok\":false,\"to\":\"back\",\"error\":\"no_return\",\"message\":\"x\"}", 0) == ObjectFrame::Refused);
+    auto r = o.drain_refusals();
+    CHECK(r.size() == 1 && r[0].thing == "back" && r[0].code == "no_return");
+}
+
 }  // namespace
 
 int main() {
@@ -134,6 +182,8 @@ int main() {
     test_exit_refusals();
     test_gives();
     test_ok_frame();
+    test_teleports();
+    test_travel_result_frame();
     std::printf("held: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }
