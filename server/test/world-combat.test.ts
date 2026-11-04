@@ -337,4 +337,15 @@ test('spawns: a dead monster only comes back while no hero is near its spot', ()
   sm.setHeroes([{ x: 200, y: 0, z: 0 }]); // walked off
   sm.step(50);
   assert.equal([...sm.creatures()].filter((c) => c.alive).length, 1);
+
+test('a quest reward item can be claimed only as many times as the quest gives it', async () => {
+  const { QuestRewards } = await import('../src/economy/quests.js');
+  const app = testApp();
+  const { hero } = makeHero(app);
+  const q = new QuestRewards(app.db, app.economy, app.sink, { Q_OneSword: { maxGold: 0, items: ['IronLongsword'] } }, [], {});
+  const many = q.claim(hero.id, { quest: 'Q_OneSword', gold: 0, items: ['IronLongsword', 'IronLongsword', 'IronLongsword'] });
+  assert.deepEqual(many, { ok: false, reason: 'item_not_allowed' });
+  assert.equal(app.economy.inventory(hero.id).length, 0);
+  assert.equal(q.claim(hero.id, { quest: 'Q_OneSword', gold: 0, items: ['IronLongsword'] }).ok, true);
+  assert.equal(app.economy.inventory(hero.id).length, 1);
 });

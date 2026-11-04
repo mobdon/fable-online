@@ -351,3 +351,24 @@ test('pickpocketing other heroes stays off, and the rule set is fully overridabl
   assert.equal(r.stealing.fenceRatio, 0.2);
   assert.equal(r.stealing.dailyValueCap, 2000);
 });
+
+test('an old payment key never pays a new fine, bribe or jail payout for free', () => {
+  const t = setup();
+  const h = t.hero(20_000);
+  const k = key();
+  t.law.record(h, 'theft', { town: 'bowerstone', value: 300 });
+  assert.equal(t.law.payFine(h, k).paid, 600);
+  const gold = t.app.economy.balance(h);
+
+  t.law.record(h, 'theft', { town: 'bowerstone', value: 300 });
+  assert.throws(() => t.law.payFine(h, k), code('key_reused'));
+  assert.ok(t.law.wantedLevel(h) > 0, 'the new crime stays open');
+  assert.throws(() => t.law.bribe(h, 'bowerstone', k), code('key_reused'));
+  assert.ok(t.law.wantedLevel(h) > 0, 'the bribe did not settle it');
+
+  t.law.record(h, 'murder', { town: 'bowerstone' });
+  t.law.sentence(h, 'caught');
+  assert.throws(() => t.law.payOut(h, k), code('key_reused'));
+  assert.ok(t.law.openSentence(h), 'still in jail');
+  assert.equal(t.app.economy.balance(h), gold, 'no gold moved and nothing was granted');
+});

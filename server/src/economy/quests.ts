@@ -92,8 +92,14 @@ export class QuestRewards {
     const renown = c.renown ?? 0;
     if (!Number.isSafeInteger(renown) || renown < 0) return reject('bad_renown');
     if (renown > (rule.maxRenown ?? 0)) return reject('over_cap');
+    // Each item at most as many times as the rule lists it: a quest that gives one sword
+    // can't be claimed as eight.
+    const left = new Map<string, number>();
+    for (const it of rule.items ?? []) left.set(it, (left.get(it) ?? 0) + 1);
     for (const it of items) {
-      if (!rule.items?.includes(it) || !this.economy.catalog.has(it)) return reject('item_not_allowed');
+      const n = left.get(it) ?? 0;
+      if (n === 0 || !this.economy.catalog.has(it)) return reject('item_not_allowed');
+      left.set(it, n - 1);
       if (this.economy.catalog.get(it).staffOnly) {
         this.events.emit({ type: 'staff_item_blocked', heroId, defId: it, action: `quest:${c.quest}`, actor: `hero:${heroId}` });
         return reject('item_not_allowed');

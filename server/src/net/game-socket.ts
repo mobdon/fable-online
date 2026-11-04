@@ -205,6 +205,9 @@ export class GameSocket {
   private law(heroId: number, m: LawRequest): void {
     const { app } = this;
     const ch = app.director.channelOf(heroId)?.sim.law;
+    // Ledger keys are global: scope the client's key to this hero and action, so it can never
+    // match (and so replay or block) another hero's payment, loot or quest claim.
+    const key = 'key' in m ? `law:${heroId}:${m.a}:${m.key}` : '';
     try {
       switch (m.a) {
         case 'weapon':
@@ -215,18 +218,18 @@ export class GameSocket {
           return ch?.report(heroId, m.kind, m.value);
         case 'steal': {
           if (!ch) throw new GameError('no_law', 'Nothing to steal here', 409);
-          const r = ch.steal(heroId, m.shop, m.def, { pickpocket: m.pickpocket, clientSpotted: m.spotted }, m.key);
+          const r = ch.steal(heroId, m.shop, m.def, { pickpocket: m.pickpocket, clientSpotted: m.spotted }, key);
           return this.send({ t: 'law_steal', spotted: r.spotted, item: r.itemId });
         }
         case 'answer':
           if (!ch) throw new GameError('no_prompt', 'Nobody is asking you anything', 409);
-          return ch.answer(heroId, m.choice, m.key);
+          return ch.answer(heroId, m.choice, key);
         case 'fence':
-          return this.send({ t: 'law_fenced', ...app.law.fence(heroId, m.item, m.key) });
+          return this.send({ t: 'law_fenced', ...app.law.fence(heroId, m.item, key) });
         case 'payout':
-          return this.send({ t: 'law_released', ...app.law.payOut(heroId, m.key) });
+          return this.send({ t: 'law_released', ...app.law.payOut(heroId, key) });
         case 'warden':
-          return this.send({ t: 'law_warden', ...app.law.warden(heroId, m.key) });
+          return this.send({ t: 'law_warden', ...app.law.warden(heroId, key) });
         case 'status':
           return app.law.pushStatus(heroId);
       }
