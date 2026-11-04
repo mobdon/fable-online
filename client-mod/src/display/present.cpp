@@ -84,9 +84,10 @@ void adjust_present(IDirect3D9* d3d, UINT adapter, D3DPRESENT_PARAMETERS* pp, HW
         pp->FullScreen_RefreshRateInHz = 0;
         if (pp->SwapEffect == D3DSWAPEFFECT_FLIP) pp->SwapEffect = D3DSWAPEFFECT_DISCARD;
         if (!pp->hDeviceWindow) pp->hDeviceWindow = window;
+        // The window is restyled after the device exists (fix_window): Fable's window code
+        // isn't ready for size messages while its device is being created.
         g_game_w = pp->BackBufferWidth;
         g_game_h = pp->BackBufferHeight;
-        style_window(window ? window : pp->hDeviceWindow, pp->BackBufferWidth, pp->BackBufferHeight);
     }
     if (!pp->Windowed && d3d && cfg.refresh_hz != 0) {
         // Highest rate the monitor offers at this resolution (or the one asked for in the ini).
@@ -110,9 +111,18 @@ void adjust_present(IDirect3D9* d3d, UINT adapter, D3DPRESENT_PARAMETERS* pp, HW
             pp->FullScreen_RefreshRateInHz, interval_name(pp->PresentationInterval));
 }
 
+std::atomic<bool> g_restyling{false};
+
 void fix_window(HWND window) {
-    if (g_game_w && g_game_h) style_window(window, g_game_w, g_game_h);
+    if (!g_game_w || !g_game_h || !window) return;
+    // The game never sees the size and style messages this sends (see restyling()).
+    g_restyling = true;
+    style_window(window, g_game_w, g_game_h);
+    g_restyling = false;
+    fo::log("display: window restyled for %ux%u", g_game_w, g_game_h);
 }
+
+bool restyling() { return g_restyling.load(); }
 
 void before_present(IDirect3DDevice9* dev) {
     // Wait for the GPU to finish the previous frame before handing it this one, so the

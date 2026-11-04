@@ -408,6 +408,7 @@ bool map_key(WPARAM vk, ui::Key& k) {
 
 LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     const Config& cfg = config();
+    if (display::restyling()) return DefWindowProcW(h, msg, w, l);
     if (menu::active() && menu::on_message(h, msg, w, l)) return 0;
     if (cfg.chat_enabled && cfg.overlay_enabled) {
         static wchar_t high_surrogate = 0;
@@ -527,9 +528,9 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, H
                                D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
     display::adjust_present(d3d, adapter, pp, focus ? focus : (pp ? pp->hDeviceWindow : nullptr), "start");
     HRESULT hr = o_CreateDevice(d3d, adapter, type, focus, flags, pp, out);
-    if (SUCCEEDED(hr)) display::fix_window(focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
-    else display::log_failure("CreateDevice", hr);
+    if (FAILED(hr)) display::log_failure("CreateDevice", hr);
     if (SUCCEEDED(hr) && out && *out) hook_device(*out, focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
+    if (SUCCEEDED(hr)) display::fix_window(g_hwnd ? g_hwnd : focus);   // after hook_window, so the game misses the resize
     if (SUCCEEDED(hr) && pp) display::on_backbuffer(pp->BackBufferWidth, pp->BackBufferHeight, pp->hDeviceWindow ? pp->hDeviceWindow : focus);
     return hr;
 }

@@ -84,12 +84,12 @@ void config_load(HMODULE self) {
         int w = 0, h = 0;
         if (swscanf(res.c_str(), L"%dx%d", &w, &h) == 2 && w >= 640 && h >= 480 && w <= 16384 && h <= 16384) { c.res_w = w; c.res_h = h; }
     }
-    std::wstring hz = ini_str(f, L"display", L"refresh", L"max");
+    std::wstring hz = ini_str(f, L"display", L"refresh", L"game");
     c.refresh_hz = hz == L"max" ? -1 : hz == L"game" ? 0 : _wtoi(hz.c_str());
-    if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = -1;
+    if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = 0;
     std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
     c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
-    std::wstring hs = ini_str(f, L"display", L"hud_scale", L"auto");
+    std::wstring hs = ini_str(f, L"display", L"hud_scale", L"off");
     c.hud_scale = hs == L"auto" ? 0.0f : hs == L"off" ? -1.0f : static_cast<float>(_wtof(hs.c_str()));
     if (c.hud_scale > 4.0f) c.hud_scale = 4.0f;
     c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);

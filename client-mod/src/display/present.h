@@ -11,6 +11,8 @@ namespace fo::display {
 void adjust_present(IDirect3D9* d3d, UINT adapter, D3DPRESENT_PARAMETERS* pp, HWND window, const char* when);
 // Re-applies the window style after the device exists (the game may restyle it).
 void fix_window(HWND window);
+// True while fix_window is changing the window; the window hook keeps those messages from the game.
+bool restyling();
 // Call around the game's Present: limits how far the CPU runs ahead of the GPU (mouse lag)
 // and measures the frame rate.
 void before_present(IDirect3DDevice9* dev);
