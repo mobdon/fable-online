@@ -89,6 +89,26 @@ reference to the target thing, so driving a puppet with it needs a second thing 
 
 ## Playing animations (used by the puppets)
 
+**Correction (in-game test):** a `CREATURE_HERO` thing has no `CTCScriptedControl`. Components
+come from the def through a registry by name (`0x004EFFB4` registers the factory `0x004D311E`
+as "CTCScriptedControl"), and the hero's def does not list it. Bit `id` of the dwords at
+`thing+0x20` says which components a thing has (bit 31 of +0x20 is 0x1F). So the puppets skip
+the scripted queue and do what `CActionPlayAnimation::Update` (`0x00712900`) does, on the
+creature itself:
+
+| What | Address | Shape |
+| --- | --- | --- |
+| refuse new actions now | `0x0085F0C0` | `CThing::() -> bool` |
+| animation by name | `0x00662D80` | `CThing::(CCharString*, int -1) -> anim`, `ret 8` |
+| creature play-animation action | `0x008425E0` | ctor, 0xB4 bytes: `(creature, anim, b, looping, loops, out[2], b, global, b, 0, seq)` |
+| set as the current action | `0x006644F0` | `CThing::(action*) -> bool`, keeps a clone (action vtable +0x2C) |
+| queue behind the current one | `0x00664490` | `CThing::(action*)`, keeps a clone |
+| current action | `thing+0x100` | its byte +0x61 set = finished |
+
+The caller deletes its own action afterwards (vtable slot 0 with 1), as the engine does.
+
+The scripted-control path below is still right for creatures whose def has the component.
+
 The handle is not needed: every handle slot finds the thing's `CTCScriptedControl`
 (component id 0x1F, vtable `0x012658E4`) and queues an action on it. The mod does the same.
 
