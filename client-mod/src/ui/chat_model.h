@@ -49,6 +49,12 @@ public:
     void system(const std::string& text, double now, uint32_t color = kColorSystem);
 
     std::vector<std::string> take_outbox();    // JSON lines, without the trailing newline
+    // Party requests and party chat: these go to the world server, which owns parties
+    // (server/src/party/parties.ts), not to the chat service.
+    std::vector<std::string> take_world_outbox();
+    // A party chat line from the world server, and the party's own notices.
+    void party_line(const std::string& from, const std::string& text, double now);
+    void party_note(const std::string& text, double now, bool error = false);
     std::vector<VisibleLine> visible(size_t rows, double now) const;
 
     std::string input_utf8() const;
@@ -86,6 +92,8 @@ private:
     void push(std::string text, uint32_t color, double now, uint8_t tabs = 0xFF);
     void send_say(const std::string& ch, const std::string& text);
     void send_whisper(const std::string& to, const std::string& text);
+    void send_party(const char* op, const std::string& name = "", const std::string& text = "");
+    bool party_command(const std::string& cmd, std::string rest, double now, bool after_party);
     void remember_contact(const std::string& name);
 
     bool open_ = false;
@@ -100,6 +108,7 @@ private:
     std::vector<std::u32string> history_;
     size_t history_pos_ = 0;
     std::vector<std::string> outbox_;
+    std::vector<std::string> world_outbox_;
     bool tags_enabled_ = true;
     ChatTab tab_ = ChatTab::All;
     uint8_t unread_ = 0;

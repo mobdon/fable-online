@@ -12,11 +12,14 @@
 #include "game/hook.h"
 #include "game/puppet.h"
 #include "game/spawns.h"
+#include "game/spirits.h"
 #include "game/thing.h"
 #include "game/things.h"
 #include "log.h"
 #include "net/world_client.h"
 #include "overlay/overlay.h"
+#include "ui/json.h"
+#include "ui/party_model.h"
 #include "world/entities.h"
 #include "world/health.h"
 #include "world/held.h"
@@ -62,6 +65,9 @@ struct State {
     /** The local hero object last tick; a new one means Fable rebuilt the area. */
     uintptr_t lastHero = 0;
     std::unique_ptr<game::PuppetPool> puppets;
+    /** Party members (not this player) by hero id, with their colour slot, from the last party frame. */
+    std::vector<std::pair<uint32_t, int>> party;
+    game::PartySpirits spirits;
     bool reportPos = true;
     /** What the server said it does with position reports ("off" until the welcome says). */
     std::string serverMove = "off";
@@ -109,8 +115,51 @@ void on_disconnected(const std::string& why) {
     // Nobody will answer what is held: let Fable carry on by itself.
     g_state->held.release_all("offline");
     g_state->puppets->clear_all();
+    g_state->party.clear();
+    g_state->spirits.clear_all();
+    overlay::clear_party();
     // With no server driving them, the local generators should run the region again.
     game::spawns::restore();
+}
+
+/** Party frames: the chat and the party list show them; the member list drives the markers. */
+void on_party_frame(const std::string& json) {
+    State& s = *g_state;
+    overlay::post_world_frame(json);
+    if (json.rfind("{\"t\":\"party\"", 0) != 0) return;
+    fo::json::Value m;
+    if (!fo::json::parse(json, m)) return;
+    s.party.clear();
+    for (auto& [id, slot] : ui::party_slots(m))
+        if (id != s.ownId) s.party.emplace_back(id, slot);
+    s.spirits.set_members(s.party);
+    fo::log("sync: party now has %u other member(s)", static_cast<unsigned>(s.party.size()));
+}
+
+/** Party requests typed in the chat go out over the world connection. */
+void send_party_requests() {
+    std::vector<std::string> out = overlay::take_world_requests();
+    if (out.empty()) return;
+    if (!net::world_connected()) {
+        overlay::post_world_frame("{\"t\":\"party_error\",\"error\":\"offline\",\"message\":\"Not connected to the realm.\"}");
+        return;
+    }
+    for (const std::string& f : out) net::world_send(f);
+}
+
+/** Where party members' stand-ins are, for the overlay's orbs and the spirits. */
+void mark_party(const std::vector<world::Pose>& poses, uint32_t nowMs) {
+    State& s = *g_state;
+    std::vector<ui::PartyMark> marks;
+    if (!s.party.empty()) {
+        for (const world::Pose& p : poses) {
+            if (p.kind != world::Kind::Hero) continue;
+            for (auto& [id, slot] : s.party)
+                if (id == p.id) marks.push_back({p.id, slot, p.x, p.y, p.z});
+        }
+    }
+    overlay::set_party_marks(std::move(marks));
+    s.spirits.sync(poses, !s.puppets->holding(nowMs) && game::local_hero() != 0, nowMs);
 }
 
 void handle_frame(const std::string& json, uint32_t nowMs) {
@@ -201,6 +250,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         // No entity id carries across a region, and the hero object is rebuilt.
         s.table.clear();
         s.puppets->clear_all();
+        s.spirits.clear_all();
         game::forget_hero();
         s.reporter.reset();
         s.lastArea = 0;
@@ -212,6 +262,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         return;
     }
     case world::FrameType::Unknown:
+        if (json.rfind("{\"t\":\"party", 0) == 0) return on_party_frame(json);
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         return;
@@ -450,9 +501,12 @@ void tick() {
     sync_objects(now);
     apply_health(now);
 
+    send_party_requests();
     auto spawned = s.table.drain_spawned();
     auto removed = s.table.drain_removed();
-    s.puppets->sync(spawned, removed, s.table.poses(now), now);
+    auto poses = s.table.poses(now);
+    s.puppets->sync(spawned, removed, poses, now);
+    mark_party(poses, now);
     drive_test_puppet(now);
 
     if (now - s.lastStatusMs >= kStatusMs) {
@@ -479,6 +533,8 @@ void start() {
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
     s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
+    // Fable's co-op spirit creatures over party members: never run in game yet, so opt-in.
+    s.spirits.set_enabled(env_flag("FABLE_ONLINE_PARTY_SPIRITS", false));
     // Fable's PC controls attack on the left mouse button. Block has no fixed key yet, so it
     // is only sent when a key is named (FABLE_ONLINE_BLOCK_KEY, a virtual-key code).
     if (const char* v = std::getenv("FABLE_ONLINE_ATTACK_KEY")) s.attackVk = std::atoi(v);
@@ -512,6 +568,7 @@ void stop() {
     net::world_stop();
     game::things::remove();
     if (g_state) {
+        g_state->spirits.clear_all();
         g_state->puppets->clear_all();
         game::spawns::restore();
         delete g_state;
