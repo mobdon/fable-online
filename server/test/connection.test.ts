@@ -437,3 +437,33 @@ test('a refused exit the client takes anyway lets its one jump through, for a wh
   late.allowJump(0, 10_000);
   assert.equal(late.check(at(0), at(300), 11_000).ok, false, 'not after the window');
 });
+
+test('following never moves a hero into the region they are already in, whatever its level names', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'fo-regions-')), 'regions.json');
+  // A level script that shares its name with another graph region: canonical() of the
+  // channel's name is not the channel's name.
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      maps: [
+        { uid: 1, script: 'HeroGuildComplex', sea: false, region: 'HeroGuildComplexInside', x: 4576, y: 3552, w: 256, h: 224 },
+        { uid: 2, script: 'BowerstoneSlums_v2', sea: false, region: 'BowerstoneSlums', x: 3744, y: 4224, w: 256, h: 160 },
+        { uid: 4, script: 'BowerstoneSlums', sea: false, region: 'BowerstoneSouth', x: 3000, y: 3000, w: 10, h: 10 },
+      ],
+      graph: { HeroGuildComplexInside: ['LookoutPoint'], BowerstoneSlums: ['LookoutPoint'], BowerstoneSouth: ['LookoutPoint'], LookoutPoint: ['HeroGuildComplex', 'BowerstoneSlums'] },
+    }),
+  );
+  const app = testApp({ regionsPath: file });
+  const { hero } = makeHero(app);
+  const frames: string[] = [];
+  app.director.join(app.heroes.get(hero.id)!, link(hero.id, 'Mob', frames));
+  assert.equal(app.director.follow(hero.id, at(3947, 4286, 20))?.region.name, 'BowerstoneSlums');
+  const enters = () => frames.filter((f) => JSON.parse(f).t === 'enter_region').length;
+  const n = enters();
+  for (let i = 0; i < 3; i++) assert.equal(app.director.follow(hero.id, at(3950 + i, 4286, 20)), undefined);
+  assert.equal(enters(), n, 'no enter_region loop');
+  app.close();
+});

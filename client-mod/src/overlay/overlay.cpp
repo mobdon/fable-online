@@ -12,6 +12,7 @@
 #include "../config.h"
 #include "../display/frame_probe.h"
 #include "../display/hud_scale.h"
+#include "../display/mouse_look.h"
 #include "../display/present.h"
 #include "../display/widescreen.h"
 #include "../log.h"

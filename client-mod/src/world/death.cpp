@@ -17,6 +17,7 @@ DeathView::Step DeathView::update(float serverHealth, float serverMax, bool load
             sinceMs_ = downMs_ = nowMs;
             gate_.clear();
             travelPending_ = sawLoading_ = false;
+            aliveSinceMs_ = 0;
             s.fell = true;
         }
         return s;
@@ -28,11 +29,17 @@ DeathView::Step DeathView::update(float serverHealth, float serverMax, bool load
             s.travel = true;
             return s;
         }
-        // Back up where they fell (a phial), or the server gave up on us: rise here.
-        if ((serverMax > 0 && serverHealth > 0) || nowMs - downMs_ >= kDeathGiveUpMs) {
+        // Back up where they fell (a phial), or the server gave up on us: rise here. Not at
+        // once: a respawn move may be on its way right behind the revive.
+        if (serverMax > 0 && serverHealth > 0) {
+            if (!aliveSinceMs_) aliveSinceMs_ = nowMs ? nowMs : 1;
+        } else {
+            aliveSinceMs_ = 0;
+        }
+        if ((aliveSinceMs_ && nowMs - aliveSinceMs_ >= kRiseGraceMs) || nowMs - downMs_ >= kDeathGiveUpMs) {
             phase_ = Phase::Rising;
             sinceMs_ = nowMs;
-            s.rose = true;
+            s.rose = s.roseInPlace = true;
         }
         return s;
     case Phase::Moving:
@@ -49,12 +56,15 @@ DeathView::Step DeathView::update(float serverHealth, float serverMax, bool load
     return s;
 }
 
-void DeathView::respawn_at(const std::string& gate, uint32_t nowMs) {
+void DeathView::respawn_at(const std::string& gate, float x, float y, uint32_t nowMs) {
     gate_ = gate;
+    tx_ = x;
+    ty_ = y;
     if (phase_ == Phase::Alive || phase_ == Phase::Rising) {
         // The tick with health 0 never reached us (a dropped frame): treat it as a death now.
         phase_ = Phase::Down;
         sinceMs_ = downMs_ = nowMs - kDeathFadeDelayMs - kDeathFadeOutMs;
+        aliveSinceMs_ = 0;
     }
     if (phase_ == Phase::Down) travelPending_ = true;
 }

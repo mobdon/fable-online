@@ -216,7 +216,9 @@ export class Director {
     const ch = this.where.get(heroId);
     if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
     const region = this.regions.locate(at.x, at.y);
-    if (!region || region === this.regions.canonical(ch.region.name)) return undefined;
+    // Compare graph names on both sides: a channel can be named by a level script whose graph
+    // region is another name, and following it to "itself" would loop (one move every report).
+    if (!region || this.regions.canonical(region) === this.regions.canonical(ch.region.name)) return undefined;
     const from = ch.region.name;
     try {
       const o = this.regions.origin(region);
