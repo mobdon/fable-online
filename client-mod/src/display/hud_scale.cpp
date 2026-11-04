@@ -14,14 +14,10 @@ constexpr int kGetRenderTarget = 38, kSetViewport = 47, kSetScissorRect = 75, kS
 using SetVertexShaderConstantF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, UINT, const float*, UINT);
 using SetScissorRect_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*);
 using SetViewport_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
-using GetCursorPos_t = BOOL(WINAPI*)(LPPOINT);
-using SetCursorPos_t = BOOL(WINAPI*)(int, int);
 
 SetVertexShaderConstantF_t o_SetVertexShaderConstantF = nullptr;
 SetScissorRect_t o_SetScissorRect = nullptr;
 SetViewport_t o_SetViewport = nullptr;
-GetCursorPos_t o_GetCursorPos = nullptr;
-SetCursorPos_t o_SetCursorPos = nullptr;
 
 char g_status[200] = "not installed";
 volatile int32_t* g_virtual = nullptr;      // [0] width, [1] height inside the code block
@@ -101,33 +97,6 @@ HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     return o_SetViewport(d, v);
 }
 
-POINT client_origin() {
-    POINT o = {0, 0};
-    if (HWND w = game_window()) ClientToScreen(w, &o);
-    return o;
-}
-
-BOOL WINAPI hk_GetCursorPos(LPPOINT p) {
-    BOOL ok = o_GetCursorPos(p);
-    if (ok && p && active()) {
-        const float s = g_scale.load();
-        POINT o = client_origin();
-        p->x = o.x + static_cast<LONG>(std::lround((p->x - o.x) / s));
-        p->y = o.y + static_cast<LONG>(std::lround((p->y - o.y) / s));
-    }
-    return ok;
-}
-
-BOOL WINAPI hk_SetCursorPos(int x, int y) {
-    if (active()) {
-        const float s = g_scale.load();
-        POINT o = client_origin();
-        x = o.x + static_cast<int>(std::lround((x - o.x) * s));
-        y = o.y + static_cast<int>(std::lround((y - o.y) * s));
-    }
-    return o_SetCursorPos(x, y);
-}
-
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
@@ -158,13 +127,10 @@ void install() {
     std::memcpy(at, jump.data(), jump.size());
     VirtualProtect(at, jump.size(), old, &old);
     FlushInstructionCache(GetCurrentProcess(), at, jump.size());
-    HMODULE exe = GetModuleHandleW(nullptr);
-    if (auto o = fo::patch::iat(exe, "user32.dll", "GetCursorPos", reinterpret_cast<void*>(hk_GetCursorPos)))
-        o_GetCursorPos = reinterpret_cast<GetCursorPos_t>(o);
-    if (auto o = fo::patch::iat(exe, "user32.dll", "SetCursorPos", reinterpret_cast<void*>(hk_SetCursorPos)))
-        o_SetCursorPos = reinterpret_cast<SetCursorPos_t>(o);
-    std::snprintf(g_status, sizeof g_status, "HUD scaling ready (cursor hooks %s/%s)", o_GetCursorPos ? "yes" : "no",
-                  o_SetCursorPos ? "yes" : "no");
+    // The cursor is left alone: Fable's CMouseDX reads movement as GetCursorPos minus the
+    // window centre and warps the cursor back with SetCursorPos every update, so remapping
+    // those calls only rounded small moves away and could pin the warp at the screen edge.
+    std::snprintf(g_status, sizeof g_status, "HUD scaling ready");
 }
 
 void set_screen(UINT w, UINT h, HWND window) {
