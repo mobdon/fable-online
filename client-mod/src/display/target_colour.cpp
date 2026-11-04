@@ -59,6 +59,7 @@ void log_table() {
 }
 
 int __stdcall adjust(int kind, uint8_t* cursor) {
+    if (!config().red_target) return kind;   // read live: the mod settings screen can change it
     if (!g_table_logged) log_table();
     int out = kind;
     int mode = -1;
@@ -85,7 +86,6 @@ void put32(uint8_t* p, uint32_t v) { std::memcpy(p, &v, 4); }
 }  // namespace
 
 void install() {
-    if (!config().red_target) return;
     if (!readable(kSite, sizeof kOriginal) || std::memcmp(reinterpret_cast<const void*>(kSite), kOriginal, sizeof kOriginal) != 0) {
         std::snprintf(g_status, sizeof g_status, "red target: code not where expected, left as is");
         return;
@@ -122,7 +122,7 @@ void install() {
     std::memcpy(at, jump, sizeof jump);
     VirtualProtect(at, sizeof jump, old, &old);
     FlushInstructionCache(GetCurrentProcess(), at, sizeof jump);
-    std::snprintf(g_status, sizeof g_status, "red target: creatures targeted in combat mode shown as enemies");
+    std::snprintf(g_status, sizeof g_status, config().red_target ? "red target: creatures targeted in combat mode shown as enemies" : "red target: ready, off in settings");
 }
 
 const char* status() { return g_status; }

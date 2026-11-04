@@ -91,8 +91,13 @@ float wrap_turn(float t) {
     while (t < -0.5f) t += 1.0f;
     return t;
 }
+}  // namespace
+void sync_aim();
+namespace {
+
 void __fastcall hk_update(void* self, void*) {
     ++g_updates;
+    sync_aim();
     if (!g_chain_logged.exchange(true)) {
         // Once: return addresses in Fable.exe on the stack, to trace the loop that runs the camera.
         const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
@@ -177,16 +182,27 @@ void install_assist() {
     std::snprintf(g_assist_status, sizeof g_assist_status, "camera assist: off (only the mouse turns the camera)");
 }
 
+bool g_aim_ok = false, g_aim_on = false;
+
+// Applies [display] aim_at_crosshair as it is now; called at start and on each camera update
+// (game thread, so the targeting search never runs while the bytes change).
+void sync_aim() {
+    if (!g_aim_ok || config().aim_at_crosshair == g_aim_on) return;
+    g_aim_on = config().aim_at_crosshair;
+    static const uint8_t patch[3] = {0xB2, 0x01, 0x90};  // mov dl, 1 ; nop
+    write_code(kAimSite, g_aim_on ? patch : kAimOriginal, 3);
+    std::snprintf(g_aim_status, sizeof g_aim_status, "%s",
+                  g_aim_on ? "targeting: along the camera's view (crosshair)" : "targeting: Fable's own (hero's facing)");
+}
+
 void install_aim() {
-    if (!config().aim_at_crosshair) return;
     if (!readable(kAimSite, sizeof kAimOriginal) ||
         std::memcmp(reinterpret_cast<const void*>(kAimSite), kAimOriginal, sizeof kAimOriginal) != 0) {
         std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: code not where expected, left as is");
         return;
     }
-    const uint8_t patch[3] = {0xB2, 0x01, 0x90};  // mov dl, 1 ; nop
-    write_code(kAimSite, patch, sizeof patch);
-    std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: along the camera's view (crosshair)");
+    g_aim_ok = true;
+    sync_aim();
 }
 
 void hook_slot(uint32_t addr, uint32_t expect, void* hook, Update_t& orig) {
