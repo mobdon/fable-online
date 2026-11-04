@@ -233,9 +233,9 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
         // hero sits off the centre of the view. Positive = the hero's right, negative = left.
         const double fx = desc[3], fy = desc[4], len = std::sqrt(fx * fx + fy * fy);
         if (len > 1e-3) {
-            // Right of the view, level. Fable's world is right-handed with Z up: the engine
-            // camera's view x axis comes out as (fy, -fx) for a level forward (fx, fy).
-            const double rx = fy / len, ry = -fx / len;
+            // Right of the view, level: (-fy, fx) for a level forward (fx, fy). Checked on
+            // screen: with (fy, -fx) a negative offset put the camera over the right shoulder.
+            const double rx = -fy / len, ry = fx / len;
             desc[0] += static_cast<float>(rx * shoulder);
             desc[1] += static_cast<float>(ry * shoulder);
             ++g_shoulder_frames;
