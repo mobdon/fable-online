@@ -6,6 +6,7 @@ import type { EventSink } from '../analytics/events.js';
 import { GameError } from '../errors.js';
 import { Law } from './law.js';
 import { BARKS, TEXT, barkId, type CrimeKind, type Jurisdiction } from './rules.js';
+import { inAnyZone, type TownZone } from '../world/town/zones.js';
 
 /** Villagers and traders that can witness crimes and report them to a guard. */
 export const VILLAGER_DEF = /VILLAGER|TRADER|SHOPKEEPER|BARMAN|CHILD|_WIFE|_HUSBAND|FARMER/;
@@ -91,6 +92,7 @@ export class ChannelLaw {
   private lastLevel = new Map<number, number>();
   private rng: () => number;
   private witnessSources: (() => Iterable<Creature>)[] = [];
+  private zones: TownZone[] = [];
 
   constructor(
     private ch: LawChannel,
@@ -112,6 +114,16 @@ export class ChannelLaw {
     if (t.faction !== 'hero' || !t.alive) return false;
     const c = this.cases.get(t.id);
     return !!c && c.stage === 'pursue';
+  }
+
+  /** The region's towns (from the level files). A drawn weapon outside them is nobody's business. */
+  setZones(zones: TownZone[]): void {
+    this.zones = zones;
+  }
+
+  /** In town, or near enough for the watch to care. Without zones the whole region counts. */
+  private inTown(p: { x: number; y: number }): boolean {
+    return !this.zones.length || inAnyZone(p, this.zones, 5);
   }
 
   // ---------------------------------------------------------------- reports from the mod
@@ -298,7 +310,7 @@ export class ChannelLaw {
         this.bark(g.id, BARKS.criminal);
         this.openCase(h.id, g.id);
       } else if (level >= 1 && !this.ignoring(h.id)) this.openCase(h.id, g.id);
-      else if (this.weaponOut.has(h.id) && !law.isBlind(h.id, this.town.id)) this.warn(h.id, g.id, 'weapon');
+      else if (this.weaponOut.has(h.id) && this.inTown(h.pos) && !law.isBlind(h.id, this.town.id)) this.warn(h.id, g.id, 'weapon');
       else if (this.trespassing.has(h.id) && !law.isBlind(h.id, this.town.id)) this.warn(h.id, g.id, 'trespass');
     }
   }
@@ -315,7 +327,7 @@ export class ChannelLaw {
     }
     switch (c.stage) {
       case 'warn': {
-        const still = c.warnFor === 'weapon' ? this.weaponOut.has(h.id) : this.trespassing.has(h.id);
+        const still = c.warnFor === 'weapon' ? this.weaponOut.has(h.id) && this.inTown(h.pos) : this.trespassing.has(h.id);
         if (!still) {
           this.bark(g.id, BARKS.heeded);
           return this.closeCase(c);

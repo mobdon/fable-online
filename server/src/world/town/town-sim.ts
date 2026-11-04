@@ -4,6 +4,7 @@ import type { RegionDef } from '../regions.js';
 import type { EntityState, PlayerInput, RegionSim, SimFactory, Vec3 } from '../sim.js';
 import type { TownData } from './town-data.js';
 import { NPC_ID_BASE, TownLife, type Ground, type TownOptions } from './townsfolk.js';
+import type { TownZone } from './zones.js';
 
 /** Input bits that count as a fight breaking out (same bits as combat-sim BUTTONS.ATTACK and CAST). */
 const VIOLENT_BUTTONS = (1 << 0) | (1 << 2);
@@ -19,7 +20,10 @@ export interface TownServices {
   /** Walkable ground for a region (the navmesh), if one was extracted. */
   ground?: (region: RegionDef) => Ground | undefined;
   options?: Partial<TownOptions>;
-  /** Guards posted at each village that has a guard def (CVillagePeopleDef's guard). */
+  /**
+   * Guards posted at a village that has a guard def, when the town data doesn't say how many
+   * (old extracts). New extracts carry Fable's own count (CVillagePeopleDef NumGuards).
+   */
   guardsPerVillage?: number;
 }
 
@@ -39,15 +43,25 @@ export class TownSim implements RegionSim {
     s: TownServices,
   ) {
     this.town = new TownLife(region.name, s.data, s.clock, s.ground?.(region), s.options);
-    // The town watch: guards at every village, and the town folk as witnesses.
+    const villages = s.data.regions[region.name]?.villages ?? [];
+    // The towns' ground, from the level files: where guards fight monsters and mind weapons.
+    const zones: TownZone[] = villages.filter((v) => v.zone && v.zone.length >= 3).map((v) => ({ village: v.uid, points: v.zone! }));
+    if (zones.length) inner.setTownZones?.(zones);
+    // The town watch: each village's guards on its guard beats, and the town folk as witnesses.
     if (inner.law && inner.addGuard) {
-      const per = s.guardsPerVillage ?? 2;
-      for (const v of s.data.regions[region.name]?.villages ?? []) {
-        const def = s.data.villages[v.def]?.guard;
+      for (const v of villages) {
+        const people = s.data.villages[v.def];
+        const def = people?.guard;
         if (!def) continue;
+        const per = people.numGuards ?? s.guardsPerVillage ?? 2;
+        const routes = v.guardRoutes ?? [];
         for (let i = 0; i < per; i++) {
+          const route = routes.length ? routes[i % routes.length]! : undefined;
+          // Two guards on one beat start at opposite ends.
+          const start = route ? (Math.floor(i / routes.length) % 2 ? route[route.length - 1]! : route[0]!) : undefined;
           const a = (i / per) * Math.PI * 2;
-          inner.addGuard(def, { x: v.x + Math.cos(a) * 3, y: v.y + Math.sin(a) * 3, z: v.z });
+          const at = start ?? { x: v.x + Math.cos(a) * 3, y: v.y + Math.sin(a) * 3, z: v.z };
+          inner.addGuard(def, { ...at }, route);
         }
       }
       inner.law.addWitnessSource(() =>
@@ -130,9 +144,23 @@ export class TownSim implements RegionSim {
     this.inner.refreshHero?.(heroId);
   }
 
-  addGuard(defName: string, at: Vec3): number {
+  addGuard(defName: string, at: Vec3, route?: Vec3[]): number {
     if (!this.inner.addGuard) throw new Error('this region has no town watch');
-    return this.inner.addGuard(defName, at);
+    return this.inner.addGuard(defName, at, route);
+  }
+
+  setTownZones(zones: TownZone[]): void {
+    this.inner.setTownZones?.(zones);
+  }
+
+  devDespawn(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string } {
+    if (!this.inner.devDespawn) return { error: 'This server runs no monsters (combat is off).' };
+    return this.inner.devDespawn(heroId, what);
+  }
+
+  devSpawn(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string } {
+    if (!this.inner.devSpawn) return { error: 'This server runs no monsters (combat is off).' };
+    return this.inner.devSpawn(heroId, defName, distance, side);
   }
 
   placeHero(heroId: number, at: Vec3, yaw?: number): boolean {

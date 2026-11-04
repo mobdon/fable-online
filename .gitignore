@@ -32,3 +32,4 @@ moderation.json
 events/
 ops/monitoring/.env
 shared/defs/nav/
+shared/defs/nav-regions/

@@ -32,6 +32,8 @@ export type GameEvent =
   | { type: 'xp_gain'; heroId: number; source: string; general: number; strength: number; skill: number; will: number; capped?: boolean }
   /** A trainable stat or ability level bought with experience, or refused. */
   | { type: 'xp_buy'; heroId: number; kind: 'stat' | 'ability'; id: string; level: number; cost: number; ok: boolean; reason?: string }
+  /** A monster the town watch did most of the killing on: no loot or experience for the hero. */
+  | { type: 'kill_by_watch'; heroId: number; creature: string; channelId: string }
   | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }
   | { type: 'staff_item_blocked'; heroId: number; defId: string; action: string; actor: string }

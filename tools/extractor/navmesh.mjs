@@ -188,7 +188,11 @@ function main() {
       skipped.push(`${script}: ${e.message}`);
       continue;
     }
-    const cells = lev.sections.flatMap((s) => s.cells);
+    // A level's sections are versions of the same ground: "NULL" is the normal one, the others
+    // are quest states (Q_BreakSiege ...) that reuse the same cell ids. Mixing them made cells
+    // claim the neighbours of other sections' cells, so paths ran through walls or failed.
+    const base = lev.sections.find((s) => s.name === 'NULL') ?? lev.sections[0];
+    const cells = base?.cells ?? [];
     if (cells.length === 0) {
       empty++; // sea, filler and backdrop levels have no ground to stand on
       continue;

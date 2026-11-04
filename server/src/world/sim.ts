@@ -70,7 +70,9 @@ export interface RegionSim {
    */
   combatState?(heroId: number): { alive: boolean; lastHitAt: number } | undefined;
   /** Post a town guard at a spot. Sims without a town watch leave this out. */
-  addGuard?(defName: string, at: Vec3): number;
+  addGuard?(defName: string, at: Vec3, route?: Vec3[]): number;
+  /** The towns in this region (the town layer sets them): guards fight monsters there, and a drawn weapon only matters there. */
+  setTownZones?(zones: import('./town/zones.js').TownZone[]): void;
   /**
    * Staff dev tool: spawn a hostile creature `distance` metres in front of the hero (and `side`
    * metres to its right), facing the hero. Returns
