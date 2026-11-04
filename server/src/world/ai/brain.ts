@@ -40,7 +40,28 @@ interface Brain {
   approachStop: number;
   /** Got there: hold the spot (just keep facing) until approach() is called again. */
   approachArrived: boolean;
+  /** A swing being wound up: when it lands (0 = none), what kind, at whom. */
+  swingAt: number;
+  swingStart: number;
+  swingKind: AttackKind;
+  swingTarget: number | null;
+  /** No new swing before this. */
+  recoverUntil: number;
+  /** Swings left in the current flurry. */
+  comboLeft: number;
+  /** The strike pose is held until this. */
+  strikeUntil: number;
+  /** Going home because it was dragged off its patch (heals on arrival), not because the fight ended. */
+  leashed: boolean;
 }
+
+/** How long the strike pose is held after a swing lands, so the next swing reads as a new one. */
+const FOLLOW_THROUGH_MS = 300;
+/**
+ * Like Fable, only a couple of creatures swing at one hero at a time; the rest of the
+ * group circles close by, waiting for an opening, so a crowd doesn't land every hit at once.
+ */
+const MAX_SWINGING = 2;
 
 /**
  * Runs every creature in one channel. Decides where creatures go and when they swing;
@@ -53,7 +74,12 @@ interface Brain {
  *
  * Leash: a creature dragged further than profile.leash from its spawn point stops
  * fighting, runs home ignoring damage, and heals to full. That closes the "pull it to
- * town and kite it" exploits.
+ * town and kite it" exploits. A creature whose fight simply ended (its target died or got
+ * away) walks home keeping its wounds.
+ *
+ * Melee follows Fable's rhythm: a visible wind-up before each swing (a flinch cancels it,
+ * and the hit only lands if the target is still in reach and in front), a flurry of one or
+ * two swings, then a pause spent circling with the guard up.
  */
 export class AiDirector implements AiHooks {
   private brains = new Map<number, Brain>();
@@ -94,6 +120,14 @@ export class AiDirector implements AiHooks {
       approachId: null,
       approachStop: 2,
       approachArrived: false,
+      swingAt: 0,
+      swingStart: 0,
+      swingKind: 'light',
+      swingTarget: null,
+      recoverUntil: 0,
+      comboLeft: 0,
+      strikeUntil: 0,
+      leashed: false,
     };
     c.anim = Anim.Idle;
     this.brains.set(c.id, b);
@@ -118,6 +152,7 @@ export class AiDirector implements AiHooks {
     const b = this.brains.get(creatureId);
     if (!b) return;
     b.state = 'dead';
+    b.swingAt = 0;
     b.c.anim = Anim.Death;
     b.c.targetId = null;
     b.path = [];
@@ -202,7 +237,19 @@ export class AiDirector implements AiHooks {
         b.blockUntil = 0;
         this.world.combat.setBlocking(b.c.id, false);
       }
-      if (b.c.stunnedMs > 0) continue; // staggered: combat owns the animation
+      if (b.c.stunnedMs > 0) {
+        // Staggered: combat owns the animation, and a swing being wound up is lost.
+        if (b.swingAt) this.cancelSwing(b);
+        continue;
+      }
+      if (b.swingAt && this.now >= b.swingAt) this.land(b);
+      else if (b.swingAt) {
+        // Track the target through the first part of the wind-up, then commit to the line.
+        const t = b.swingTarget === null ? undefined : this.findTarget(b.swingTarget);
+        if (t && this.now - b.swingStart < (b.swingAt - b.swingStart) * 0.6) this.face(b, t.pos);
+      } else if (b.c.anim === Anim.Attack && this.now >= b.strikeUntil && b.state === 'attack') {
+        b.c.anim = Anim.Alert; // swing over: back to the guard stance, so the next swing reads as new
+      }
       if (this.now >= b.nextThink) {
         b.nextThink = this.now + THINK_MS;
         this.think(b);
@@ -266,7 +313,7 @@ export class AiDirector implements AiHooks {
         }
         if (dist(b.c.pos, b.home) > b.p.leash) {
           b.approachId = null;
-          return this.goHome(b);
+          return this.goHome(b, true);
         }
         const d = dist(b.c.pos, t.pos);
         if (b.approachArrived) {
@@ -283,7 +330,8 @@ export class AiDirector implements AiHooks {
         if (!b.goal) {
           if (dist(b.c.pos, b.home) > 1.5) this.goTo(b, b.home, b.p.runSpeed, Anim.Run);
           else {
-            b.c.health = b.c.maxHealth;
+            if (b.leashed) b.c.health = b.c.maxHealth;
+            b.leashed = false;
             b.threat.clear();
             b.lastSeen.clear();
             b.fled = false;
@@ -301,7 +349,8 @@ export class AiDirector implements AiHooks {
 
   private fight(b: Brain): void {
     const p = b.p;
-    if (dist(b.c.pos, b.home) > p.leash) return this.goHome(b);
+    if (dist(b.c.pos, b.home) > p.leash) return this.goHome(b, true);
+    if (b.swingAt) return; // mid wind-up: committed
     this.refreshThreat(b);
     const t = this.pickTarget(b);
     if (!t) return this.disengage(b);
@@ -315,6 +364,7 @@ export class AiDirector implements AiHooks {
     if (b.state === 'strafe') {
       if (this.now < b.stateUntil && d < p.attackRange + 4) {
         this.circle(b, t.pos);
+        this.maybeBlock(b, t);
         return;
       }
       b.state = 'chase';
@@ -335,23 +385,18 @@ export class AiDirector implements AiHooks {
       b.state = 'attack';
       this.stop(b);
       this.face(b, t.pos);
-      if (b.c.attackCooldownMs <= 0) {
-        if (b.c.blocking) {
-          this.world.combat.setBlocking(b.c.id, false);
-          b.blockUntil = 0;
-        }
-        const kind = this.pickAttack(p);
-        b.c.anim = Anim.Attack;
-        this.world.combat.attack(b.c.id, t.id, kind);
-        if (p.circles) {
+      if (b.c.attackCooldownMs <= 0 && this.now >= b.recoverUntil && !b.blockUntil) {
+        if (p.preferredRange === 0 && this.swingingAt(t.id, b) >= MAX_SWINGING) {
+          // Wait its turn: step round the hero with its guard up.
           b.state = 'strafe';
-          b.stateUntil = this.now + 800 + this.rng() * 700;
-          if (this.rng() < 0.3) b.strafeDir = b.strafeDir === 1 ? -1 : 1;
+          b.stateUntil = this.now + 600 + this.rng() * 600;
+          b.recoverUntil = b.stateUntil;
+          return;
         }
-      } else if (p.blockChance > 0 && !b.c.blocking && this.rng() < p.blockChance) {
-        this.world.combat.setBlocking(b.c.id, true);
-        b.c.anim = Anim.Block;
-        b.blockUntil = this.now + 700;
+        if (b.comboLeft <= 0) b.comboLeft = 1 + Math.floor(this.rng() * Math.max(1, p.comboMax));
+        this.windUp(b, t);
+      } else if (!b.c.blocking && b.c.anim !== Anim.Attack) {
+        if (!this.maybeBlock(b, t) && b.c.anim !== Anim.Block) b.c.anim = Anim.Alert;
       }
       return;
     }
@@ -367,6 +412,69 @@ export class AiDirector implements AiHooks {
     // Re-path when the target has moved off the end of our path, or every second.
     const dest = this.slot(b, t.pos);
     if (!b.goal || dist(b.goal, dest) > 1.5 || this.now >= b.repathAt) this.goTo(b, dest, p.runSpeed, Anim.Run);
+  }
+
+  /** Other melee creatures winding up or mid-flurry against this target. */
+  private swingingAt(targetId: number, self: Brain): number {
+    let n = 0;
+    for (const o of this.brains.values())
+      if (o !== self && o.p.preferredRange === 0 && o.c.targetId === targetId && (o.swingAt || o.comboLeft > 0)) n++;
+    return n;
+  }
+
+  /** Start a swing: the strike animation plays now, the hit is decided when it lands. */
+  private windUp(b: Brain, t: Combatant): void {
+    if (b.c.blocking) this.world.combat.setBlocking(b.c.id, false);
+    b.blockUntil = 0;
+    const kind = this.pickAttack(b.p);
+    b.swingKind = kind;
+    b.swingTarget = t.id;
+    b.swingStart = this.now;
+    b.swingAt = this.now + (b.p.windupMs[kind] ?? b.p.windupMs.light ?? 450);
+    b.c.anim = Anim.Attack;
+  }
+
+  /** The swing lands: combat checks reach, facing and blocks at this moment. */
+  private land(b: Brain): void {
+    const target = b.swingTarget;
+    const kind = b.swingKind;
+    b.swingAt = 0;
+    b.swingTarget = null;
+    b.comboLeft = Math.max(0, b.comboLeft - 1);
+    b.strikeUntil = this.now + FOLLOW_THROUGH_MS;
+    if (target !== null) this.world.combat.attack(b.c.id, target, kind);
+    if (b.comboLeft > 0) {
+      // The next swing of the flurry follows the follow-through.
+      b.recoverUntil = this.now + FOLLOW_THROUGH_MS + 100;
+      return;
+    }
+    b.recoverUntil = this.now + this.between(b.p.recoverMs);
+    if (b.p.circles && b.p.preferredRange === 0) {
+      b.state = 'strafe';
+      b.stateUntil = b.recoverUntil;
+      if (this.rng() < 0.4) b.strafeDir = b.strafeDir === 1 ? -1 : 1;
+    }
+  }
+
+  private cancelSwing(b: Brain): void {
+    b.swingAt = 0;
+    b.swingTarget = null;
+    b.comboLeft = 0;
+    // Knocked out of its swing: it needs a moment before trying again.
+    b.recoverUntil = Math.max(b.recoverUntil, this.now + 400);
+  }
+
+  /** Between swings: raise the guard now and then, and more often when the target is winding up. */
+  private maybeBlock(b: Brain, t: Combatant): boolean {
+    const p = b.p;
+    if (b.c.blocking || b.blockUntil || dist(b.c.pos, t.pos) > p.attackRange + 2.5) return false;
+    const windingUp = ((t as { chargeMs?: number }).chargeMs ?? 0) > 0;
+    const chance = windingUp ? Math.max(p.reactBlockChance, p.blockChance) : p.blockChance * 0.5;
+    if (chance <= 0 || this.rng() >= chance) return false;
+    this.world.combat.setBlocking(b.c.id, true);
+    b.c.anim = Anim.Block;
+    b.blockUntil = this.now + 600 + this.rng() * 500;
+    return true;
   }
 
   /** Notice a target: a short alert pause (or none when hit) and then the chase. */
@@ -415,8 +523,12 @@ export class AiDirector implements AiHooks {
     this.goHome(b);
   }
 
-  private goHome(b: Brain): void {
+  private goHome(b: Brain, leashed = false): void {
     b.state = 'return';
+    b.leashed = b.leashed || leashed;
+    b.swingAt = 0;
+    b.swingTarget = null;
+    b.comboLeft = 0;
     b.approachId = null;
     b.c.targetId = null;
     if (b.c.blocking) this.world.combat.setBlocking(b.c.id, false);
@@ -572,6 +684,12 @@ export class AiDirector implements AiHooks {
       return;
     }
     const path = nav.findPath(b.c.pos, p);
+    if (!path && !nav.nearestCell(b.c.pos.x, b.c.pos.y, 2)) {
+      // Off the ground data (a bridge or ledge the level files don't cover): walk straight
+      // rather than freeze until it is back on known ground.
+      b.path = [b.goal];
+      return;
+    }
     if (!path) {
       b.path = [];
       b.goal = null;
@@ -613,7 +731,7 @@ export class AiDirector implements AiHooks {
       }
       const nx = c.pos.x + (dx / d) * left;
       const ny = c.pos.y + (dy / d) * left;
-      if (nav && !nav.walkable(nx, ny)) {
+      if (nav && !nav.walkable(nx, ny) && nav.walkable(c.pos.x, c.pos.y)) {
         // Something shoved us off the planned line (knockback): plan again next think.
         this.stop(b);
         b.nextThink = this.now;
@@ -624,7 +742,7 @@ export class AiDirector implements AiHooks {
       if (b.moveAnim !== Anim.Strafe) c.yaw = Math.atan2(-dx, dy);
       left = 0;
     }
-    if (nav) c.pos.z = nav.heightAt(c.pos.x, c.pos.y);
+    if (nav && nav.walkable(c.pos.x, c.pos.y)) c.pos.z = nav.heightAt(c.pos.x, c.pos.y);
     if (c.anim !== Anim.Attack || b.path.length) c.anim = b.moveAnim;
     if (!b.path.length || dist(c.pos, b.goal) < ARRIVE) {
       b.path = [];

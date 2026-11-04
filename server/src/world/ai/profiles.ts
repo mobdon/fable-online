@@ -40,6 +40,17 @@ export interface AiProfile {
   blockChance: number;
   /** Attack mix: kind -> weight. */
   attacks: Partial<Record<AttackKind, number>>;
+  /**
+   * Wind-up before a swing lands, ms, by kind. The strike animation starts at the wind-up,
+   * so a hero who sees it coming can block, step back or hit first (a flinch cancels it).
+   */
+  windupMs: Partial<Record<AttackKind, number>>;
+  /** Pause after a swing (or the last swing of a combo) before the next one, ms [min, max]. */
+  recoverMs: [number, number];
+  /** Most swings in one flurry; each extra swing follows after a short gap. */
+  comboMax: number;
+  /** Chance per think, while recovering, to raise its guard when the target is winding up a swing. */
+  reactBlockChance: number;
 }
 
 const base: AiProfile = {
@@ -63,6 +74,10 @@ const base: AiProfile = {
   leap: null,
   blockChance: 0,
   attacks: { light: 1 },
+  windupMs: { light: 450, heavy: 900, ranged: 600 },
+  recoverMs: [1200, 2000],
+  comboMax: 1,
+  reactBlockChance: 0,
 };
 
 export const PROFILES: Record<string, AiProfile> = {
@@ -71,21 +86,31 @@ export const PROFILES: Record<string, AiProfile> = {
     ...base,
     family: 'bandit',
     runSpeed: 5.5,
-    sight: 15,
-    fov: 180,
+    sight: 22,
+    fov: 220,
+    hear: 8,
     attackRange: 2.2,
     leash: 45,
+    alertMs: 350,
     fleeAt: 0.15,
     breaksAfterDeaths: 3,
     packRadius: 14,
-    blockChance: 0.2,
-    attacks: { light: 3, heavy: 1 },
+    // Fable bandits square up: a flurry of one or two swings, then step round the hero with
+    // their guard up before going in again.
+    circles: true,
+    blockChance: 0.25,
+    reactBlockChance: 0.45,
+    attacks: { light: 5, heavy: 1 },
+    windupMs: { light: 450, heavy: 1000 },
+    recoverMs: [1300, 2300],
+    comboMax: 2,
   },
   banditArcher: {
     ...base,
     family: 'banditArcher',
     runSpeed: 5.5,
-    sight: 22,
+    sight: 26,
+    hear: 8,
     fov: 180,
     attackRange: 20,
     preferredRange: 12,
@@ -107,7 +132,12 @@ export const PROFILES: Record<string, AiProfile> = {
     fleeAt: 0.25,
     breaksAfterDeaths: 2,
     packRadius: 12,
+    blockChance: 0.1,
+    reactBlockChance: 0.2,
     attacks: { light: 4, heavy: 1 },
+    windupMs: { light: 400, heavy: 900 },
+    recoverMs: [1000, 1800],
+    comboMax: 2,
   },
   wolf: {
     ...base,
@@ -124,6 +154,8 @@ export const PROFILES: Record<string, AiProfile> = {
     packRadius: 18,
     circles: true,
     attacks: { light: 1 },
+    windupMs: { light: 350 },
+    recoverMs: [900, 1600],
   },
   balverine: {
     ...base,
@@ -141,6 +173,9 @@ export const PROFILES: Record<string, AiProfile> = {
     circles: true,
     leap: { min: 4, max: 9, speed: 15, cooldownMs: 5000 },
     attacks: { light: 2, heavy: 1 },
+    windupMs: { light: 400, heavy: 800 },
+    recoverMs: [900, 1600],
+    comboMax: 2,
   },
   /**
    * Town guards (CREATURE_BS_GUARD*, CREATURE_KHG_GUARD, CREATURE_BS_SHERIFF, prison guards).
@@ -163,7 +198,9 @@ export const PROFILES: Record<string, AiProfile> = {
     alertMs: 300,
     packRadius: 25,
     blockChance: 0.35,
+    reactBlockChance: 0.5,
     attacks: { light: 3, heavy: 1 },
+    comboMax: 2,
   },
   guardCrossbow: {
     ...base,

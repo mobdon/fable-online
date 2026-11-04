@@ -15,8 +15,11 @@ export const BALANCE = {
   strengthPerLevel: 0.15,
   /** Each Skill level adds this share to ranged damage. */
   skillPerLevel: 0.15,
-  /** Creatures use their weapon damage times their power times this. */
-  creatureScale: 2,
+  /**
+   * Creatures use their weapon damage times their power times this. At 1 a bandit leader
+   * swing takes about a tenth of a starting hero's 100 health, near Fable's own feel.
+   */
+  creatureScale: 1,
   /** Weapon damage a creature without a weapon (claws, fists) counts as. */
   creatureUnarmed: 2,
 
@@ -26,6 +29,14 @@ export const BALANCE = {
   rangedCone: Math.PI / 12,
   /** Body radius added to reach. */
   bodyRadius: 0.5,
+  /**
+   * Hero melee aims like Fable's soft lock, which turns the hero onto the nearest enemy:
+   * a wide cone, and a little extra reach for the delay between Fable's picture and the server.
+   */
+  heroMeleeCone: (Math.PI * 5) / 9,
+  heroReachSlack: 0.7,
+  /** A hero swing pressed this close to the end of the last one is held and fired when it ends. */
+  swingBufferMs: 400,
 
   cooldownMs: { light: 550, heavy: 850, unarmed: 450, ranged: 900, flourish: 1200 } as Record<string, number>,
   /** Hold attack this long and release for a flourish. */
@@ -132,11 +143,19 @@ export function facingAngle(c: Combatant): number {
   return Math.atan2(Math.cos(c.yaw), -Math.sin(c.yaw));
 }
 
+/** Melee reach (centre to centre) and half-angle for this attacker. */
+export function meleeArc(attacker: Combatant): { reach: number; cone: number } {
+  const reach = (BALANCE.reach[weaponClassKey(attacker.weapon)] ?? 2) + BALANCE.bodyRadius;
+  return attacker.kind === 'hero'
+    ? { reach: reach + BALANCE.heroReachSlack, cone: BALANCE.heroMeleeCone }
+    : { reach, cone: BALANCE.meleeCone };
+}
+
 export function inReach(attacker: Combatant, target: Combatant, ranged: boolean): boolean {
-  const key = ranged ? 'ranged' : weaponClassKey(attacker.weapon);
-  const reach = (BALANCE.reach[key] ?? 2) + BALANCE.bodyRadius;
+  const arc = ranged ? { reach: (BALANCE.reach.ranged ?? 40) + BALANCE.bodyRadius, cone: BALANCE.rangedCone } : meleeArc(attacker);
+  const reach = arc.reach;
   if (distance(attacker, target) > reach) return false;
-  const cone = ranged ? BALANCE.rangedCone : BALANCE.meleeCone;
+  const cone = arc.cone;
   return angleDiff(facingAngle(attacker), angleTo(attacker, target)) <= cone;
 }
 

@@ -46,6 +46,7 @@ export function monsterAi(nav?: NavStore): (ctx: AiContext) => ChannelAi {
         director.onSpawn(c);
       },
       onDamaged: (id, by, n) => director.onDamaged(id, by, n),
+      pursue: (id, heroId) => void director.pursue(id, heroId),
       onDeath(id) {
         director.onDeath(id);
       },
