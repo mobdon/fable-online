@@ -41,6 +41,15 @@ constexpr uintptr_t kExitTrigger = 0x00779080;    // void CTCDRegionExit::Trigge
 constexpr uintptr_t kGiveContents = 0x0074EE90;   // bool CTCContainerRewardHero::GiveToHero()
 constexpr uintptr_t kDoorPlayOpen = 0x00730C00;   // void CTCDoor::PlayOpen(bool animate)
 constexpr uintptr_t kDoorPlayClose = 0x00730DD0;  // void CTCDoor::PlayClose()
+constexpr uint32_t kTeleporterVtable = 0x0126FDA4;   // CTCTeleporter (component type 0xDD)
+/**
+ * void CTCTeleporter::TeleportHeroHere(): posts the "move the hero to this spot" world
+ * message (0x2C, the one region exits post) with the gate's position. Every gate and Guild
+ * teleport, from the gate itself or the Guild Seal, ends here.
+ */
+constexpr uintptr_t kTeleportHere = 0x007DFCF0;
+/** The teleport screen's "go back": the same message with the spot the last seal jump left. */
+constexpr uintptr_t kTeleportBack = 0x005FAD40;
 
 /** A door the hero used is reported only if the hero is this close (villagers open doors too). */
 constexpr float kDoorReportRange = 5.0f;
@@ -49,6 +58,7 @@ using ExitTriggerFn = void(FO_THISCALL*)(void*);
 using GiveFn = uint8_t(FO_THISCALL*)(void*);
 using DoorOpenFn = void(FO_THISCALL*)(void*, int);
 using DoorCloseFn = void(FO_THISCALL*)(void*);
+using TeleportFn = void(FO_THISCALL*)(void*);
 
 Stats g_stats;
 world::LevelNames g_levels;
@@ -225,6 +235,31 @@ void FO_FASTCALL door_close_hook(void* self, void*) {
     door_changed(reinterpret_cast<uintptr_t>(self), false);
 }
 
+void FO_FASTCALL teleport_hook(void* self, void*) {
+    uintptr_t comp = reinterpret_cast<uintptr_t>(self);
+    ++g_stats.teleports;
+    std::string id = id_of_component(comp);
+    if (g_hold && !id.empty()) {
+        ++g_stats.held;
+        g_events.push_back(Event{Event::Kind::Teleport, comp, id, true});
+        return;  // the jump happens when the server moves the hero (release)
+    }
+    if (!id.empty()) g_events.push_back(Event{Event::Kind::Teleport, comp, id, false});
+    reinterpret_cast<TeleportFn>(kTeleportHere)(self);
+}
+
+void FO_FASTCALL teleport_back_hook(void* self, void*) {
+    uintptr_t owner = reinterpret_cast<uintptr_t>(self);
+    ++g_stats.teleports;
+    if (g_hold && owner) {
+        ++g_stats.held;
+        g_events.push_back(Event{Event::Kind::TeleportBack, owner, "back", true});
+        return;
+    }
+    g_events.push_back(Event{Event::Kind::TeleportBack, owner, "back", false});
+    reinterpret_cast<TeleportFn>(kTeleportBack)(self);
+}
+
 struct CallSite {
     uintptr_t at;
     uintptr_t target;  // what the call goes to in the retail exe
@@ -240,6 +275,10 @@ CallSite g_sites[] = {
     {0x007310DC, kDoorPlayOpen, reinterpret_cast<void*>(&door_open_hook), false},
     {0x007310A4, kDoorPlayClose, reinterpret_cast<void*>(&door_close_hook), false},
     {0x00731152, kDoorPlayClose, reinterpret_cast<void*>(&door_close_hook), false},
+    {0x005FBD79, kTeleportHere, reinterpret_cast<void*>(&teleport_hook), false},
+    {0x005FC095, kTeleportHere, reinterpret_cast<void*>(&teleport_hook), false},
+    {0x005FC0A8, kTeleportHere, reinterpret_cast<void*>(&teleport_hook), false},
+    {0x0041F58D, kTeleportBack, reinterpret_cast<void*>(&teleport_back_hook), false},
 };
 
 /** Points the call at `site.at` to `to`, if it still calls `from` (so another exe is left alone). */
@@ -301,7 +340,7 @@ bool install() {
         else fo::log("things: call at 0x%08X is not what this mod expects; left alone", static_cast<unsigned>(s.at));
     }
     g_installed = done > 0;
-    fo::log("things: %u of %u Fable calls routed (exit, chest and search gives, doors)", done,
+    fo::log("things: %u of %u Fable calls routed (exit, chest and search gives, doors, Cullis Gates)", done,
             static_cast<unsigned>(sizeof(g_sites) / sizeof(g_sites[0])));
     return g_installed;
 }
@@ -324,7 +363,17 @@ std::vector<Event> drain_events() {
 }
 
 bool release(uintptr_t comp, world::HeldKind kind) {
+    if (kind == world::HeldKind::TeleportBack) {
+        if (!comp) return false;
+        reinterpret_cast<TeleportFn>(kTeleportBack)(reinterpret_cast<void*>(comp));
+        return true;
+    }
     uint32_t vt = r32(comp);
+    if (kind == world::HeldKind::Teleport) {
+        if (vt != kTeleporterVtable) return false;
+        reinterpret_cast<TeleportFn>(kTeleportHere)(reinterpret_cast<void*>(comp));
+        return true;
+    }
     if (kind == world::HeldKind::Exit) {
         if (vt != kExitVtable) return false;
         reinterpret_cast<ExitTriggerFn>(kExitTrigger)(reinterpret_cast<void*>(comp));

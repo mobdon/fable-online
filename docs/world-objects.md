@@ -222,7 +222,7 @@ server id is `<LevelScriptName>:<uid & 0xFFFFFFFF>` with no guessing. A componen
 is at component +4; a thing's components are a sorted vector of `{int id, CTCBase*}` at
 +0x44.
 
-Seven direct call sites inside Fable.exe go through the mod (`client-mod/src/game/things.cpp`).
+Eleven direct call sites inside Fable.exe go through the mod (`client-mod/src/game/things.cpp`).
 Each call site is checked byte for byte before it is changed, so another exe is left alone:
 
 | Call site | Fable call | What the mod does online |
@@ -230,6 +230,14 @@ Each call site is checked byte for byte before it is changed, so another exe is 
 | 0x7798F6 (`CTCDRegionExit` update, slot 9) | `Trigger` 0x779080, posts the region-change message | Holds it, sends `interact` `use`. On `enter_region` or `ok` the trigger runs and Fable loads the region; `demon_door_closed`, `locked` or `jailed` drops it; anything else, or 3 s with no answer, lets it run. |
 | 0x7507F6 (`CTCChest` update), 0x81235B (search timer) | `GiveToHero` 0x74EE90, puts gold and items in the inventory | Holds it, sends `interact` `use`. `loot` with `again:false` lets Fable hand over the chest's own contents; `again`, `gone`, `need_keys`, `need_spade` drop it; anything else, or 5 s, lets it run. |
 | 0x731094, 0x7310DC / 0x7310A4, 0x731152 (`CTCDoor` update) | `PlayOpen` 0x730C00 / `PlayClose` 0x730DD0 | Fable plays the door, and if the hero is within 5 m the mod sends `interact` `open` or `close`. |
+| 0x5FBD79 (teleport to a gate's thing, also the Guild Seal's "Guild"), 0x5FC095 / 0x5FC0A8 (teleport to a region's active gate) | `CTCTeleporter::TeleportHeroHere` 0x7DFCF0, posts the same move message (0x2C) as an exit, with the gate's position | Holds it, sends `travel` with the gate's thing id. On `enter_region` or `travel_result` ok the jump runs; a rule refusal (`locked`, `in_combat`, `cooldown`, `barred`, `wanted`, `in_prison`, `no_return`, ...) drops it; anything else, or 4 s, lets it run. |
+| 0x41F58D (teleport screen, "go back") | 0x5FAD40, the same message to the spot the last seal jump left | Held the same way, sent as `travel` `back`. |
+
+`CTCTeleporter` (vtable 0x0126FDA4, component type 0xDD; a thing with one has flag
+0x20000000 at +0x38): +0x10 active (found), +0x11 set once, +0x12 hero-inside latch, +0x1B
+open the teleport screen on the next update. The Guild teleport (0x5FBD90) looks for the
+teleporter whose def is `HERO_GUILD_TELEPORT_MARKER`; the region list (0x5FBFA0) takes the
+first active teleporter in the chosen region.
 
 `CTCDoor`: +0x10 wanted state, +0x11 shown state, +0x14 game time it opened, +0x20 def
 (+0x28 trigger type: 0 proximity, 1 used). The update plays any change between the two

@@ -398,6 +398,8 @@ const char* event_name(game::things::Event::Kind k) {
     case game::things::Event::Kind::Give: return "give";
     case game::things::Event::Kind::DoorOpened: return "door opened";
     case game::things::Event::Kind::DoorClosed: return "door closed";
+    case game::things::Event::Kind::Teleport: return "teleport to";
+    case game::things::Event::Kind::TeleportBack: return "teleport";
     }
     return "?";
 }
@@ -408,11 +410,25 @@ void send_thing_events(uint32_t nowMs) {
     using Kind = game::things::Event::Kind;
     for (const game::things::Event& e : game::things::drain_events()) {
         const char* action = e.kind == Kind::DoorOpened ? "open" : e.kind == Kind::DoorClosed ? "close" : "use";
-        world::HeldKind hk = e.kind == Kind::Exit ? world::HeldKind::Exit : world::HeldKind::Give;
+        bool teleport = e.kind == Kind::Teleport || e.kind == Kind::TeleportBack;
+        world::HeldKind hk = e.kind == Kind::Exit       ? world::HeldKind::Exit
+                             : e.kind == Kind::Teleport ? world::HeldKind::Teleport
+                             : e.kind == Kind::TeleportBack ? world::HeldKind::TeleportBack
+                                                            : world::HeldKind::Give;
         // Fable can ask again while the first one waits (a search timer runs every frame).
         if (e.held && !s.held.hold(e.comp, hk, e.id, nowMs)) continue;
         std::string frame;
-        bool sent = net::world_connected() && s.objects.request(e.id, action, nowMs, frame);
+        bool sent = false;
+        if (teleport) {
+            // Cullis Gate / Guild Seal travel: the server checks the gate, combat and the law,
+            // and moves the hero; enter_region then lets Fable's own jump go ahead.
+            if (net::world_connected() && !s.objects.loading()) {
+                frame = world::travel_frame(e.id);
+                sent = true;
+            }
+        } else {
+            sent = net::world_connected() && s.objects.request(e.id, action, nowMs, frame);
+        }
         if (sent) net::world_send(frame);
         if (s.dev || e.held) fo::log("sync: %s %s%s%s", event_name(e.kind), e.id.c_str(), e.held ? ", waiting for the server" : "",
                                      sent ? "" : " (not sent)");
@@ -430,7 +446,9 @@ void send_thing_events(uint32_t nowMs) {
 void run_decisions(uint32_t nowMs) {
     State& s = *g_state;
     for (const world::Decision& d : s.held.drain(nowMs)) {
-        const char* what = d.kind == world::HeldKind::Exit ? "exit" : "give";
+        const char* what = d.kind == world::HeldKind::Exit       ? "exit"
+                           : d.kind == world::HeldKind::Give ? "give"
+                                                             : "teleport";
         if (d.verdict == world::Verdict::Drop) {
             fo::log("sync: %s %s stopped by the server (%s)", what, d.id.c_str(), d.why.c_str());
             continue;

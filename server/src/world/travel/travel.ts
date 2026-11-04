@@ -35,6 +35,8 @@ export interface TravelRules {
   arrivalStep: number;
   /** Regions no one can teleport out of or back into (Fable's teleport barriers, prisons). */
   barred: RegExp[];
+  /** Every gate counts as found (test servers, FO_GATES_OPEN). */
+  allOpen?: boolean;
 }
 
 export const TRAVEL_RULES: TravelRules = {
@@ -119,7 +121,7 @@ export class Travel {
   list(heroId: number): Record<string, unknown> {
     const open = this.unlockedOf(heroId);
     const gates: GateEntry[] = [];
-    for (const g of this.gates.values()) if (g.guild || open.has(g.id)) gates.push({ id: g.id, region: g.region, guild: g.guild });
+    for (const g of this.gates.values()) if (g.guild || this.rules.allOpen || open.has(g.id)) gates.push({ id: g.id, region: g.region, guild: g.guild });
     const back = this.returns.get(heroId);
     return { t: 'gates', gates, guild: true, back: back ? { region: back.region } : null };
   }
@@ -235,7 +237,7 @@ export class Travel {
     }
     const g = this.gates.get(target.gate);
     if (!g) throw new GameError('no_gate', 'No such gate');
-    if (!g.guild && !this.unlockedOf(heroId).has(g.id)) throw new GameError('locked', 'You have not found that Cullis Gate yet');
+    if (!g.guild && !this.rules.allOpen && !this.unlockedOf(heroId).has(g.id)) throw new GameError('locked', 'You have not found that Cullis Gate yet');
     if (this.barred(g.region)) throw new GameError('barred', 'A magical barrier stops you teleporting there');
     return { region: g.region, pos: this.arrival(g), gate: g.id };
   }

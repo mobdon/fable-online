@@ -309,6 +309,18 @@ ObjectFrame WorldObjects::on_frame(const std::string& json, uint32_t nowMs) {
         return ObjectFrame::Ok;
     }
 
+    if (t == "travel_result") {
+        // Answer to a travel request: "to" is the gate id, "guild" or "back", as asked.
+        std::string to = v.str("to");
+        if (to.empty() || to.size() > 96) return ObjectFrame::None;
+        if (v.flag("ok")) {
+            acks_.push_back(to);
+            return ObjectFrame::Ok;
+        }
+        refusals_.push_back(Refusal{to, v.str("error"), v.str("message")});
+        return ObjectFrame::Refused;
+    }
+
     if (t == "error") {
         Refusal r;
         r.thing = v.str("thing");

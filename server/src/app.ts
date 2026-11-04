@@ -23,7 +23,7 @@ import { NavStore } from './world/nav/navmesh.js';
 import { monsterAi } from './world/ai/combat-ai.js';
 import { WorldThings } from './world/things/world-things.js';
 import { WorldObjects } from './world/things/objects.js';
-import { Travel } from './world/travel/travel.js';
+import { Travel, TRAVEL_RULES } from './world/travel/travel.js';
 import fs from 'node:fs';
 import { Law, type LawHost } from './law/law.js';
 import { mergeRules } from './law/rules.js';
@@ -174,7 +174,7 @@ export function createApp(
   );
   const things = opts.things ?? WorldThings.load(cfg.thingsPath);
   const objects = new WorldObjects(things, director, economy, db, events);
-  const travel = new Travel(things, director, heroes, db, events);
+  const travel = new Travel(things, director, heroes, db, events, { ...TRAVEL_RULES, barred: [...TRAVEL_RULES.barred], allOpen: cfg.gatesOpen });
   law.attach(lawHost(director, regions));
   trades.attach({
     send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
