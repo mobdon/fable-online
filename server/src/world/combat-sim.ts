@@ -283,6 +283,22 @@ export class CombatSim implements RegionSim {
     this.combat.add(hero);
   }
 
+  /** Re-read the hero's loadout and swap in its weapon and armour. Health and the rest stay. */
+  refreshLoadout(heroId: number): void {
+    const slot = this.heroes.get(heroId);
+    if (!slot) return;
+    const h = slot.hero;
+    const l = this.s.loadout?.(heroId) ?? {};
+    const fresh = heroCombatant(heroId, h.pos, this.s.data, l, (i) => {
+      if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
+    });
+    h.weapon = fresh.weapon;
+    h.armour = fresh.armour;
+    h.metal = fresh.metal;
+    if (fresh.armourFixed !== undefined) h.armourFixed = fresh.armourFixed;
+    else delete h.armourFixed;
+  }
+
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
     this.heroes.delete(heroId);

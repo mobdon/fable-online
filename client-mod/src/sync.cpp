@@ -11,6 +11,7 @@
 
 #include "config.h"
 #include "crash_exit.h"
+#include "game/gear.h"
 #include "game/hook.h"
 #include "game/menu_pages.h"
 #include "game/puppet.h"
@@ -28,6 +29,7 @@
 #include "ui/party_model.h"
 #include "world/entities.h"
 #include "world/death.h"
+#include "world/gear_report.h"
 #include "world/health.h"
 #include "world/held.h"
 #include "world/objects.h"
@@ -85,6 +87,11 @@ struct State {
     uint32_t lastHealthLogMs = 0;
     /** Local heals (potions, food, Heal Life) waiting to be reported or answered. */
     world::HealWatch heals;
+    /** The hero's equipped weapons, read from Fable and reported so the server fights with them. */
+    world::GearReporter gear;
+    uint32_t lastGearReadMs = 0;
+    game::HeroGear lastGear;
+    bool gearLogged = false;
     uint32_t healSeq = 0;
     /** The server's death, shown without Fable's own game over (world/death.h). */
     world::DeathView death;
@@ -127,6 +134,7 @@ void on_connected() {
     if (!g_state) return;
     g_state->reporter.reset();
     g_state->sentRenown = -1;  // a new connection hears the hero's renown again
+    g_state->gear.reset();
     g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
@@ -314,6 +322,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
             }
             return;
         }
+        if (json.find("\"t\":\"gear_result\"") != std::string::npos)
+            fo::log("sync: server answered the gear report: %s", json.c_str());
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -436,6 +446,26 @@ void report_combat(uint32_t nowMs) {
         std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u}", ++s.inputSeq, buttons);
     net::world_send(frame);
     if (s.inputSeq <= 40) fo::log("sync: sent buttons %u (attack %s)", buttons, buttons & 1 ? "down" : "up");
+}
+
+/**
+ * Tells the server which weapons the hero has equipped in Fable (twice a second, sent on a
+ * change), so its combat hits with the hero's own sword. The server decides whether to accept it.
+ */
+void report_gear(uint32_t nowMs) {
+    State& s = *g_state;
+    if (!net::world_connected() || nowMs - s.lastGearReadMs < 500) return;
+    s.lastGearReadMs = nowMs;
+    uintptr_t hero = game::local_hero();
+    game::HeroGear g;
+    if (!hero || !game::read_gear(hero, g)) return;
+    if (!s.gearLogged || g.melee != s.lastGear.melee || g.ranged != s.lastGear.ranged) {
+        fo::log("sync: Fable has the hero holding melee '%s', ranged '%s'", g.melee.c_str(), g.ranged.c_str());
+        s.gearLogged = true;
+        s.lastGear = g;
+    }
+    const std::string frame = s.gear.update(g.melee, g.ranged, nowMs);
+    if (!frame.empty()) net::world_send(frame);
 }
 
 /**
@@ -737,6 +767,7 @@ void tick() {
     apply_health(now);
     show_death(now);
     report_renown(now);
+    report_gear(now);
     sync_trade(now);
 
     send_party_requests();

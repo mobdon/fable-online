@@ -29,6 +29,7 @@ export class GameSocket {
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
   private heals = new Bucket(2, 4);
+  private gearReports = new Bucket(1, 4);
   private tradeReqs = new Bucket(4, 10);
   private tradeInvites = new Bucket(0.2, 3);
   private devSpawns = new Bucket(1, 5);
@@ -130,6 +131,9 @@ export class GameSocket {
       case 'heal':
         if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
         return this.heal(this.heroId, msg.share, msg.key);
+      case 'gear':
+        if (!this.gearReports.take()) return this.dropped('gear flood');
+        return this.gear(this.heroId, msg);
       case 'trade_request':
         if (!this.tradeInvites.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Wait a moment before asking again' });
         return this.trade(this.heroId, msg);
@@ -342,6 +346,19 @@ export class GameSocket {
   }
 
   /**
+   * The mod read the hero's equipped weapons from Fable. The server takes the ones it accepts
+   * (src/combat/client-gear.ts) and has the hero fight with them from now on.
+   */
+  private gear(heroId: number, msg: Extract<ClientMessage, { t: 'gear' }>): void {
+    const { app } = this;
+    const r = app.clientGear.report(heroId, { melee: msg.melee, ranged: msg.ranged });
+    if (r.changed) app.director.channelOf(heroId)?.sim.refreshLoadout?.(heroId);
+    if (r.changed || r.refused.length)
+      app.events.emit({ type: 'client_gear', heroId, accepted: r.accepted, refused: r.refused, trusted: app.cfg.trustClientGear });
+    this.send({ t: 'gear_result', accepted: r.accepted, refused: r.refused });
+  }
+
+  /**
    * The client's Fable opened a shop screen or pressed buy/sell. The server checks the hero is
    * at that shop (its own copy of the position), that the keeper is minding it, and that the
    * shop has the item, then moves gold and items in the ledger. The client only shows the result.
@@ -527,6 +544,7 @@ export class GameSocket {
       GameSocket.online.delete(id);
       this.app.resume.disconnected(id);
       this.app.parties.disconnect(id);
+      this.app.clientGear.forget(id);
     }
     this.app.director.leave(id);
   }

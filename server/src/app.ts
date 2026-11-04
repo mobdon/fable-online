@@ -33,6 +33,7 @@ import { WorldClock } from './world/clock.js';
 import { loadTownData, type TownData } from './world/town/town-data.js';
 import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
+import { ClientGear } from './combat/client-gear.js';
 import { Scoreboard } from './scoreboard/scoreboard.js';
 import { ResumeTokens } from './net/resume.js';
 import { Analytics } from './analytics/analytics.js';
@@ -73,6 +74,8 @@ export interface App {
   /** Realm chat and name tags; null when FO_CHAT=0. main.ts opens its port. */
   chat: RealmChat | null;
   parties: Parties;
+  /** Weapons the mod reports equipped in each hero's Fable, as far as the server accepts them. */
+  clientGear: ClientGear;
   /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
   spawnDefs: string[];
   /** True when the hero belongs to a gm or admin account (dev tools such as dev_spawn). */
@@ -139,6 +142,13 @@ export function createApp(
   };
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
+  const clientGear = new ClientGear({
+    data,
+    trust: cfg.trustClientGear,
+    owns: (heroId, defId) => economy.inventory(heroId).some((i) => i.def_id === defId),
+    staffOnly: (defId) => catalog.has(defId) && !!catalog.get(defId).staffOnly,
+    isStaff: staffHero,
+  });
   const spawns = loadSpawns(cfg.spawnsPath);
   let travelRef: Travel | undefined;
   const spawnDefs = !opts.sim && cfg.combat ? serverSpawnDefs(spawns, data) : [];
@@ -153,7 +163,8 @@ export function createApp(
           loot,
           progress,
           loadout: (heroId) => ({
-            equipped: economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id),
+            // The weapon in the hero's own Fable comes first: heroCombatant fights with the first one.
+            equipped: [...clientGear.equipped(heroId), ...economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id)],
             staff: staffHero(heroId),
             pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),
@@ -270,6 +281,7 @@ export function createApp(
     analytics,
     chat,
     parties,
+    clientGear,
     spawnDefs,
     staffHero,
     close() {

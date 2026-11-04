@@ -7,6 +7,7 @@
 #include "world/entities.h"
 #include "world/death.h"
 #include "world/health.h"
+#include "world/gear_report.h"
 #include "world/reporter.h"
 #include "world/snapshot.h"
 #include "world/spawn_filter.h"
@@ -416,6 +417,24 @@ void test_tick_stamps_absorb_jitter() {
     CHECK(steady == steps);
 }
 
+void test_gear_report() {
+    using fo::world::GearReporter;
+    GearReporter g;
+    // The first read goes at once, empty slots included.
+    CHECK(g.update("OBJECT_SWORD_OF_AEONS", "", 1000) == "{\"t\":\"gear\",\"melee\":\"OBJECT_SWORD_OF_AEONS\",\"ranged\":\"\"}");
+    CHECK(g.update("OBJECT_SWORD_OF_AEONS", "", 1500).empty());
+    // A swap passes through "none": nothing is sent until the new weapon has held a moment.
+    CHECK(g.update("", "", 2000).empty());
+    CHECK(g.update("OBJECT_IRON_WARHAMMER", "", 2100).empty());
+    CHECK(g.update("OBJECT_IRON_WARHAMMER", "", 2100 + fo::world::kGearSettleMs).find("OBJECT_IRON_WARHAMMER") != std::string::npos);
+    // The same gear is sent again after a while; a bad name is sent as empty.
+    CHECK(!g.update("OBJECT_IRON_WARHAMMER", "", 2600 + fo::world::kGearResendMs).empty());
+    CHECK(!fo::world::valid_def_name("bad name"));
+    CHECK(!fo::world::valid_def_name(""));
+    g.reset();
+    CHECK(g.update("bad\"name", "OBJECT_YEW_LONGBOW", 50000) == "{\"t\":\"gear\",\"melee\":\"\",\"ranged\":\"OBJECT_YEW_LONGBOW\"}");
+}
+
 int main() {
     std::printf("world tests\n");
     test_welcome();
@@ -432,6 +451,7 @@ int main() {
     test_reporter();
     test_health();
     test_death_view();
+    test_gear_report();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;
 }
