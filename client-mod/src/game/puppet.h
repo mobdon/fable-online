@@ -12,6 +12,7 @@
 
 #include "../world/entities.h"
 #include "script.h"
+#include "thing.h"
 
 namespace fo::game {
 
@@ -84,10 +85,15 @@ class PuppetPool {
         uint32_t flinchUntilMs = 0;
         uint32_t retryAtMs = 0;  // a refused animation is tried again from this time
         uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
+        Pos parkedAt;             // where a parked puppet is held, far from everyone
+        bool parkedAway = false;
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);
     void park(uint32_t id);
+    void send_away(Puppet& p);
+    void hold_parked(uint32_t nowMs);
+    void retire(Puppet& p);
     void drive(const world::Pose& p, uint32_t nowMs);
     void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
     const std::string& def_for(const world::Spawn& s) const;
@@ -97,6 +103,7 @@ class PuppetPool {
     std::unordered_map<uint32_t, Puppet> live_;
     /** Parked puppets by def, ready to be shown again instead of spawning another. */
     std::unordered_multimap<std::string, Puppet> pool_;
+    uint32_t lastParkedHoldMs_ = 0;
     PuppetStats stats_;
     uint32_t nextName_ = 1;
     /** Entities waiting for a puppet (held, or lost to an area load and to be made again). */

@@ -22,8 +22,15 @@ constexpr uint32_t kFlinchMs = 350;
 constexpr uint32_t kRetryRefusedMs = 100;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
 constexpr float kSpawnRadius = 6.0f;
-/** Parked puppets kept per def. Beyond this they are released. */
+/** Parked puppets kept per def. Beyond this they are retired. */
 constexpr size_t kPoolPerDef = 8;
+/**
+ * A hidden puppet is still a whole Fable creature with its own AI: left where it was, a
+ * removed bandit went on swinging at the hero unseen. Parked puppets are moved this far
+ * away (metres, on each axis) and held there, with their actions cleared, until reused.
+ */
+constexpr float kParkAway = 3000.0f;
+constexpr uint32_t kParkedHoldEveryMs = 1000;
 /** After the engine freed a puppet (an area load), wait this long before making any. */
 constexpr uint32_t kHoldAfterLossMs = 5000;
 /** Fewest milliseconds between two new puppets, so a crowd does not arrive in one frame. */
@@ -104,6 +111,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
         pool_.erase(pooled);
         if (p.ref.alive()) {
             p.spawn = s;
+            p.parkedAway = false;
             script::set_drawable(p.ref, true);
             p.hidden = false;
             p.gait = p.wanted = Gait::None;
@@ -155,11 +163,11 @@ void PuppetPool::park(uint32_t id) {
     script::clear_commands(p.ref);
     script::clear_scripted(p.ref);
     script::set_drawable(p.ref, false);
+    send_away(p);
     p.hidden = true;
     p.gait = p.wanted = Gait::None;
     if (pool_.count(p.def) >= kPoolPerDef) {
-        script::set_free(p.ref);
-        p.ref.release();
+        retire(p);
         return;
     }
     std::string def = p.def;
@@ -175,6 +183,43 @@ void PuppetPool::place(const std::vector<world::Pose>& poses) {
         uintptr_t thing = it->second.ref.thing();  // 0 once the engine has freed it
         if (thing) write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
     }
+}
+
+void PuppetPool::send_away(Puppet& p) {
+    uintptr_t thing = p.ref.thing();
+    if (!thing) return;
+    if (!p.parkedAway) {
+        Pos at;
+        if (!read_pos(thing, at)) return;
+        p.parkedAt = Pos{at.x + kParkAway, at.y + kParkAway, at.z};
+        p.parkedAway = true;
+    }
+    write_pos(thing, p.parkedAt, false, 0);
+}
+
+/** Keep parked puppets where they were put: their own AI may try to walk back and fight. */
+void PuppetPool::hold_parked(uint32_t nowMs) {
+    if (nowMs - lastParkedHoldMs_ < kParkedHoldEveryMs) return;
+    lastParkedHoldMs_ = nowMs;
+    for (auto& [def, p] : pool_) {
+        if (!p.ref.alive()) continue;
+        script::clear_commands(p.ref);
+        send_away(p);
+    }
+}
+
+/**
+ * Let go of a puppet for good. It is never handed to Fable's own AI (SetFree): a freed
+ * bandit is an ordinary hostile creature and attacks the hero. It stays hidden, far away.
+ */
+void PuppetPool::retire(Puppet& p) {
+    if (p.ref.alive()) {
+        script::clear_commands(p.ref);
+        script::set_drawable(p.ref, false);
+        script::set_attackable(p.ref, false);
+        send_away(p);
+    }
+    p.ref.release();
 }
 
 void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
@@ -293,6 +338,7 @@ void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vecto
     for (const world::Spawn& s : spawned)
         if (!live_.count(s.id)) pending_[s.id] = s;
     for (const world::Pose& p : poses) drive(p, nowMs);
+    hold_parked(nowMs);
     // One new puppet at a time, and none while held.
     if (!pending_.empty() && !holding(nowMs) && nowMs - lastSpawnMs_ >= kSpawnEveryMs) {
         auto it = pending_.begin();
@@ -310,10 +356,7 @@ void PuppetPool::clear_all() {
     ids.reserve(live_.size());
     for (const auto& [id, p] : live_) ids.push_back(id);
     for (uint32_t id : ids) park(id);
-    for (auto& [def, p] : pool_) {
-        if (p.ref.alive()) script::set_free(p.ref);
-        p.ref.release();
-    }
+    for (auto& [def, p] : pool_) retire(p);
     pool_.clear();
     stats_.live = 0;
 }
