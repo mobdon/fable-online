@@ -5,11 +5,13 @@
  *   npm run admin -- list                         every hero, where they are and their life stage
  *   npm run admin -- graduate <Name>              move a hero straight to the shared world
  *   npm run admin -- place <Name> <Region> [x y z]  put a hero in a region (0 0 0 = the next report anchors)
+ *   npm run admin -- password <Account> <New>     set an account's password and log it out everywhere
  *
  * Uses FO_DB like the server (default data/fable-online.sqlite).
  */
 import { Database } from '../src/db/database.js';
 import { STAGE_REGIONS } from '../src/world/regions.js';
+import { hashPassword } from '../src/accounts/accounts.js';
 
 const db = new Database(process.env.FO_DB || 'data/fable-online.sqlite');
 const [cmd, name, ...rest] = process.argv.slice(2);
@@ -67,7 +69,24 @@ switch (cmd) {
     console.log(`${h.name} will join in ${region} at (${x}, ${y}, ${z}).`);
     break;
   }
+  case 'password': {
+    const acct = name ? db.get<{ id: number; username: string }>('SELECT id, username FROM accounts WHERE username = ?', name) : undefined;
+    if (!acct) {
+      const all = db.all<{ username: string }>('SELECT username FROM accounts ORDER BY id').map((a) => a.username);
+      console.error(`No account called "${name ?? ''}". Accounts: ${all.join(', ') || 'none yet'}`);
+      process.exit(1);
+    }
+    const pw = rest[0] ?? '';
+    if (pw.length < 8 || pw.length > 128) {
+      console.error('The new password must be 8-128 characters.');
+      process.exit(1);
+    }
+    db.run('UPDATE accounts SET password_hash = ? WHERE id = ?', hashPassword(pw), acct.id);
+    db.run('DELETE FROM sessions WHERE account_id = ?', acct.id);
+    console.log(`${acct.username} has a new password. Log in with it in the launcher.`);
+    break;
+  }
   default:
-    console.log('Usage: npm run admin -- list | graduate <Name> | place <Name> <Region> [x y z]');
+    console.log('Usage: npm run admin -- list | graduate <Name> | place <Name> <Region> [x y z] | password <Account> <New>');
 }
 db.close();

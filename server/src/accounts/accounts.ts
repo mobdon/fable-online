@@ -23,7 +23,7 @@ export interface TokenPair {
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 
-function hashPassword(password: string): string {
+export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16);
   const hash = crypto.scryptSync(password, salt, SCRYPT.keylen, SCRYPT);
   return `scrypt$${SCRYPT.N}$${salt.toString('base64')}$${hash.toString('base64')}`;
