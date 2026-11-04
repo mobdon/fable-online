@@ -6,6 +6,10 @@
 namespace fo::patch {
 // Replaces module's import of dll!func with hook. Returns the original, or nullptr if not imported.
 void* iat(HMODULE module, const char* dll, const char* func, void* hook);
+// The import slot itself (module's entry for dll!func), or nullptr if not imported.
+void** iat_slot(HMODULE module, const char* dll, const char* func);
+// Writes one pointer, making the page writable for the moment it takes.
+bool write(void** where, void* value);
 // Replaces slot `index` of obj's vtable. Returns the old pointer (or the saved original if
 // this slot already points at hook). All objects sharing that vtable are affected.
 void* vtable(void* obj, int index, void* hook);

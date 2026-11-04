@@ -1,5 +1,6 @@
 #include "overlay.h"
 #include <windows.h>
+#include <tlhelp32.h>
 #include <d3d9.h>
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,8 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 #include "../assets/fable_ui.h"
 #include "../config.h"
 #include "../display/frame_probe.h"
@@ -57,6 +60,9 @@ EndScene_t o_EndScene = nullptr;
 SetTransform_t o_SetTransform = nullptr;
 DirectInput8Create_t o_DirectInput8Create = nullptr;
 DICreateDevice_t o_DICreateDevice = nullptr;
+std::atomic<bool> g_factories_done{false};
+void** g_slot_d3d = nullptr;   // the exe's import slots for the two factories
+void** g_slot_di = nullptr;
 GetDeviceState_t o_GetDeviceState = nullptr;
 GetDeviceData_t o_GetDeviceData = nullptr;
 WNDPROC o_WndProc = nullptr;
@@ -924,6 +930,7 @@ HRESULT WINAPI hk_CreateDevice(IDirect3D9* d3d, UINT adapter, D3DDEVTYPE type, H
                                D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
     display::adjust_present(d3d, adapter, pp, focus ? focus : (pp ? pp->hDeviceWindow : nullptr), "start");
     HRESULT hr = o_CreateDevice(d3d, adapter, type, focus, flags, pp, out);
+    fo::log("overlay: the game created its device (type %d, 0x%08lX)", static_cast<int>(type), static_cast<unsigned long>(hr));
     if (FAILED(hr)) display::log_failure("CreateDevice", hr);
     if (SUCCEEDED(hr) && out && *out) hook_device(*out, focus ? focus : (pp ? pp->hDeviceWindow : nullptr));
     if (SUCCEEDED(hr)) display::fix_window(g_hwnd ? g_hwnd : focus);   // after hook_window, so the game misses the resize
@@ -950,6 +957,125 @@ BOOL CALLBACK find_game_window(HWND w, LPARAM out) {
     return TRUE;
 }
 
+// The game's device was made before the mod went in, and d3d9.dll keeps more than one device
+// vtable (a pure device has its own), so a throwaway device's table may not be the game's.
+// Find the game's device object instead: a word in private memory pointing into d3d9.dll at
+// a table that shares most of its 119 entries with the throwaway's (the kinds differ in a
+// handful), and patch that table. Memory is read through ReadProcessMemory, so a page going
+// away mid-scan fails the read instead of faulting.
+constexpr int kDeviceMethods = 119;
+
+// Which d3d9 the game is really using: every module with d3d or dinput in its name, and any
+// loaded from somewhere other than Windows or the game folder (a wrapper's private copy).
+void log_graphics_modules() {
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+    if (snap == INVALID_HANDLE_VALUE) return;
+    MODULEENTRY32W e = {sizeof(e)};
+    unsigned total = 0;
+    for (BOOL ok = Module32FirstW(snap, &e); ok; ok = Module32NextW(snap, &e)) {
+        ++total;
+        std::wstring name(e.szModule), path(e.szExePath);
+        for (auto& c : name) c = static_cast<wchar_t>(towlower(c));
+        for (auto& c : path) c = static_cast<wchar_t>(towlower(c));
+        const bool gfx = name.find(L"d3d") != std::wstring::npos || name.find(L"dinput") != std::wstring::npos || name.find(L"dxgi") != std::wstring::npos;
+        for (auto& c : path) if (c == static_cast<wchar_t>(92)) c = L'/';  // a backslash, spelt out to keep this file clean of them
+        const bool odd = path.rfind(L"c:/windows/", 0) != 0 && path.find(L"microsoft games") == std::wstring::npos && name != L"fable_online.dll";
+        if (gfx || odd) {
+            char n[128] = {}, pth[260] = {};
+            WideCharToMultiByte(CP_UTF8, 0, e.szModule, -1, n, sizeof n, nullptr, nullptr);
+            WideCharToMultiByte(CP_UTF8, 0, e.szExePath, -1, pth, sizeof pth, nullptr, nullptr);
+            fo::log("overlay: module %s at %p (%lu KB) %s", n, static_cast<void*>(e.modBaseAddr), static_cast<unsigned long>(e.modBaseSize / 1024), pth);
+        }
+    }
+    CloseHandle(snap);
+    fo::log("overlay: %u modules loaded", total);
+}
+
+bool read_mem(const void* at, void* out, size_t n) {
+    SIZE_T got = 0;
+    return ReadProcessMemory(GetCurrentProcess(), at, out, n, &got) && got == n;
+}
+
+void** find_game_device_vtable(void** sample, HMODULE d3d9, HWND game, int& sharedOut) {
+    (void)d3d9;
+    void* sampleEntries[kDeviceMethods];
+    sharedOut = 0;
+    if (!read_mem(sample, sampleEntries, sizeof sampleEntries)) return nullptr;
+    // Readable private memory, so a word can be checked for pointing somewhere safe to read
+    // before it is read directly. VirtualQuery hands the regions back in address order.
+    struct Region { uintptr_t lo, hi; };
+    std::vector<Region> regions;
+    MEMORY_BASIC_INFORMATION m = {};
+    for (uintptr_t a = 0x10000; a < 0x7FFF0000 && VirtualQuery(reinterpret_cast<void*>(a), &m, sizeof m) == sizeof m;
+         a = reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize) {
+        if (m.State != MEM_COMMIT || m.Type != MEM_PRIVATE) continue;
+        if (m.Protect & (PAGE_GUARD | PAGE_NOACCESS)) continue;
+        if (!(m.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) continue;
+        regions.push_back({reinterpret_cast<uintptr_t>(m.BaseAddress), reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize});
+    }
+    auto readable = [&](uintptr_t v, size_t n) {
+        size_t lo = 0, hi = regions.size();
+        while (lo < hi) {
+            const size_t mid = (lo + hi) / 2;
+            if (regions[mid].hi <= v) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo < regions.size() && v >= regions[lo].lo && v + n <= regions[lo].hi;
+    };
+    // Every table whose first three entries (IUnknown) are the sample's: the same kind of
+    // object, wherever its table lives (a capture or overlay layer gives each device its own copy).
+    std::vector<std::pair<void**, int>> seen;   // table -> entries shared with the sample
+    std::vector<unsigned> objects, withWindow;
+    std::vector<uintptr_t> buf;
+    const uintptr_t hwndWord = reinterpret_cast<uintptr_t>(game);
+    for (const Region& r : regions) {
+        const size_t words = (r.hi - r.lo) / sizeof(uintptr_t);
+        buf.resize(words);
+        if (!read_mem(reinterpret_cast<const void*>(r.lo), buf.data(), words * sizeof(uintptr_t))) continue;
+        for (size_t i = 0; i < words; ++i) {
+            const uintptr_t v = buf[i];
+            if ((v & 3) || v < 0x10000 || !readable(v, 3 * sizeof(void*))) continue;
+            void** vt = reinterpret_cast<void**>(v);
+            if (vt == sample) continue;
+            // Through ReadProcessMemory: the region list goes stale within milliseconds in a game
+            // that churns its heap, and a direct read of a page since freed would fault.
+            void* head[3];
+            if (!read_mem(vt, head, sizeof head)) continue;
+            if (head[0] != sampleEntries[0] || head[1] != sampleEntries[1] || head[2] != sampleEntries[2]) continue;
+            bool holdsWindow = false;
+            if (hwndWord)
+                for (size_t j = i + 1; j < words && j < i + 2048; ++j)
+                    if (buf[j] == hwndWord) { holdsWindow = true; break; }
+            bool known = false;
+            for (size_t k = 0; k < seen.size(); ++k)
+                if (seen[k].first == vt) { ++objects[k]; if (holdsWindow) ++withWindow[k]; known = true; break; }
+            if (known) continue;
+            void* entries[kDeviceMethods];
+            int shared = -1;
+            if (read_mem(vt, entries, sizeof entries)) {
+                shared = 0;
+                for (int k = 0; k < kDeviceMethods; ++k) if (entries[k] == sampleEntries[k]) ++shared;
+            }
+            seen.emplace_back(vt, shared);
+            objects.push_back(1);
+            withWindow.push_back(holdsWindow ? 1u : 0u);
+        }
+    }
+    void** best = nullptr;
+    int bestShared = 0;
+    bool bestHasWindow = false;
+    for (size_t k = 0; k < seen.size(); ++k) {
+        if (seen[k].second < 40) continue;
+        fo::log("overlay: device table candidate %p: %d of %d entries shared with the throwaway, %u object(s), %u holding the game window",
+                static_cast<void*>(seen[k].first), seen[k].second, kDeviceMethods, objects[k], withWindow[k]);
+        const bool hasWindow = withWindow[k] > 0;
+        if (hasWindow && !bestHasWindow) { best = seen[k].first; bestShared = seen[k].second; bestHasWindow = true; continue; }
+        if (hasWindow == bestHasWindow && seen[k].second > bestShared) { best = seen[k].first; bestShared = seen[k].second; }
+    }
+    sharedOut = bestShared;
+    return bestHasWindow || bestShared >= kDeviceMethods / 2 ? best : nullptr;
+}
+
 void fallback_dummy_device() {
     HMODULE d3d9 = LoadLibraryW(L"d3d9.dll");
     auto create = d3d9 ? reinterpret_cast<Direct3DCreate9_t>(GetProcAddress(d3d9, "Direct3DCreate9")) : nullptr;
@@ -968,15 +1094,106 @@ void fallback_dummy_device() {
     pp.Windowed = TRUE;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     pp.hDeviceWindow = tmp;
-    if (d3d && SUCCEEDED(d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, tmp, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &dev))) {
-        hook_device(dev, game);
+    HRESULT hr = d3d ? d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, tmp, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &dev) : E_FAIL;
+    // While the game's own device holds the screen a windowed hardware device is refused
+    // (D3DERR_INVALIDCALL); a NULLREF device draws nothing but shares the same vtable.
+    const char* kind = "HAL";
+    if (FAILED(hr) && d3d) {
+        kind = "NULLREF";
+        hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_NULLREF, tmp, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &pp, &dev);
+    }
+    fo::log("overlay: throwaway %s device: 0x%08lX, table %p", kind, static_cast<unsigned long>(hr), dev ? *reinterpret_cast<void**>(dev) : nullptr);
+    log_graphics_modules();
+    if (SUCCEEDED(hr) && dev) {
+        int shared = 0;
+        void** sample = *reinterpret_cast<void***>(dev);
+        // The game may not have made its device yet: look again every couple of seconds for a while.
+        void** gameTable = nullptr;
+        for (int attempt = 0; attempt < 15 && !gameTable; ++attempt) {
+            if (attempt) Sleep(2000);
+            gameTable = find_game_device_vtable(sample, d3d9, game, shared);
+        }
+        if (gameTable) {
+            // A stand-in object whose only word is the game's table: hook_device patches that table.
+            void* standIn = gameTable;
+            hook_device(reinterpret_cast<IDirect3DDevice9*>(&standIn), game);
+            fo::log("overlay: hooked the game's own device table at %p (%d of %d entries shared with a throwaway's), window %s",
+                    static_cast<void*>(gameTable), shared, kDeviceMethods, game ? "found" : "NOT found: typing won't work");
+        } else {
+            hook_device(dev, game);
+            fo::log("overlay: hooked via a throwaway device (no other device table found, best shared %d), window %s", shared,
+                    game ? "found" : "NOT found: typing won't work");
+        }
         dev->Release();
-        fo::log("overlay: hooked via a throwaway device (window %s)", game ? "found" : "NOT found: typing won't work");
     } else {
-        fo::log("overlay: throwaway device failed, overlay off");
+        fo::log("overlay: throwaway device failed (0x%08lX), overlay off", static_cast<unsigned long>(hr));
     }
     if (d3d) d3d->Release();
     DestroyWindow(tmp);
+}
+
+// The import hooks only see calls that go through Fable.exe's own import table. They miss the
+// game when the mod goes in after it has started (the retail build unpacks itself first, so
+// the launcher injects late) or when the exe reaches the DLLs through a stub table. Every
+// IDirect3D9 shares one vtable inside d3d9.dll, and every IDirectInput8 one inside dinput8.dll,
+// so patching CreateDevice on a throwaway interface catches the game's call however it got
+// its interface. Harmless next to the import hooks: the same slot, the same hook.
+const GUID kIID_IDirectInput8W = {0xBF798031, 0x483A, 0x4DA2, {0xAA, 0x99, 0x5D, 0x64, 0xED, 0x36, 0x97, 0x00}};
+
+void hook_factories() {
+    if (g_factories_done.exchange(true)) return;
+    if (HMODULE d3d9 = LoadLibraryW(L"d3d9.dll")) {
+        auto create = reinterpret_cast<Direct3DCreate9_t>(GetProcAddress(d3d9, "Direct3DCreate9"));
+        IDirect3D9* d3d = create ? create(D3D_SDK_VERSION) : nullptr;
+        if (d3d) {
+            if (auto o = patch::vtable(d3d, kD3D9_CreateDevice, reinterpret_cast<void*>(hk_CreateDevice))) o_CreateDevice = reinterpret_cast<CreateDevice_t>(o);
+            d3d->Release();
+        }
+    }
+    if (HMODULE di8 = LoadLibraryW(L"dinput8.dll")) {
+        auto create = reinterpret_cast<DirectInput8Create_t>(GetProcAddress(di8, "DirectInput8Create"));
+        void* di = nullptr;
+        if (create && SUCCEEDED(create(GetModuleHandleW(nullptr), 0x0800, kIID_IDirectInput8W, &di, nullptr)) && di) {
+            if (auto o = patch::vtable(di, kDI_CreateDevice, reinterpret_cast<void*>(hk_DICreateDevice))) o_DICreateDevice = reinterpret_cast<DICreateDevice_t>(o);
+            reinterpret_cast<IUnknown*>(di)->Release();
+        }
+    }
+    fo::log("overlay: CreateDevice hooked on the interfaces themselves: Direct3D %s, DirectInput %s",
+            o_CreateDevice ? "yes" : "no", o_DICreateDevice ? "yes" : "no");
+}
+
+// The mod goes in while the wrapper is still filling the exe's import table, so the import
+// hooks written at that point are overwritten moments later. Watch the two slots and write
+// the hooks back the instant the wrapper fills them: the game's first Direct3DCreate9 then
+// lands in the mod and its device is caught at creation. The interface hooks go in as soon
+// as the two DLLs are loaded, as a second net.
+DWORD WINAPI import_watch(LPVOID) {
+    bool saidD3d = false, saidDi = false;
+    for (int i = 0; i < 90000; ++i) {
+        if (g_slot_d3d) {
+            void* v = *g_slot_d3d;
+            if (v && v != reinterpret_cast<void*>(hk_Direct3DCreate9)) {
+                o_Direct3DCreate9 = reinterpret_cast<Direct3DCreate9_t>(v);
+                if (patch::write(g_slot_d3d, reinterpret_cast<void*>(hk_Direct3DCreate9)) && !saidD3d) {
+                    saidD3d = true;
+                    fo::log("overlay: the wrapper filled the Direct3DCreate9 import (%p); hook written back", v);
+                }
+            }
+        }
+        if (g_slot_di) {
+            void* v = *g_slot_di;
+            if (v && v != reinterpret_cast<void*>(hk_DirectInput8Create)) {
+                o_DirectInput8Create = reinterpret_cast<DirectInput8Create_t>(v);
+                if (patch::write(g_slot_di, reinterpret_cast<void*>(hk_DirectInput8Create)) && !saidDi) {
+                    saidDi = true;
+                    fo::log("overlay: the wrapper filled the DirectInput8Create import (%p); hook written back", v);
+                }
+            }
+        }
+        if (!g_factories_done.load() && GetModuleHandleW(L"d3d9.dll") && GetModuleHandleW(L"dinput8.dll")) hook_factories();
+        Sleep(1);
+    }
+    return 0;
 }
 }  // namespace
 
@@ -990,6 +1207,9 @@ void install_early() {
         o_DirectInput8Create = reinterpret_cast<DirectInput8Create_t>(o);
         g_iat_di = true;
     }
+    g_slot_d3d = patch::iat_slot(exe, "d3d9.dll", "Direct3DCreate9");
+    g_slot_di = patch::iat_slot(exe, "dinput8.dll", "DirectInput8Create");
+    if (HANDLE t = CreateThread(nullptr, 0, import_watch, nullptr, 0, nullptr)) CloseHandle(t);
 }
 
 void install_late() {
@@ -1004,7 +1224,10 @@ void install_late() {
     }
     fo::log("overlay: import hooks: Direct3DCreate9 %s, DirectInput8Create %s",
             g_iat_d3d ? "yes" : "NOT IMPORTED", g_iat_di ? "yes" : "NOT IMPORTED");
-    for (int i = 0; i < 300 && !g_device_hooked; ++i) Sleep(100);  // wait up to 30 s for the game's device
+    hook_factories();
+    // The game makes its device within moments of starting, so if it has not come through the
+    // hooks in 10 s it was made before the mod went in: patch its vtable through a throwaway.
+    for (int i = 0; i < 100 && !g_device_hooked; ++i) Sleep(100);
     if (!g_device_hooked) {
         fo::log("overlay: the game's device wasn't caught at creation; trying the fallback");
         fallback_dummy_device();

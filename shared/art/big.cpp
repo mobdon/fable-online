@@ -43,7 +43,13 @@ bool Bank::read_at(uint32_t off, void* dst, size_t n) {
 void Bank::read_entries(uint32_t count, uint32_t eoff, uint32_t esize) {
     std::vector<uint8_t> e(esize);
     if (!read_at(eoff, e.data(), esize)) return;
-    size_t q = 12;  // three u32s before the first entry
+    // The table opens with u32 group count, then per group u32 id and u32 entry count, then the
+    // entries. frontend.big has one group; textures.big's banks have two and five, and their
+    // counts add up to the bank's entry count.
+    if (e.size() < 4) return;
+    const uint32_t groups = u32(&e[0]);
+    if (groups > 64) return;
+    size_t q = 4 + static_cast<size_t>(groups) * 8;
     auto need = [&](size_t n) { return q + n <= e.size(); };
     for (uint32_t i = 0; i < count; ++i) {
         // u32 magic, id, type, size, offset, crc, name_len; name; u32 crc, source_count; sources; u32 sub_len; sub

@@ -13,7 +13,9 @@ bool write_ptr(void** where, void* value) {
 }
 }  // namespace
 
-void* iat(HMODULE module, const char* dll, const char* func, void* hook) {
+bool write(void** where, void* value) { return write_ptr(where, value); }
+
+void** iat_slot(HMODULE module, const char* dll, const char* func) {
     auto base = reinterpret_cast<BYTE*>(module);
     auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
@@ -28,13 +30,18 @@ void* iat(HMODULE module, const char* dll, const char* func, void* hook) {
             if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal)) continue;
             auto byname = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
             if (std::strcmp(reinterpret_cast<char*>(byname->Name), func) != 0) continue;
-            void** slot = reinterpret_cast<void**>(&slots->u1.Function);
-            void* orig = *slot;
-            if (orig == hook) return nullptr;
-            return write_ptr(slot, hook) ? orig : nullptr;
+            return reinterpret_cast<void**>(&slots->u1.Function);
         }
     }
     return nullptr;
+}
+
+void* iat(HMODULE module, const char* dll, const char* func, void* hook) {
+    void** slot = iat_slot(module, dll, func);
+    if (!slot) return nullptr;
+    void* orig = *slot;
+    if (orig == hook) return nullptr;
+    return write_ptr(slot, hook) ? orig : nullptr;
 }
 
 void* vtable(void* obj, int index, void* hook) {
