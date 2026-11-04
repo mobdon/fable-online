@@ -63,6 +63,12 @@ export interface RegionSim {
   readonly healing?: SimHealing;
   /** The town watch for this channel, when the sim runs guards (see src/law/guards.ts). */
   readonly law?: import('../law/guards.js').ChannelLaw;
+  /**
+   * Whether a hero is alive and when they last dealt or took a hit (Date.now() ms, 0 if
+   * never), for rules that refuse things in a fight (Cullis Gate travel). Sims without
+   * combat leave this out.
+   */
+  combatState?(heroId: number): { alive: boolean; lastHitAt: number } | undefined;
   /** Post a town guard at a spot. Sims without a town watch leave this out. */
   addGuard?(defName: string, at: Vec3): number;
   addHero(heroId: number, at: Vec3): void;

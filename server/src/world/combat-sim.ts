@@ -89,6 +89,8 @@ export class CombatSim implements RegionSim {
   private heroes = new Map<number, HeroSlot>();
   private ai: ChannelAi | undefined;
   private charging = new Set<number>();
+  /** heroId -> when they last dealt or took a hit */
+  private lastHit = new Map<number, number>();
   /** The town watch: guard creatures, run by their own copy of the server's AI. */
   readonly law?: ChannelLaw;
   private guards = new Map<number, Creature>();
@@ -107,6 +109,11 @@ export class CombatSim implements RegionSim {
     };
     this.combat = new CombatSystem(s.data, hooks, s.harm ?? defaultHarmPolicy);
     this.combat.onDeath((d) => this.onDeath(d));
+    this.combat.onHit((a, t) => {
+      const now = Date.now();
+      if (a.kind === 'hero') this.lastHit.set(a.id, now);
+      if (t.kind === 'hero') this.lastHit.set(t.id, now);
+    });
     this.spawns = new SpawnManager(s.spawns.regions[region.name], s.data, this.combat, hooks, s.spawnOptions);
     this.ai = s.ai?.({
       region,
@@ -225,6 +232,7 @@ export class CombatSim implements RegionSim {
     this.heroes.delete(heroId);
     this.law?.heroLeft(heroId);
     this.charging.delete(heroId);
+    this.lastHit.delete(heroId);
     this.combat.remove(heroId);
     return h && { ...h.hero.pos };
   }
@@ -302,6 +310,11 @@ export class CombatSim implements RegionSim {
   position(heroId: number): Vec3 | undefined {
     const p = this.heroes.get(heroId)?.hero.pos;
     return p && { ...p };
+  }
+
+  combatState(heroId: number): { alive: boolean; lastHitAt: number } | undefined {
+    const h = this.heroes.get(heroId)?.hero;
+    return h && { alive: h.alive, lastHitAt: this.lastHit.get(heroId) ?? 0 };
   }
 
   hero(heroId: number): Hero | undefined {

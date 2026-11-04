@@ -22,6 +22,10 @@ message Ping         { uint32 n = 1; }
 // The player's own Fable finished a quest. quest = OBJECT_QUEST_CARD_* or a quest script name.
 // The server pays only what that quest can pay, once (see server/src/economy/quests.ts). 1 per 5 s, burst 3.
 message QuestComplete { string quest = 1; uint32 gold = 2; uint32 renown = 3; repeated string items = 4; }
+// Cullis Gate / Guild Seal travel (docs/world-objects.md). to = gate thing id, "guild" or "back";
+// from = the gate the hero stands in, empty for a seal jump. 1 per s, burst 3.
+message Travel       { string to = 1; string from = 2; }
+message GatesRequest { }
 
 // ---- server -> client --------------------------------------------------
 message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6;
@@ -42,4 +46,8 @@ message ChatOut      { uint32 from = 1; string text = 2; string name = 3; }
 message Pong         { uint32 n = 1; }
 message Error        { string error = 1; string message = 2; }
 // EntityState.def_id: 0 for heroes, fableHash(creature def name) for creatures. anim 2 = dead.
+message Gate         { string id = 1; string region = 2; bool guild = 3; }
+message Gates        { repeated Gate gates = 1; bool guild = 2; string back_region = 3; }
+message GateUnlocked { string id = 1; string region = 2; }
+message TravelResult { bool ok = 1; string to = 2; string region = 3; string error = 4; repeated uint32 party = 5; uint32 with = 6; uint32 left_behind_by = 7; }
 message QuestReward  { string quest = 1; bool ok = 2; uint32 gold = 3; uint32 renown = 4; repeated string items = 5; string reason = 6; }

@@ -2,7 +2,7 @@
 // Reads the interactive things of every level from YOUR Fable install and writes
 // shared/defs/world-things.json for the server: region exits and the entrances they
 // lead to, doors, chests, searchable containers, items lying in the world, digging spots,
-// demon doors and doors that teleport.
+// demon doors, doors that teleport and Cullis Gates.
 //   node tools/extractor/things.mjs "C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters"
 //
 // Sources (retail game, nothing from them is committed):
@@ -165,7 +165,7 @@ export function build(wld, levels, gtgEntrances) {
     return pos && L ? [num(pos[0] + L.dx), num(pos[1] + L.dy), pos[2]] : pos;
   };
 
-  const out = { v: 1, levels: levelInfo, regionAnchor, exits: [], entrances: [], doors: [], chests: [], containers: [], pickups: [], digSpots: [], demonDoors: [], hooks: [] };
+  const out = { v: 1, levels: levelInfo, regionAnchor, exits: [], entrances: [], doors: [], chests: [], containers: [], pickups: [], digSpots: [], demonDoors: [], hooks: [], gates: [] };
   const entranceByKey = new Map();
   const addEntrance = (level, t) => {
     const key = `${byScript.get(level)?.uid}:${low(t.uid)}`;
@@ -209,6 +209,8 @@ export function build(wld, levels, gtgEntrances) {
         out.pickups.push({ ...base(t), forSale: s ? bool(s.ForSale) : false, stealable: s ? bool(s.Stealable) : false, price: s ? Number(s.Price ?? 0) : 0, persistent: bool(t.top.ThingGamePersistent) });
       }
       if (/^CREATURE_DEMON_DOOR_FACE/.test(t.def) || t.script === 'DemonDoorFace') out.demonDoors.push({ ...base(t), exit: null });
+      const gate = gateKind(t);
+      if (gate) out.gates.push({ ...base(t), fwd: t.fwd ?? null, guild: gate === 'guild' });
       const h = t.tc.CTCActionUseScriptedHook;
       if (h && bool(h.TeleportToRegionEntrance)) {
         const target = entranceByKey.get(linkKey(h.EntranceConnectedToUID ?? '0'));
@@ -216,6 +218,11 @@ export function build(wld, levels, gtgEntrances) {
       }
     }
   }
+
+  // The same gate can sit in a level twice (an "off" and an "on" model swapped by a quest
+  // section). Keep one per spot, preferring the one that always exists.
+  out.gates.sort((a, b) => (a.section === 'NULL' ? 0 : 1) - (b.section === 'NULL' ? 0 : 1));
+  out.gates = out.gates.filter((g, i) => !out.gates.slice(0, i).some((o) => o.region === g.region && (o.pos[0] - g.pos[0]) ** 2 + (o.pos[1] - g.pos[1]) ** 2 < 10 * 10));
 
   // A demon door guards the region exit next to it (the way into its DemonDoor_* region).
   for (const dd of out.demonDoors) {
@@ -232,6 +239,18 @@ export function build(wld, levels, gtgEntrances) {
     dd.exit = best?.id ?? null;
   }
   return out;
+}
+
+/**
+ * Cullis Gates are things with Fable's CTCTeleporter component; the Guild's pedestal is one
+ * too. The def names are a fallback in case a gate model carries the component under
+ * another name. Teleporters inside buyable houses belong to the property system, not here.
+ */
+const GATE_DEFS = /TELEPORTER_GRIFFONS|HKC_TELEPORTER_ON|GUILD_PEDESTAL_TELEPORT/;
+export function gateKind(t) {
+  if (/BUYABLE_HOUSE|_OFF_/.test(t.def)) return null;
+  if (!t.tc.CTCTeleporter && !GATE_DEFS.test(t.def)) return null;
+  return /GUILD_PEDESTAL/.test(t.def) ? 'guild' : 'gate';
 }
 
 // ---------------------------------------------------------------- main
@@ -277,7 +296,7 @@ function main() {
   console.log(
     `${levels.length} levels: ${doc.exits.length} exits (${linked} linked), ${doc.entrances.length} entrances, ${doc.doors.length} doors, ` +
       `${doc.chests.length} chests, ${doc.containers.length} containers, ${doc.pickups.length} pickups, ${doc.digSpots.length} digging spots, ` +
-      `${doc.demonDoors.length} demon doors, ${doc.hooks.length} teleport doors -> ${out}`,
+      `${doc.demonDoors.length} demon doors, ${doc.hooks.length} teleport doors, ${doc.gates.length} Cullis Gates -> ${out}`,
   );
 }
 

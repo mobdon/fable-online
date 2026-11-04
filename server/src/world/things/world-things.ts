@@ -74,8 +74,22 @@ export interface HookThing extends ThingBase {
   to: Link | null;
 }
 
+/**
+ * A Cullis Gate (or the Guild's teleport pedestal): a thing with Fable's CTCTeleporter
+ * component. Kept apart from the usable things above because the travel rules own it
+ * (src/world/travel/travel.ts), not WorldObjects.
+ */
+export interface GateThing extends ThingBase {
+  /** The direction the gate faces; arrivals step out this way. */
+  fwd: [number, number] | null;
+  /** The Guild's own gate: every graduated hero can always travel there. */
+  guild: boolean;
+}
+
 export interface WorldThingsFile {
   v: 1;
+  /** Older extracts have no gates. */
+  gates?: GateThing[];
   exits: ExitThing[];
   doors: DoorThing[];
   chests: ChestThing[];
@@ -111,6 +125,8 @@ export class WorldThings {
   private all = new Map<string, AnyThing>();
   /** demon door id by the id of the exit it guards */
   readonly guardedExits = new Map<string, string>();
+  /** Cullis Gates, by id. Not part of get(): travel looks them up itself. */
+  readonly gates = new Map<string, GateThing>();
 
   constructor(f: WorldThingsFile) {
     const add = (t: AnyThing) => {
@@ -131,6 +147,7 @@ export class WorldThings {
     for (const t of f.demonDoors) add({ kind: 'demon_door', ...t });
     for (const t of f.hooks) add({ kind: 'hook', ...t });
     for (const d of f.demonDoors) if (d.exit) this.guardedExits.set(d.exit, d.id);
+    for (const g of f.gates ?? []) this.gates.set(g.id, g);
   }
 
   /** Load the extracted file, or an empty table so the server still runs without game files. */
