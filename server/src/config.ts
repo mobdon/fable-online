@@ -132,6 +132,18 @@ export interface ServerConfig {
   renownImportMax: number;
   /** After that one import, the most renown reports may add per hero per UTC day. */
   renownDailyMax: number;
+  /**
+   * Experience the server takes from a hero's own Fable (quest rewards, kills of monsters the
+   * server doesn't run, experience orbs) per UTC day. Server kills don't count towards it.
+   */
+  xpLocalDailyMax: number;
+  /** The first time a hero connects, experience and bought levels worth up to this are taken from the save. */
+  xpImportMax: number;
+  /**
+   * Experience the local game adds this soon after a server kill paid the same hero is taken
+   * as that kill's own orbs (the stand-in dying in Fable) and not paid twice.
+   */
+  xpEchoMs: number;
   /** 'reward': each kill pays the creature's reward value. 'tables': Fable's drop tables, gold only. */
   lootMode: 'reward' | 'tables';
   /** Most gold one hero can earn from monster kills per hour (0 = no cap). */
@@ -225,6 +237,9 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
     renownImportMax: num('FO_RENOWN_IMPORT_MAX', 5_000),
     renownDailyMax: num('FO_RENOWN_DAILY_MAX', 5_000),
+    xpLocalDailyMax: num('FO_XP_LOCAL_DAILY_MAX', 50_000),
+    xpImportMax: num('FO_XP_IMPORT_MAX', 250_000),
+    xpEchoMs: num('FO_XP_ECHO_MS', 15_000),
     lootMode: str('FO_LOOT_MODE', 'reward') === 'tables' ? 'tables' : 'reward',
     lootGoldPerHour: num('FO_LOOT_GOLD_PER_HOUR', 3_000),
     monsterRespawnSec: num('FO_RESPAWN_SEC', 300),

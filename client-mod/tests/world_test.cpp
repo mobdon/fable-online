@@ -11,6 +11,7 @@
 #include "world/reporter.h"
 #include "world/snapshot.h"
 #include "world/spawn_filter.h"
+#include "world/xp_sync.h"
 
 namespace {
 int g_failed = 0;
@@ -444,6 +445,67 @@ void test_gear_report() {
           "{\"t\":\"gear\",\"melee\":\"\",\"ranged\":\"OBJECT_YEW_LONGBOW\"}");
 }
 
+std::string xp_state(double seq, int general, int physique, const char* why) {
+    char b[256];
+    std::snprintf(b, sizeof b,
+                  "{\"t\":\"xp_state\",\"seq\":%.0f,\"pools\":[%d,0,0,0],\"total\":%d,\"stats\":[%d],\"abilities\":[0,0,1],\"why\":\"%s\"}",
+                  seq, general, general, physique, why);
+    return b;
+}
+
+void test_xp_sync() {
+    XpState st;
+    CHECK(parse_xp_state(xp_state(1000, 50, 2, "sync"), st));
+    CHECK(st.seq == 1000 && st.s.pools[0] == 50 && st.s.stats[0] == 2 && st.s.stats[9] == 0 && st.s.abilities[2] == 1);
+    CHECK(!parse_xp_state("{\"t\":\"xp_state\",\"seq\":1,\"pools\":[-1,0,0,0],\"stats\":[],\"abilities\":[]}", st));
+    CHECK(!parse_xp_state("{\"t\":\"tick\"}", st));
+
+    XpSync x;
+    XpSnapshot local;
+    local.pools[0] = 300;
+    local.total = 300;  // Fable's lifetime total, which the server also keeps
+    std::string f;
+    // First contact: report straight away, with no base.
+    CHECK(x.step(local, 0, f));
+    CHECK(f.find("\"base\":0") != std::string::npos && f.find("\"pools\":[300,0,0,0]") != std::string::npos);
+    CHECK(!x.step(local, 100, f));  // waiting for the answer
+    XpSnapshot out;
+    CHECK(!x.take_write(local, out));
+    // The server imported 300 general and Physique 0: Fable already has that, nothing to write.
+    XpState imp;
+    CHECK(parse_xp_state(xp_state(1000, 300, 0, "import"), imp));
+    imp.s.abilities[2] = 0;
+    x.on_state(imp);
+    CHECK(!x.take_write(local, out));
+    CHECK(!x.step(local, 200, f));
+
+    // Fable buys Physique 1 for 300: the change must settle, then it is reported once.
+    XpSnapshot bought = local;
+    bought.pools[0] = 0;
+    bought.stats[0] = 1;
+    CHECK(!x.step(bought, 1000, f));
+    CHECK(!x.step(bought, 1000 + kXpSettleMs - 1, f));
+    CHECK(x.step(bought, 1000 + kXpSettleMs, f));
+    CHECK(f.find("\"base\":1000") != std::string::npos && f.find("\"stats\":[1,") != std::string::npos);
+    // A kill lands while the report waits: it is kept but not written yet.
+    XpState kill;
+    CHECK(parse_xp_state(xp_state(1001, 340, 0, "kill"), kill));
+    x.on_state(kill);
+    CHECK(!x.take_write(bought, out));
+    // The server refuses the purchase: its answer goes into Fable, Physique back to 0.
+    XpState refused;
+    CHECK(parse_xp_state(xp_state(1002, 340, 0, "sync"), refused));
+    refused.s.abilities[2] = 0;
+    x.on_state(refused);
+    CHECK(x.take_write(bought, out));
+    CHECK(out.stats[0] == 0 && out.pools[0] == 340);
+    x.wrote();
+    CHECK(!x.step(out, 3000, f));
+    // An older state arriving late changes nothing.
+    x.on_state(kill);
+    CHECK(x.server_seq() == 1002);
+}
+
 int main() {
     std::printf("world tests\n");
     test_welcome();
@@ -461,6 +523,7 @@ int main() {
     test_health();
     test_death_view();
     test_gear_report();
+    test_xp_sync();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;
 }

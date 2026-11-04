@@ -6,6 +6,7 @@ import { ResumeTokens } from './resume.js';
 import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage, type TradeRequest, type PartyRequest } from './protocol.js';
 import { SHOP_REACH } from '../economy/shops.js';
 import { claimHeal } from '../combat/healing.js';
+import { wire as wireXp } from '../heroes/experience.js';
 import { townOf } from '../world/town/town-sim.js';
 import { shopIdOf } from '../world/town/townsfolk.js';
 
@@ -39,6 +40,7 @@ export class GameSocket {
   private travels = new Bucket(1, 3);
   private partyReqs = new Bucket(2, 6);
   private partyChats = new Bucket(1, 5);
+  private xpSyncs = new Bucket(2, 6);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -92,6 +94,9 @@ export class GameSocket {
         if (!this.interacts.take()) return this.dropped('interact flood');
         if (this.app.travel.isGate(msg.thing)) return this.send(this.app.travel.useGate(this.heroId, msg.thing));
         return this.send(this.exitAware(msg.thing, this.app.objects.interact(this.heroId, msg.thing, msg.action)));
+      case 'xp_sync':
+        if (!this.xpSyncs.take()) return this.dropped('xp_sync rate');
+        return this.xpSync(this.heroId, msg);
       case 'gates':
         if (!this.interacts.take()) return this.dropped('interact flood');
         return this.send(this.app.travel.list(this.heroId));
@@ -450,6 +455,24 @@ export class GameSocket {
     this.send({ t: 'dev_result', ok: true, message: `Removed ${r.removed.length}: ${r.removed.join(', ')}` });
   }
 
+  /**
+   * The mod's report of the local game's experience. The server keeps what it agrees with and
+   * answers with its own state, which the mod writes back into Fable: a refused purchase or a
+   * gain over the cap is undone there.
+   */
+  private xpSync(heroId: number, msg: Extract<ClientMessage, { t: 'xp_sync' }>): void {
+    const [general, strength, skill, will] = msg.pools;
+    const r = this.app.experience.sync(heroId, { base: msg.base, general, strength, skill, will, stats: msg.stats, abilities: msg.abilities });
+    this.send({
+      t: 'xp_state',
+      ...wireXp(r.state),
+      why: r.imported ? 'import' : 'sync',
+      ...(r.bought.length ? { bought: r.bought } : {}),
+      ...(r.refused.length ? { refused: r.refused } : {}),
+      ...(r.dropped > 0 ? { dropped: r.dropped } : {}),
+    });
+  }
+
   /** Staff dev tool: monsters next to the hero, run by the server. Refused for player accounts. */
   private devSpawn(heroId: number, def: string, count: number): void {
     const { app } = this;
@@ -549,6 +572,8 @@ export class GameSocket {
         client_move: app.cfg.clientMovement,
         // Monster defs the server runs: the mod drops the level files' own copies of them.
         ...(app.spawnDefs.length ? { spawn_defs: app.spawnDefs } : {}),
+        // The server keeps hero experience: the mod may send xp_sync (older servers refuse it).
+        xp: true,
       });
       if (resumed) app.events.emit({ type: 'player_resumed', heroId: hero.id });
       app.director.join(hero, link, resumed);

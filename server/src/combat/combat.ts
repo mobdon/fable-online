@@ -24,6 +24,15 @@ export interface DeathInfo {
   killer: Combatant | null;
   /** Damage each attacker did to the victim this life, for loot and experience credit. */
   damageBy: Map<number, number>;
+  /** The same damage split by how it was done (melee, ranged, Will), which decides the experience pools. */
+  styleBy: Map<number, DamageStyle>;
+}
+
+/** Damage by discipline: melee is Strength, arrows and bolts are Skill, spells are Will. */
+export interface DamageStyle {
+  strength: number;
+  skill: number;
+  will: number;
 }
 export type DeathListener = (d: DeathInfo) => void;
 /** Every landed hit, after armour and shields. `killed` is true when it was the killing blow. */
@@ -45,6 +54,7 @@ export const defaultHarmPolicy: HarmPolicy = (a, t) => {
 export class CombatSystem implements CombatPort {
   readonly all = new Map<number, Combatant>();
   private damageBy = new Map<number, Map<number, number>>();
+  private styleBy = new Map<number, Map<number, DamageStyle>>();
   private stunImmuneMs = new Map<number, number>();
   private knockedDown = new Set<number>();
   private spellCooldown = new Map<string, number>();
@@ -72,11 +82,13 @@ export class CombatSystem implements CombatPort {
   add(c: Combatant): void {
     this.all.set(c.id, c);
     this.damageBy.delete(c.id);
+    this.styleBy.delete(c.id);
   }
 
   remove(id: number): void {
     this.all.delete(id);
     this.damageBy.delete(id);
+    this.styleBy.delete(id);
     this.stunImmuneMs.delete(id);
     this.knockedDown.delete(id);
     for (const k of [...this.spellCooldown.keys()]) if (k.startsWith(`${id}:`)) this.spellCooldown.delete(k);
@@ -122,7 +134,7 @@ export class CombatSystem implements CombatPort {
       }
     }
     const stun = blocked ? 0 : kind === 'flourish' ? BALANCE.flourishStunMs : BALANCE.flinchMs;
-    const done = this.applyDamage(a, t, dmg, { armourFactor: ranged ? BALANCE.rangedArmourFactor : 1, stunMs: stun });
+    const done = this.applyDamage(a, t, dmg, { armourFactor: ranged ? BALANCE.rangedArmourFactor : 1, stunMs: stun, style: ranged ? 'skill' : 'strength' });
     return { ok: true, hit: true, targetId: t.id, damage: done, blocked, killed: !t.alive };
   }
 
@@ -168,7 +180,7 @@ export class CombatSystem implements CombatPort {
     if (targets.length === 0) return { ok: true, hit: false, reason: 'miss' };
     let total = 0;
     for (const t of targets) {
-      total += this.applyDamage(h, t, dmg, { armourFactor: BALANCE.spellArmourFactor, stunMs: BALANCE.flinchMs, lightning: spell === 'lightning' });
+      total += this.applyDamage(h, t, dmg, { armourFactor: BALANCE.spellArmourFactor, stunMs: BALANCE.flinchMs, lightning: spell === 'lightning', style: 'will' });
       if (spell === 'force_push') this.knockBack(h, t, 3);
     }
     if (spell === 'drain_life') h.health = Math.min(h.maxHealth, h.health + total);
@@ -232,6 +244,7 @@ export class CombatSystem implements CombatPort {
     c.attackCooldownMs = 0;
     c.blocking = false;
     this.damageBy.delete(id);
+    this.styleBy.delete(id);
   }
 
   // ---------------------------------------------------------------- internals
@@ -261,7 +274,12 @@ export class CombatSystem implements CombatPort {
   }
 
   /** Apply one hit after blocks. Returns the damage actually dealt. */
-  private applyDamage(a: Combatant, t: Combatant, raw: number, o: { armourFactor: number; stunMs: number; lightning?: boolean }): number {
+  private applyDamage(
+    a: Combatant,
+    t: Combatant,
+    raw: number,
+    o: { armourFactor: number; stunMs: number; lightning?: boolean; style?: keyof DamageStyle },
+  ): number {
     let dmg = raw;
     if (a.kind === 'hero' && t.kind === 'hero') dmg *= BALANCE.pvpScale;
     dmg *= 1 - armourReduction(t.armour, t.armourFixed) * o.armourFactor;
@@ -278,6 +296,13 @@ export class CombatSystem implements CombatPort {
     const by = this.damageBy.get(t.id) ?? new Map<number, number>();
     by.set(a.id, (by.get(a.id) ?? 0) + dmg);
     this.damageBy.set(t.id, by);
+    if (o.style && a.kind === 'hero') {
+      const styles = this.styleBy.get(t.id) ?? new Map<number, DamageStyle>();
+      const st = styles.get(a.id) ?? { strength: 0, skill: 0, will: 0 };
+      st[o.style] += dmg;
+      styles.set(a.id, st);
+      this.styleBy.set(t.id, styles);
+    }
     if (a.kind === 'hero') (a as Hero).combo = Math.min(BALANCE.comboCap, (a as Hero).combo + 1);
     if (t.kind === 'hero') {
       (t as Hero).combo = 0;
@@ -301,8 +326,9 @@ export class CombatSystem implements CombatPort {
     t.blocking = false;
     t.health = 0;
     if (t.kind === 'creature') (t as Creature).targetId = null;
-    const info: DeathInfo = { victim: t, killer, damageBy: this.damageBy.get(t.id) ?? new Map() };
+    const info: DeathInfo = { victim: t, killer, damageBy: this.damageBy.get(t.id) ?? new Map(), styleBy: this.styleBy.get(t.id) ?? new Map() };
     this.damageBy.delete(t.id);
+    this.styleBy.delete(t.id);
     this.hooks.onDeath?.(t.id, killer?.id ?? null);
     for (const fn of this.deathListeners) fn(info);
   }

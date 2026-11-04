@@ -253,4 +253,36 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (hero_id, day)
   );
   `,
+  /* 7: hero experience pools, bought stat and ability levels */ `
+  -- The server's copy of Fable's CTCHeroExperience and ability levels. The mod writes this
+  -- into the local game; nothing a client reports raises it without a server check.
+  CREATE TABLE hero_xp (
+    hero_id     INTEGER PRIMARY KEY REFERENCES heroes(id),
+    general     INTEGER NOT NULL DEFAULT 0 CHECK (general >= 0),
+    strength    INTEGER NOT NULL DEFAULT 0 CHECK (strength >= 0),
+    skill       INTEGER NOT NULL DEFAULT 0 CHECK (skill >= 0),
+    will        INTEGER NOT NULL DEFAULT 0 CHECK (will >= 0),
+    total       INTEGER NOT NULL DEFAULT 0 CHECK (total >= 0),
+    stats       TEXT NOT NULL DEFAULT '[]',  -- JSON: level per TrainableStatLevels slot
+    abilities   TEXT NOT NULL DEFAULT '[]',  -- JSON: level per ability slot, 0 = not owned
+    imported    INTEGER NOT NULL DEFAULT 0,  -- the save's own experience was taken once
+    local_day   TEXT,                        -- UTC day of local_today
+    local_today INTEGER NOT NULL DEFAULT 0,  -- experience taken from the local game that day
+    updated_at  INTEGER NOT NULL
+  );
+
+  -- Every change to a hero's experience, for support and the economy watchdog.
+  CREATE TABLE hero_xp_log (
+    id       INTEGER PRIMARY KEY,
+    hero_id  INTEGER NOT NULL REFERENCES heroes(id),
+    kind     TEXT NOT NULL,   -- kill, local, import, buy, refund, admin
+    detail   TEXT,
+    general  INTEGER NOT NULL DEFAULT 0,
+    strength INTEGER NOT NULL DEFAULT 0,
+    skill    INTEGER NOT NULL DEFAULT 0,
+    will     INTEGER NOT NULL DEFAULT 0,
+    at       INTEGER NOT NULL
+  );
+  CREATE INDEX hero_xp_log_hero ON hero_xp_log(hero_id, at);
+  `,
 ];

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { GameBin, NamesBin, fieldOffset, readF32, readI32, type Def } from './fable-bin.js';
 import { extractBoasts } from './boasts.js';
 import type { CreatureData, GameData, ItemData, QuestCardData, RewardRow, SpellData, WeaponClass, WeaponType } from './game-data.js';
+import { STAT_BY_SLOT, DISCIPLINES, abilityDiscipline, type Progression } from '../heroes/xp-tables.js';
 
 /**
  * Pulls the numbers the server needs out of game.bin. Each field below was identified by
@@ -24,6 +25,14 @@ export const FIELDS = {
   objectFamily: { rows: 0xe0cb2a11 },
   /** CREATURE_GENERATION_FAMILY: u32 count, then that many creature def refs. */
   family: { creatures: 0xc50c0369 },
+  /**
+   * MAIN_HERO_STATS holds the trainable stat tracks in slot order. Each track is
+   * { category (0 Strength, 1 Skill, 2 Will), u32 level count, count x level row }, and a
+   * level row is { cost hash, i32 cost, ?, ?, text hash, text id } (24 bytes).
+   */
+  heroStats: { category: 0x1fa67c0c, levels: 0xdcc01ba9, cost: 0x273817d1 },
+  /** HERO_ABILITY: inventory slot (0..19), u32 4 + 4 x i32 experience cost per level. */
+  heroAbility: { slot: 0xaf220b38, costs: 0xfafc8a1b },
 } as const;
 
 const WEAPON_TYPES: WeaponType[] = ['sword', 'axe', 'hammer', 'longbow', 'crossbow'];
@@ -157,7 +166,46 @@ export function extract(gameBin: Buffer, namesBin: Buffer, scriptBin?: Buffer): 
     families,
     questCards,
     rewardTables,
+    progression: progression(g),
   };
+}
+
+/** Experience prices: the trainable stat tracks and each HERO_ABILITY's cost per level. */
+export function progression(g: GameBin): Progression | undefined {
+  const out: Progression = { stats: [], abilities: [] };
+  const hs = g.def('MAIN_HERO_STATS');
+  if (hs) {
+    const b = g.own(hs);
+    const key = (h: number) => {
+      const k = Buffer.alloc(4);
+      k.writeUInt32LE(h >>> 0);
+      return k;
+    };
+    let slot = 0;
+    for (let o = b.indexOf(key(FIELDS.heroStats.levels)); o >= 0 && slot < STAT_BY_SLOT.length; o = b.indexOf(key(FIELDS.heroStats.levels), o + 4), slot++) {
+      const category = o >= 8 && b.readUInt32LE(o - 8) === FIELDS.heroStats.category ? b.readInt32LE(o - 4) : -1;
+      const n = b.readUInt32LE(o + 4);
+      const costs: number[] = [];
+      for (let i = 0, p = o + 8; i < n && i < 16 && p + 8 <= b.length; i++, p += 24) {
+        if (b.readUInt32LE(p) !== FIELDS.heroStats.cost) break;
+        costs.push(Math.max(0, b.readInt32LE(p + 4)));
+      }
+      const id = STAT_BY_SLOT[slot];
+      const discipline = DISCIPLINES[category];
+      if (id && discipline && costs.length >= 2) out.stats.push({ slot, id, discipline, costs });
+    }
+  }
+  for (const def of g.group('HERO_ABILITY')) {
+    const own = g.own(def);
+    const slot = readI32(own, FIELDS.heroAbility.slot);
+    const o = fieldOffset(own, FIELDS.heroAbility.costs);
+    if (slot === undefined || o < 0 || o + 4 > own.length) continue;
+    const n = own.readUInt32LE(o);
+    const costs: number[] = [];
+    for (let i = 0; i < n && i < 8 && o + 8 + i * 4 <= own.length; i++) costs.push(Math.max(0, own.readInt32LE(o + 4 + i * 4)));
+    if (costs.length) out.abilities.push({ slot, def: def.name, discipline: abilityDiscipline(def.name), costs });
+  }
+  return out.stats.length || out.abilities.length ? out : undefined;
 }
 
 /** A `u32 n` + n x def ref list, as names. */

@@ -4,7 +4,7 @@ set(FO_MOD_SOURCES
   src/game/hero.cpp src/game/world_time.cpp src/game/weather.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/quests.cpp src/game/spirits.cpp src/game/shop_stock.cpp src/game/shop_stock_hook.cpp src/game/defs_edit.cpp src/game/menu_row.cpp src/util/inflate.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp src/game/gear.cpp src/game/menu_pages.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
-  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/death.cpp src/world/held.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp src/world/sky.cpp
+  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/death.cpp src/world/held.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp src/world/sky.cpp src/world/xp_sync.cpp src/game/hero_xp.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp src/ui/trade_model.cpp src/ui/party_model.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
@@ -24,7 +24,7 @@ add_custom_command(TARGET fable_online POST_BUILD
 
 # The parts with no Windows or game dependencies are tested on their own; see tests/run.sh.
 if(FO_BUILD_TESTS)
-  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/death.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp)
+  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/death.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp src/world/xp_sync.cpp src/ui/json.cpp)
   target_include_directories(world_tests PRIVATE src)
   add_executable(sky_tests tests/sky_test.cpp src/world/sky.cpp src/ui/json.cpp)
   target_include_directories(sky_tests PRIVATE src)

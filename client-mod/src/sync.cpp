@@ -12,6 +12,7 @@
 #include "config.h"
 #include "crash_exit.h"
 #include "game/gear.h"
+#include "game/hero_xp.h"
 #include "game/hook.h"
 #include "game/menu_pages.h"
 #include "game/puppet.h"
@@ -39,6 +40,7 @@
 #include "world/reporter.h"
 #include "world/sky.h"
 #include "world/snapshot.h"
+#include "world/xp_sync.h"
 
 namespace fo::sync {
 namespace {
@@ -137,6 +139,14 @@ struct State {
     bool syncWeather = true;
     /** The mod turned Fable's rain or snow override on, so it has to turn it off again. */
     bool rainSet = false, snowSet = false;
+    /** Hero experience kept in step with the server (only when its welcome offers it). */
+    world::XpSync xp;
+    bool serverXp = false;
+    bool xpOn = true;
+    uint32_t lastXpMs = 0;
+    uint32_t xpWrites = 0;
+    /** The hero object whose experience components were last missing, so that is logged once. */
+    uintptr_t xpMissingLogged = 0;
 };
 
 State* g_state = nullptr;
@@ -160,6 +170,8 @@ void on_connected() {
     g_state->puppets->clear_all();
     g_state->death.reset();
     overlay::set_fade(0, "");
+    g_state->xp.reset();
+    g_state->serverXp = false;
     if (g_state->suppressSpawns) game::spawns::suppress();
 }
 
@@ -173,6 +185,8 @@ void on_disconnected(const std::string& why) {
             static_cast<unsigned>(g_state->puppets->live_count()));
     g_state->table.clear();
     g_state->objects.clear();
+    g_state->xp.reset();
+    g_state->serverXp = false;
     // Nobody will answer what is held: let Fable carry on by itself.
     g_state->held.release_all("offline");
     g_state->puppets->clear_all();
@@ -365,6 +379,57 @@ void restore_clock() {
     s.fableSpeed = -1;
 }
 
+/** The server's experience for this hero: kept, and written into Fable by sync_xp. */
+void on_xp_state(const std::string& json) {
+    State& s = *g_state;
+    world::XpState st;
+    if (!world::parse_xp_state(json, st)) {
+        fo::log("sync: xp: could not read %s", json.c_str());
+        return;
+    }
+    s.xp.on_state(st);
+    if (st.why != "kill" || s.dev)
+        fo::log("sync: xp: server has general %d, strength %d, skill %d, will %d (%s%s%s)", st.s.pools[0], st.s.pools[1], st.s.pools[2],
+                st.s.pools[3], st.why.c_str(), st.bought ? ", kept a purchase" : "", st.refused ? ", refused a purchase" : "");
+    if (st.refused) fo::log("sync: xp: refused: %s", json.c_str());
+}
+
+/**
+ * Hero experience: report what Fable changed by itself (a purchase, a quest reward) and write
+ * the server's numbers back in. Runs a few times a second, never while a region loads.
+ */
+void sync_xp(uint32_t nowMs) {
+    State& s = *g_state;
+    if (!s.xpOn || !s.serverXp || !net::world_connected() || s.objects.loading()) return;
+    if (nowMs - s.lastXpMs < 200) return;
+    s.lastXpMs = nowMs;
+    uintptr_t hero = game::local_hero();
+    if (!hero) return;
+    world::XpSnapshot local;
+    if (!game::read_xp(hero, local)) {
+        if (s.xpMissingLogged != hero) {
+            s.xpMissingLogged = hero;
+            fo::log("sync: xp: can't read the hero's experience yet (%s not found)", game::xp_missing(hero));
+        }
+        return;
+    }
+    std::string frame;
+    if (s.xp.step(local, nowMs, frame)) {
+        net::world_send(frame);
+        fo::log("sync: xp: Fable has general %d, strength %d, skill %d, will %d; telling the server", local.pools[0], local.pools[1],
+                local.pools[2], local.pools[3]);
+    }
+    world::XpSnapshot want;
+    if (!s.xp.take_write(local, want)) return;
+    if (!game::write_xp(hero, want)) {
+        fo::log("sync: xp: could not write the server's experience into Fable");
+        return;
+    }
+    s.xp.wrote();
+    if (++s.xpWrites <= 20 || s.dev)
+        fo::log("sync: xp: wrote the server's experience into Fable (general %d -> %d)", local.pools[0], want.pools[0]);
+}
+
 void handle_frame(const std::string& json, uint32_t nowMs) {
     State& s = *g_state;
     // Player trading belongs to the overlay's trade window.
@@ -387,6 +452,8 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         if (!w.resume.empty()) net::world_set_resume(w.resume);
         // The monsters the server runs: the level files' own copies of those are left out.
         if (s.suppressSpawns) game::spawns::set_server_defs(w.spawnDefs);
+        // Servers that keep hero experience say so; older ones would drop the connection on xp_sync.
+        s.serverXp = json.find("\"xp\":true") != std::string::npos;
         fo::log("sync: joined as %s (entity %u), server ticks %u a second, position reports %s%s", w.name.c_str(),
                 w.playerId, w.tickRate, w.clientMove.c_str(), w.resume.empty() ? "" : ", can resume");
         return;
@@ -487,6 +554,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
             fo::log("sync: server answered the gear report: %s", json.c_str());
         if (json.rfind("{\"t\":\"quest_reward\"", 0) == 0) return on_quest_reward(json);
         if (json.rfind("{\"t\":\"sky\"", 0) == 0) return on_sky_frame(json, nowMs);
+        if (json.rfind("{\"t\":\"xp_state\"", 0) == 0) return on_xp_state(json);
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -941,6 +1009,7 @@ void tick() {
     report_renown(now);
     report_gear(now);
     sync_clock(now);
+    sync_xp(now);
     sync_trade(now);
     report_quests();
 
@@ -986,6 +1055,8 @@ void start() {
     // Fable's clock follows the realm's (FABLE_ONLINE_SYNC_CLOCK=0 leaves it alone).
     s.syncClock = env_flag("FABLE_ONLINE_SYNC_CLOCK", true);
     s.syncWeather = env_flag("FABLE_ONLINE_SYNC_WEATHER", true);
+    // Hero experience from the server (FABLE_ONLINE_XP=0 leaves Fable's own alone).
+    s.xpOn = env_flag("FABLE_ONLINE_XP", true);
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
     s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));

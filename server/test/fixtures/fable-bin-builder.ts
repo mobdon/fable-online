@@ -5,7 +5,7 @@ import { fableHash } from '../../src/data/fable-bin.js';
  * Builds tiny synthetic names.bin + game.bin pairs in Fable's layout, so the decoder and
  * extractor can be tested without any game files. All names and numbers here are made up.
  */
-export type Field = { name: string | number; i32?: number; f32?: number; ref?: string; refs?: string[] };
+export type Field = { name: string | number; i32?: number; f32?: number; ref?: string; refs?: string[]; i32s?: number[] };
 
 export interface DefSpec {
   group: string;
@@ -48,7 +48,11 @@ export function buildBins(types: string[], defs: DefSpec[], chunkSize = 3): { ga
         const h = Buffer.alloc(4);
         h.writeUInt32LE(typeof f.name === 'number' ? f.name : fableHash(f.name));
         let v: Buffer;
-        if (f.refs) {
+        if (f.i32s) {
+          v = Buffer.alloc(4 + 4 * f.i32s.length);
+          v.writeUInt32LE(f.i32s.length);
+          f.i32s.forEach((n, i) => v.writeInt32LE(n, 4 + i * 4));
+        } else if (f.refs) {
           v = Buffer.alloc(4 + 4 * f.refs.length);
           v.writeUInt32LE(f.refs.length);
           f.refs.forEach((r, i) => v.writeInt32LE(defIndex.get(r) ?? -1, 4 + i * 4));

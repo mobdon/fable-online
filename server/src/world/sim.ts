@@ -88,6 +88,8 @@ export interface RegionSim {
    * fight with it from now on. Health stays as it is. Sims without combat leave this out.
    */
   refreshLoadout?(heroId: number): void;
+  /** The hero's bought levels changed: sims that keep combat stats re-read them. */
+  refreshHero?(heroId: number): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
   /**

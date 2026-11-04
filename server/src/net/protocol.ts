@@ -78,6 +78,13 @@ export type ClientMessage =
    */
   | { t: 'travel'; to: string; from?: string }
   | { t: 'gates' }
+  /**
+   * What the local game says the hero's experience is (src/heroes/experience.ts). The server
+   * treats a higher level as a purchase it prices and checks, and a rise in the pools as
+   * experience Fable gave by itself, taken up to a cap. `base` is the seq of the last
+   * xp_state the mod wrote, 0 for none. Pools are [general, strength, skill, will].
+   */
+  | { t: 'xp_sync'; base: number; pools: [number, number, number, number]; stats: number[]; abilities: number[] }
   | LawRequest;
 
 /**
@@ -203,6 +210,20 @@ export function decode(raw: string): ClientMessage {
     }
     case 'gates':
       return { t: 'gates' };
+    case 'xp_sync': {
+      const ints = (v: unknown, n: number, max: number, what: string) => {
+        if (!Array.isArray(v) || v.length > n) throw new ProtocolError(`bad ${what}`);
+        const out = new Array<number>(n).fill(0);
+        v.forEach((x, i) => {
+          if (!isNum(x) || !Number.isInteger(x) || x < 0 || x > max) throw new ProtocolError(`bad ${what}`);
+          out[i] = x;
+        });
+        return out;
+      };
+      const pools = ints(m.pools, 4, 1e9, 'pools') as [number, number, number, number];
+      const base = isNum(m.base) && Number.isSafeInteger(m.base) && m.base >= 0 ? m.base : 0;
+      return { t: 'xp_sync', base, pools, stats: ints(m.stats, 10, 16, 'stats'), abilities: ints(m.abilities, 20, 8, 'abilities') };
+    }
     case 'party': {
       if (typeof m.op !== 'string' || !PARTY_OPS.has(m.op as PartyOp)) throw new ProtocolError('bad party op');
       // eslint-disable-next-line no-control-regex

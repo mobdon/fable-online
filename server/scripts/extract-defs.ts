@@ -19,5 +19,6 @@ const weapons = Object.values(data.items).filter((i) => i.weapon).length;
 console.log(
   `wrote ${out}: ${Object.keys(data.items).length} items (${weapons} weapons), ${Object.keys(data.creatures).length} creatures, ` +
     `${data.abilities.length} hero abilities, ${Object.keys(data.spells).length} spell defs, ` +
-    `${Object.keys(data.questCards).length} quest cards (${Object.values(data.questCards).filter((c) => c.boastGold !== undefined).length} with boasts${script ? '' : '; no script.bin found'})`,
+    `${Object.keys(data.questCards).length} quest cards (${Object.values(data.questCards).filter((c) => c.boastGold !== undefined).length} with boasts${script ? '' : '; no script.bin found'}), ` +
+    `experience prices for ${data.progression?.stats.length ?? 0} stats and ${data.progression?.abilities.length ?? 0} abilities`,
 );
