@@ -125,6 +125,26 @@ against them:
 
 Exits that only exist in quest sections are left to the client's quest for now.
 
+### Cullis Gates and the Guild Seal
+
+`server/src/world/travel/travel.ts` (`Travel`). The extractor lists every thing with a
+`CTCTeleporter` component as a gate (`gates` in `world-things.json`), the Guild's
+`OBJECT_GUILD_PEDESTAL_TELEPORT_01` marked `guild`. Teleporters in buyable houses and
+switched-off models (`*_OFF_*`) are left out, and a gate placed twice at the same spot (a
+quest section swapping models) is kept once.
+
+| Rule | Detail |
+| --- | --- |
+| Unlocking | A gate unlocks for a hero when the server's copy of the hero is within 12 m of it (checked about once a second), or stands in it and walks in. Stored per hero in `hero_flags` as `gate:<id>`. Nothing the client says unlocks a gate. The Guild is always open. |
+| Who can travel | Graduated heroes in a shared channel, alive, not loading a region, not wanted or in prison (the law's `cullis_gate` check in `Director.transfer`). |
+| Combat | No travel for 10 s after dealing or taking a hit (`RegionSim.combatState`). |
+| Cooldown | 10 s between jumps. |
+| Barriers | No travel out of or into `DemonDoor_*`, the prisons, `BowerstoneJail`, `Arena` and `ArenaCells`. |
+| Seal jump | Travel without `from` is a Guild Seal jump from anywhere and remembers where the hero left; `to: "back"` returns there once. The way back is kept in memory, not across logouts. |
+| Gate to gate | With `from`, the hero must stand within 4 m of that gate; no way back is set. |
+| Arrival | 2.5 m out of the gate along its facing, then the usual `enter_region` (`via: "cullis_gate"`, `thing`: the gate) and the region-load freeze. |
+| Parties | `Travel.parties` (unset until parties exist). Members in the same channel within 20 m who pass the same checks go along and land around the arrival point; the rest are told `travel_result` with `left_behind_by`. |
+
 ## Protocol
 
 Client to server:
@@ -133,6 +153,8 @@ Client to server:
 | --- | --- |
 | `{"t":"interact","thing":"LookoutPoint:112","action":"use"}` | The hero used a thing. `action` is `use` (default), `open`, `close`, or `opened` (demon doors). On an exit, `use` means Fable fired it and is waiting for the server. |
 | `{"t":"region_ready","region":"GreatwoodEntrance"}` | The local game finished loading the region it was sent to. |
+| `{"t":"gates"}` | List the gates this hero can travel to. An `interact` on a gate does the same and unlocks it if the hero is there. |
+| `{"t":"travel","to":"LookoutPoint:5"\|"guild"\|"back","from":"Greatwood:7"}` | Travel. `from` (optional) is the gate the hero stands in; without it this is a Guild Seal jump. |
 
 Server to client:
 
@@ -143,6 +165,9 @@ Server to client:
 | `{"t":"object","id":...,"open":true}` / `{"gone":true}` / `{"opened":true}` | One thing changed. |
 | `{"t":"loot","thing":...,"gold":500,"items":[{"item_id","def"}],"blocked":[],"again":false}` | What the hero got. `again` means they already had it and nothing new was made. |
 | `{"t":"ok","thing":...}` | Accepted an exit or a door that loads another region; `enter_region` follows. |
+| `{"t":"gates","gates":[{"id","region","guild"}],"guild":true,"back":{"region"}\|null}` | Where this hero can travel. |
+| `{"t":"gate_unlocked","id":...,"region":...}` | The hero just found a gate. |
+| `{"t":"travel_result","ok":true,"to":...,"region":...,"party":[ids]}` / `{"ok":false,"error":"locked"\|"in_combat"\|"cooldown"\|"barred"\|"no_return"\|"too_far"\|"wanted"\|...}` | Answer to `travel`. Party members who went along get `"with":<leader>`; ones left behind get `"left_behind_by":<leader>`. On success `enter_region` follows. |
 | `{"t":"error","error":"too_far"\|"need_keys"\|"gone"\|"locked"\|"demon_door_closed"\|...,"thing":...}` | Refused. |
 
 ## The client side

@@ -23,6 +23,7 @@ import { NavStore } from './world/nav/navmesh.js';
 import { monsterAi } from './world/ai/combat-ai.js';
 import { WorldThings } from './world/things/world-things.js';
 import { WorldObjects } from './world/things/objects.js';
+import { Travel } from './world/travel/travel.js';
 import fs from 'node:fs';
 import { Law, type LawHost } from './law/law.js';
 import { mergeRules } from './law/rules.js';
@@ -51,6 +52,8 @@ export interface App {
   regions: RegionTable;
   director: Director;
   objects: WorldObjects;
+  /** Cullis Gate and Guild Seal travel. */
+  travel: Travel;
   law: Law;
   clock: WorldClock;
   town: TownData;
@@ -142,7 +145,9 @@ export function createApp(
     (id, region, p) => heroes.savePosition(id, region, p.x, p.y, p.z),
     clock,
   );
-  const objects = new WorldObjects(opts.things ?? WorldThings.load(cfg.thingsPath), director, economy, db, events);
+  const things = opts.things ?? WorldThings.load(cfg.thingsPath);
+  const objects = new WorldObjects(things, director, economy, db, events);
+  const travel = new Travel(things, director, heroes, db, events);
   law.attach(lawHost(director, regions));
   trades.attach({
     send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
@@ -180,6 +185,7 @@ export function createApp(
     regions,
     director,
     objects,
+    travel,
     law,
     clock,
     town,

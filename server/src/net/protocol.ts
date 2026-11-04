@@ -5,8 +5,9 @@ import type { PlayerInput } from '../world/sim.js';
  * shared/protocol/messages.proto). The codec is isolated here so it can move to protobuf
  * binary frames without touching game code.
  *
- * Client -> server: hello, input, chat, interact, region_ready, ping, plus the shop, heal, law
- * and trade requests below. That is all a client can say: intent, never state. Positions, health, gold and items only ever flow
+ * Client -> server: hello, input, chat, interact, region_ready, ping (plus the requests
+ * below: quests, positions, shops, heals, travel, trade, law). That is all a client
+ * can say: intent, never state. Positions, health, gold and items only ever flow
  * server -> client. "interact" names a thing the hero wants to use; the server decides
  * whether they can reach it and what happens.
  */
@@ -48,6 +49,13 @@ export type ClientMessage =
    */
   | { t: 'dev_spawn'; def: string; count: number }
   | TradeRequest
+  /**
+   * Cullis Gate / Guild Seal travel. `to` is a gate's thing id, "guild" or "back" (to where
+   * the last seal jump left from). `from` names the gate the hero is standing in; without it
+   * this is a seal jump. `gates` asks for the list of gates this hero can travel to.
+   */
+  | { t: 'travel'; to: string; from?: string }
+  | { t: 'gates' }
   | LawRequest;
 
 /**
@@ -154,6 +162,14 @@ export function decode(raw: string): ClientMessage {
     }
     case 'law':
       return decodeLaw(m);
+    case 'travel': {
+      const to = m.to === 'guild' || m.to === 'back' ? m.to : typeof m.to === 'string' && THING_ID.test(m.to) ? m.to : null;
+      if (!to) throw new ProtocolError('bad travel');
+      if (m.from !== undefined && (typeof m.from !== 'string' || !THING_ID.test(m.from))) throw new ProtocolError('bad travel');
+      return m.from === undefined ? { t: 'travel', to } : { t: 'travel', to, from: m.from as string };
+    }
+    case 'gates':
+      return { t: 'gates' };
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
     case 'heal':

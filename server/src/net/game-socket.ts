@@ -31,6 +31,7 @@ export class GameSocket {
   private tradeReqs = new Bucket(4, 10);
   private tradeInvites = new Bucket(0.2, 3);
   private devSpawns = new Bucket(1, 5);
+  private travels = new Bucket(1, 3);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -80,7 +81,16 @@ export class GameSocket {
       }
       case 'interact':
         if (!this.interacts.take()) return this.dropped('interact flood');
+        if (this.app.travel.isGate(msg.thing)) return this.send(this.app.travel.useGate(this.heroId, msg.thing));
         return this.send(this.app.objects.interact(this.heroId, msg.thing, msg.action));
+      case 'gates':
+        if (!this.interacts.take()) return this.dropped('interact flood');
+        return this.send(this.app.travel.list(this.heroId));
+      case 'travel': {
+        if (!this.travels.take()) return this.send({ t: 'travel_result', ok: false, to: msg.to, error: 'rate', message: 'Slow down' });
+        const target = msg.to === 'guild' ? { guild: true as const } : msg.to === 'back' ? { back: true as const } : { gate: msg.to };
+        return this.send(this.app.travel.travel(this.heroId, target, msg.from));
+      }
       case 'region_ready':
         this.app.director.regionReady(this.heroId, msg.region);
         return;
