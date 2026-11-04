@@ -25,8 +25,10 @@ class ThingRef {
     bool held() const { return held_; }
     /** Asks the engine whether the thing behind this reference is still alive. */
     bool alive() const;
-    /** The CThing the reference points at, or 0. Used for direct component reads. */
+    /** The CThing behind the reference, or 0 (also once the engine has freed it). */
     uintptr_t thing() const;
+    /** The script wrapper the reference holds (CGameScriptThing), for its own slots. */
+    uintptr_t script_thing() const;
     void release();
 
     void* raw() { return storage_; }

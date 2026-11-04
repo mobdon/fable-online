@@ -76,6 +76,7 @@ class PuppetPool {
         bool described = false;
         bool animOk = false;  // the last animation was taken
         uint32_t flinchUntilMs = 0;
+        uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);

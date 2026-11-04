@@ -192,3 +192,12 @@ valid MSVC RTTI (vtable-4 -> complete object locator, signature 0 -> type descri
 ".?AV..."), the thing's class name contains "Creature", and the stand-in is at least
 2 s old. A refusal is logged with the failed check ("anims: refused ...").
 An unknown ST_ name falls back to the def's default animation inside 0x00662D80.
+
+## Script references hold a CGameScriptThing, not the CThing
+
+A script reference ({vtable 0x01238C8C, object*, counter*}) points at a CGameScriptThing
+(vtable 0x012852CC), the script runner's wrapper. Its CThingPtr is at +0x0C
+({vtable, control*}); the control block's first dword is the CThing, or 0 once the engine
+has freed it (0x00A01B50). Reading component or creature fields straight off the wrapper
+gives the garbage seen at +0x70. The wrapper's own slots (e.g. vtable +0x18, the "near"
+value CreateNear asks for) are still called on the wrapper itself.

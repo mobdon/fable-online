@@ -111,6 +111,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             ++stats_.reused;
             return true;
         }
+        mark_stand_in(p.thingAddr, false);
         ++stats_.lost;  // the engine freed it while it was parked
     }
 
@@ -132,6 +133,8 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     script::clear_commands(p.ref);
     p.lastCommandsMs = nowMs;
     p.createdMs = nowMs;
+    p.thingAddr = p.ref.thing();
+    mark_stand_in(p.thingAddr, true);
     fo::log("puppet: created %s as %s for entity %u", def.c_str(), name, s.id);
     live_.emplace(s.id, std::move(p));
     ++stats_.spawned;
@@ -170,6 +173,7 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     if (!thing || !p.ref.alive()) {
         // Fable freed it: it loaded another area. Make it again once things have settled.
         ++stats_.lost;
+        mark_stand_in(p.thingAddr, false);
         pending_[pose.id] = p.spawn;
         live_.erase(it);
         hold(nowMs, kHoldAfterLossMs);

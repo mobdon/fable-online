@@ -4,6 +4,8 @@
 
 #include <cmath>
 #include <cstring>
+#include <mutex>
+#include <unordered_set>
 
 #include "../log.h"
 
@@ -11,6 +13,14 @@ namespace fo::game {
 namespace {
 
 uintptr_t g_hero = 0;
+// Stand-ins are made from the hero's own def, so a scan for the hero must skip them.
+std::mutex g_standInsMu;
+std::unordered_set<uintptr_t> g_standIns;
+
+bool is_stand_in(uintptr_t a) {
+    std::lock_guard<std::mutex> lock(g_standInsMu);
+    return g_standIns.count(a) != 0;
+}
 DWORD g_lastScan = 0;
 
 bool read(uintptr_t addr, void* out, size_t n) {
@@ -103,7 +113,7 @@ uintptr_t local_hero() {
         buf.resize(size / 4);
         if (!read(lo, buf.data(), buf.size() * 4)) return;
         for (size_t i = 0; i < buf.size(); ++i)
-            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4)) {
+            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4) && !is_stand_in(lo + i * 4)) {
                 found = lo + i * 4;
                 return;
             }
@@ -116,6 +126,15 @@ uintptr_t local_hero() {
 }
 
 void forget_hero() { g_hero = 0; }
+
+void mark_stand_in(uintptr_t thing, bool on) {
+    if (!thing) return;
+    std::lock_guard<std::mutex> lock(g_standInsMu);
+    if (on)
+        g_standIns.insert(thing);
+    else
+        g_standIns.erase(thing);
+}
 
 bool read_pos(uintptr_t thing, Pos& out) {
     uintptr_t phys = physics_of(thing);

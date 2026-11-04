@@ -51,6 +51,9 @@ constexpr uint32_t kThingCreatureFlags = 0x6C;  // bit 3: is a creature with an 
 
 /** What 0x00662D80 reads first: thing+0x70 must be an object with a vtable (0x0042B0A2). */
 constexpr uint32_t kThingAnimSource = 0x70;
+/** What a script reference holds: a CGameScriptThing, with the CThingPtr at +0x0C. */
+constexpr uint32_t kGameScriptThingVtable = 0x012852CC;
+constexpr uint32_t kGameScriptThingPtr = 0x0C;
 /** The second object it reads (+0x134, then its vfunc +0x10 through 0x0073A6E0). */
 constexpr uint32_t kThingAnimTables = 0x134;
 
@@ -179,11 +182,23 @@ bool ThingRef::alive() const {
     return as<bool(__thiscall*)(const void*)>(reinterpret_cast<void*>(kRefAlive))(storage_);
 }
 
-uintptr_t ThingRef::thing() const {
+uintptr_t ThingRef::script_thing() const {
     if (!held_) return 0;
     uint32_t t = 0;
     std::memcpy(&t, storage_ + 4, 4);
     return readable(t, 4) ? t : 0;
+}
+
+uintptr_t ThingRef::thing() const {
+    // The reference holds a CGameScriptThing, the script runner's wrapper. The CThing is
+    // behind its CThingPtr at +0x0C: {vtable, control*}, and the control block's first
+    // dword is the thing (0 once the engine has freed it), as 0x00A01B50 reads it.
+    uintptr_t gst = script_thing();
+    if (!gst || !readable(gst, kGameScriptThingPtr + 8) || read_ptr(gst) != kGameScriptThingVtable) return 0;
+    uintptr_t ctrl = read_ptr(gst + kGameScriptThingPtr + 4);
+    if (!ctrl || !readable(ctrl, 4)) return 0;
+    uintptr_t thing = read_ptr(ctrl);
+    return thing && readable(thing, 0x110) ? thing : 0;
 }
 
 // ---------- lookups ----------
@@ -219,7 +234,8 @@ bool create_near(const char* def, const char* script_name, float radius, ThingRe
 
     ThingRef near_hero;
     if (!hero(near_hero)) return false;
-    uintptr_t thing = near_hero.thing();
+    // The "near" value comes from the script wrapper's own slot, as the script runner asks it.
+    uintptr_t thing = near_hero.script_thing();
     if (!thing) return false;
     void* near_fn = slot(thing, kThingNearValue);
     void* create_fn = slot(obj, kCreateNear);
