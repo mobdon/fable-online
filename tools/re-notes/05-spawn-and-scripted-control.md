@@ -108,6 +108,12 @@ The handle is not needed: every handle slot finds the thing's `CTCScriptedContro
 the same map the movement code reads `ST_WALK` and `ST_RUN` from (`0x00663610`). So
 `ST_IDLE`, `ST_WALK`, `ST_RUN` and the other `ST_*` names play each creature's own loop.
 
+The puppets map the server's anim ids to these names (`client-mod/src/game/puppet.cpp`,
+`spec_for`): `ST_IDLE`, `ST_WALK`, `ST_RUN`, `ST_STRIKE_LEFT`/`ST_STRIKE_RIGHT`,
+`ST_IDLE_MELEE`, `ST_BACK_HIT`, `ST_DIE` then `ST_DEATH_FRAME`, `ST_LEAP_IN`,
+`ST_BLOCK_LOOP`, `ST_TAUNT`. All appear in `names.bin`. Which creature defs map each one is not
+checked yet: a name a creature lacks falls back to a default inside `0x00662D80`.
+
 `.ClearCommands` (+0x840) only zeroes component 0x30 +0x1C; it does not touch this queue.
 
 ## Creature generators

@@ -26,8 +26,8 @@ struct PuppetStats {
     uint32_t animsRefused = 0;  // no scripted-control component, or a pointer looked wrong
 };
 
-/** The locomotion loop a puppet is playing, picked from the server's anim field. */
-enum class Gait : uint8_t { None, Idle, Walk, Run };
+/** What a puppet is playing, picked from the server's anim field (world::Anim). */
+enum class Gait : uint8_t { None, Idle, Walk, Run, Attack, Alert, Hit, Death, Leap, Block, Taunt };
 
 class PuppetPool {
   public:
@@ -68,6 +68,7 @@ class PuppetPool {
         uint32_t wantedSinceMs = 0;
         uint32_t lastAnimMs = 0;
         uint32_t animSeq = 0;
+        uint32_t strikes = 0;  // alternates left and right swings
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);

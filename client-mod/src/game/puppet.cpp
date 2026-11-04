@@ -34,17 +34,44 @@ Gait gait_for(const world::Pose& pose) {
         case world::Anim::Run: return Gait::Run;
         case world::Anim::Walk:
         case world::Anim::Strafe: return Gait::Walk;
+        case world::Anim::Attack: return Gait::Attack;
+        case world::Anim::Alert: return Gait::Alert;
+        case world::Anim::Hit: return Gait::Hit;
+        case world::Anim::Death: return Gait::Death;
+        case world::Anim::Leap: return Gait::Leap;
+        case world::Anim::Block: return Gait::Block;
+        case world::Anim::Taunt: return Gait::Taunt;
         default: break;
     }
     return Gait::Idle;
 }
 
-/** Names from the creature's own animation map (each creature def maps them to its own). */
-const char* anim_for(Gait g) {
+/**
+ * How a gait is played. Names come from the creature's own animation map (each creature
+ * def maps them to its own sequences). `first` plays once when `once` is set, then
+ * `follow` loops; `repeat` plays `first` again each time the queue runs dry.
+ */
+struct GaitSpec {
+    const char* first;
+    bool once;
+    const char* follow;  // null: loop `first`
+    bool repeat;
+    bool immediate;  // skip kGaitSettleMs: a hit or a swing is over before it settles
+};
+
+GaitSpec spec_for(Gait g, uint32_t strikes) {
     switch (g) {
-        case Gait::Walk: return "ST_WALK";
-        case Gait::Run: return "ST_RUN";
-        default: return "ST_IDLE";
+        case Gait::Walk: return {"ST_WALK", false, nullptr, false, false};
+        case Gait::Run: return {"ST_RUN", false, nullptr, false, false};
+        case Gait::Attack:
+            return {strikes & 1 ? "ST_STRIKE_RIGHT" : "ST_STRIKE_LEFT", true, "ST_IDLE_MELEE", true, true};
+        case Gait::Alert: return {"ST_IDLE_MELEE", false, nullptr, false, false};
+        case Gait::Hit: return {"ST_BACK_HIT", true, "ST_IDLE_MELEE", false, true};
+        case Gait::Death: return {"ST_DIE", true, "ST_DEATH_FRAME", false, true};
+        case Gait::Leap: return {"ST_LEAP_IN", true, "ST_IDLE_MELEE", false, true};
+        case Gait::Block: return {"ST_BLOCK_LOOP", false, nullptr, false, true};
+        case Gait::Taunt: return {"ST_TAUNT", true, "ST_IDLE_MELEE", false, true};
+        default: return {"ST_IDLE", false, nullptr, false, false};
     }
 }
 }  // namespace
@@ -140,9 +167,12 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
         return;
     }
 
-    // A dead creature is left where it fell with its own death animation playing; the
+    // A dead creature is left where it fell, playing its death and then lying still; the
     // server will stop sending it when the corpse is gone.
-    if (pose.anim == world::Anim::Death) return;
+    if (pose.anim == world::Anim::Death) {
+        if (animate_) animate(p, pose, nowMs);
+        return;
+    }
 
     write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
     if (animate_) animate(p, pose, nowMs);
@@ -157,15 +187,16 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
 }
 
 void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
-    // The position write above stays the authority on where the puppet stands; this only
-    // gives Fable a walk, run or idle loop to play while it is moved, through the same
-    // scripted-control queue a quest's `.PlayLoopingAnim` uses.
+    // The position write stays the authority on where the puppet stands; this only gives
+    // Fable an animation to play while it is moved, through the same scripted-control
+    // queue a quest's `.PlayLoopingAnim` and `.PlayAnimation` use.
     Gait want = gait_for(pose);
     if (want != p.wanted) {
         p.wanted = want;
         p.wantedSinceMs = nowMs;
     }
-    bool settled = nowMs - p.wantedSinceMs >= kGaitSettleMs || p.gait == Gait::None;
+    bool settled = p.gait == Gait::None || spec_for(p.wanted, 0).immediate ||
+                   nowMs - p.wantedSinceMs >= kGaitSettleMs;
     bool change = p.wanted != p.gait && settled;
     bool refresh = !change && p.gait != Gait::None && nowMs - p.lastAnimMs >= kGaitRefreshMs &&
                    script::scripted_queue_empty(p.ref);
@@ -173,16 +204,31 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
 
     p.lastAnimMs = nowMs;
     Gait next = change ? p.wanted : p.gait;
-    if (script::play_looping_anim(p.ref, anim_for(next), kGaitLoops, change, ++p.animSeq)) {
-        if (change && stats_.animsPlayed < 20)
-            fo::log("puppet: %s now %s", p.scriptName.c_str(), anim_for(next));
-        p.gait = next;
-        ++stats_.animsPlayed;
+    if (next == Gait::Attack) ++p.strikes;
+    GaitSpec sp = spec_for(next, p.strikes);
+    uint32_t seq = ++p.animSeq;
+    bool ok;
+    if (change || sp.repeat) {
+        // A repeating swing gets one short follow loop, so the queue runs dry and the next
+        // swing starts while the server still says it is attacking.
+        if (sp.once) {
+            ok = script::play_anim_once(p.ref, sp.first, change, seq) &&
+                 script::play_looping_anim(p.ref, sp.follow, sp.repeat ? 1 : kGaitLoops, false, ++p.animSeq);
+        } else {
+            ok = script::play_looping_anim(p.ref, sp.first, kGaitLoops, change, seq);
+        }
     } else {
-        if (stats_.animsRefused++ == 0)
-            fo::log("puppet: %s has no scripted control; it is moved without animations", p.scriptName.c_str());
-        p.gait = next;  // do not retry every tick; the refresh check retries it slowly
+        // Ran dry: carry on with the loop, never replay a one-off (a death or a taunt).
+        ok = script::play_looping_anim(p.ref, sp.follow ? sp.follow : sp.first, kGaitLoops, false, seq);
     }
+    if (ok) {
+        if (change && stats_.animsPlayed < 40)
+            fo::log("puppet: %s now %s", p.scriptName.c_str(), sp.first);
+        ++stats_.animsPlayed;
+    } else if (stats_.animsRefused++ == 0) {
+        fo::log("puppet: %s has no scripted control; it is moved without animations", p.scriptName.c_str());
+    }
+    p.gait = next;  // also on a refusal: the refresh check retries it slowly
 }
 
 void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,

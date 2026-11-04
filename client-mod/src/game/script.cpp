@@ -312,7 +312,8 @@ void clear_scripted(ThingRef& t) {
     as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kQueueClear))(reinterpret_cast<void*>(comp));
 }
 
-bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence) {
+namespace {
+bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool clear_first, uint32_t sequence) {
     if (!anim || !*anim || !iface()) return false;
     uintptr_t comp = scripted_control(t);
     if (!comp) return false;
@@ -334,12 +335,22 @@ bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_firs
     uint8_t global = 0;
     if (readable(kScriptGlobalFlag, 1)) std::memcpy(&global, reinterpret_cast<const void*>(kScriptGlobalFlag), 1);
     Str name(anim);
-    // (name, 0, looping=1, loops, 0, sequence, 0, 1, global, 0, 0): the runner's defaults.
+    // The runner's defaults: `.PlayLoopingAnim` builds (name, 0, 1, loops, 0, seq, 0, 1, global, 0, 0)
+    // and `.PlayAnimation` builds (name, 0, 0, -1, 0, seq, 0, 1, global, 0, 0).
     as<void*(__thiscall*)(void*, void*, int, int, int, int, int, int, int, int, int, int)>(
-        reinterpret_cast<void*>(kPlayAnimCtor))(action, name.raw(), 0, 1, loops, 0, static_cast<int>(sequence), 0, 1,
-                                               global, 0, 0);
+        reinterpret_cast<void*>(kPlayAnimCtor))(action, name.raw(), 0, looping ? 1 : 0, looping ? loops : -1, 0,
+                                               static_cast<int>(sequence), 0, 1, global, 0, 0);
     as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kQueueAction))(reinterpret_cast<void*>(comp), action);
     return true;
+}
+}  // namespace
+
+bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence) {
+    return queue_anim(t, anim, true, loops, clear_first, sequence);
+}
+
+bool play_anim_once(ThingRef& t, const char* anim, bool clear_first, uint32_t sequence) {
+    return queue_anim(t, anim, false, -1, clear_first, sequence);
 }
 
 bool hero_health(float& current, float& max) {
