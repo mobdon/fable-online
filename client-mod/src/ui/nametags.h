@@ -46,6 +46,12 @@ struct TagSettings {
 uint32_t renown_color(double renown);
 std::string format_renown(double renown);   // 12500 -> "12,500 renown"
 
+// A view matrix (row vectors, D3D layout) from a camera's position, forward and up, like
+// D3DXMatrixLookAtLH. With `ref` (the game's own view matrix, 16 floats) each axis is turned
+// to point the way ref's does, so the result follows the engine's convention. False for a
+// degenerate camera.
+bool view_from_camera(const float pos[3], const float fwd[3], const float up[3], const float* ref, float out[16]);
+
 class TagStore {
 public:
     // Applies a "tags" message. A new region means all old tags are gone.

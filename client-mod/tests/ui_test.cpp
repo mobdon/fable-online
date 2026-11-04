@@ -235,6 +235,25 @@ static void test_tag_staff_and_self() {
     CHECK(staff == 1 && self == 1);
 }
 
+static void test_view_from_camera() {
+    // The test view used above: camera at the origin looking down +y, z up, x right.
+    const float ref[16] = {1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1};
+    const float pos[3] = {0, 0, 0}, fwd[3] = {0, 1, 0}, up[3] = {0, 0, 1};
+    float m[16];
+    CHECK(ui::view_from_camera(pos, fwd, up, ref, m));
+    bool same = true;
+    for (int i = 0; i < 16; ++i) same = same && std::fabs(m[i] - ref[i]) < 1e-5f;
+    CHECK(same);
+    // Moved 0.5 to the left: a point straight ahead lands right of the view centre.
+    const float left[3] = {-0.5f, 0, 0};
+    CHECK(ui::view_from_camera(left, fwd, up, ref, m));
+    const float p[3] = {0, 10, 0};
+    const float vx = p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12];
+    CHECK(vx > 0.49f && vx < 0.51f);
+    const float zero[3] = {0, 0, 0};
+    CHECK(!ui::view_from_camera(pos, zero, up, ref, m));
+}
+
 static void test_party() {
     ui::ChatModel c;
     // Party requests go to the world server, not the chat service.
@@ -356,6 +375,7 @@ int main() {
     test_tabs();
     test_tags();
     test_tag_staff_and_self();
+    test_view_from_camera();
     test_party();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

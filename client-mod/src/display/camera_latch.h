@@ -20,6 +20,10 @@ void on_update(float yaw_turns, const float focus[3]);
 // Mouse motion read this frame (counts). Game thread.
 void on_mouse(long dx);
 const char* status();
+// The camera the engine took for the latest frame (position, forward, up: world space, Z up),
+// with every change made here applied. False before the first frame or when it is older than
+// max_age_s (menus, loading). Any thread.
+bool frame_camera(float pos[3], float fwd[3], float up[3], double max_age_s = 0.5);
 // One line with what it has learnt and how often it turned the view. Game thread.
 void log_stats();
 }  // namespace fo::display::camera_latch

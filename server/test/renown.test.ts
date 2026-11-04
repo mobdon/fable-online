@@ -67,6 +67,17 @@ test('renown a quest claim already paid is not counted twice', () => {
   }
 });
 
+test('a report of 0 does not use up the import', () => {
+  const app = testApp({ renownImportMax: 5_000, renownDailyMax: 100 });
+  try {
+    const { hero } = makeHero(app);
+    assert.deepEqual(app.renown.report(hero.id, 0), { ok: true, renown: 0, gained: 0, kind: 'import', capped: false });
+    assert.deepEqual(app.renown.report(hero.id, 2_000), { ok: true, renown: 2_000, gained: 2_000, kind: 'import', capped: false });
+  } finally {
+    app.close();
+  }
+});
+
 test('bad totals are refused', () => {
   const app = testApp();
   try {

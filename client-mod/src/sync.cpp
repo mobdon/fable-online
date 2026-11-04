@@ -108,6 +108,7 @@ struct State {
     /** Renown: last read from Fable, last sent to the server, and when it was last read. */
     int32_t fableRenown = -1;
     int32_t sentRenown = -1;
+    std::string renownWhy;
     uint32_t lastRenownMs = 0;
 };
 
@@ -116,6 +117,11 @@ State* g_state = nullptr;
 std::atomic<int> g_serverRenown{-1};
 std::atomic<int> g_fableRenown{-1};
 constexpr uint32_t kRenownEveryMs = 2000;
+/** When the world was last seen playable (game thread ticking, hero present, no region load). */
+std::atomic<uint32_t> g_worldShownMs{0};
+/** Name tags stay hidden this long after a load or a stall, so they don't flash over the fade. */
+constexpr uint32_t kTagsAfterLoadMs = 1500;
+std::atomic<uint32_t> g_busyUntilMs{0};
 
 void on_connected() {
     if (!g_state) return;
@@ -331,11 +337,19 @@ void report_renown(uint32_t nowMs) {
     s.lastRenownMs = nowMs;
     uintptr_t hero = game::local_hero();
     int32_t total = 0;
-    if (!hero || !game::read_renown(hero, total)) return;
+    std::string why;
+    if (!hero) return;
+    if (!game::read_renown(hero, total, &why)) {
+        if (why != s.renownWhy) fo::log("sync: can't read the hero's renown: %s", why.c_str());
+        s.renownWhy = why;
+        return;
+    }
+    s.renownWhy.clear();
     if (total != s.fableRenown) fo::log("sync: renown in Fable is %d", total);
     s.fableRenown = total;
     g_fableRenown = total;
-    if (!net::world_connected() || s.objects.loading() || total == s.sentRenown) return;
+    // 0 is also what a hero reads while its save is still loading: nothing to send then.
+    if (!net::world_connected() || s.objects.loading() || total <= 0 || total == s.sentRenown) return;
     char frame[64];
     std::snprintf(frame, sizeof(frame), "{\"t\":\"renown_report\",\"total\":%d}", total);
     net::world_send(frame);
@@ -703,6 +717,10 @@ void tick() {
     // No local hero means Fable is between areas or in a menu: making creatures then crashes it.
     uintptr_t heroNow = game::local_hero();
     if (!heroNow || heroNow != s.lastHero) s.puppets->hold(now, kHoldAfterLoadMs);
+    // Name tags: only over a world that is being played. A stall (an area load on this
+    // thread), a missing or new hero, or a region load in progress hides them for a moment.
+    if (s.loadSeen || !heroNow || heroNow != s.lastHero || s.objects.loading()) g_busyUntilMs = now + kTagsAfterLoadMs;
+    g_worldShownMs = now;
     s.lastHero = heroNow;
 
     for (net::WorldEvent& e : net::world_poll()) {
@@ -742,6 +760,11 @@ void tick() {
 }
 
 }  // namespace
+
+bool world_shown() {
+    const uint32_t now = GetTickCount(), at = g_worldShownMs.load();
+    return at && now - at < 250 && static_cast<int32_t>(now - g_busyUntilMs.load()) >= 0;
+}
 
 int own_renown() {
     int v = g_serverRenown.load();

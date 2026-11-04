@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include "../config.h"
 #include "../log.h"
 
@@ -181,6 +182,17 @@ bool g_swapped = false;   // kept for the stats line; always false
 
 float shoulder_now() { return config().camera_shoulder; }
 
+// The camera the engine draws this frame with, after smoothing and the shoulder offset: name
+// tags are placed with it, so they sit where the hero is drawn.
+std::mutex g_frame_mu;
+float g_frame[9] = {};
+double g_frame_at = 0;
+void remember_frame_camera(const float* desc, double now) {
+    std::lock_guard<std::mutex> lock(g_frame_mu);
+    std::memcpy(g_frame, desc, sizeof g_frame);
+    g_frame_at = now;
+}
+
 void __fastcall hk_set_camera(void* self, void*, float* desc) {
     if (!desc || !readable(desc, 0x24)) { o_set_camera(self, desc); return; }
     const double now = now_s();
@@ -242,10 +254,20 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
             changed = true;
         }
     }
+    remember_frame_camera(desc, now);
     o_set_camera(self, desc);
     if (changed) std::memcpy(desc, saved, sizeof saved);
 }
 }  // namespace
+
+bool frame_camera(float pos[3], float fwd[3], float up[3], double max_age_s) {
+    std::lock_guard<std::mutex> lock(g_frame_mu);
+    if (!g_frame_at || now_s() - g_frame_at > max_age_s) return false;
+    std::memcpy(pos, g_frame, 3 * sizeof(float));
+    std::memcpy(fwd, g_frame + 3, 3 * sizeof(float));
+    std::memcpy(up, g_frame + 6, 3 * sizeof(float));
+    return true;
+}
 
 void install() {
     if (!readable(reinterpret_cast<const void*>(kSetCameraSlot), 4) || *reinterpret_cast<const uint32_t*>(kSetCameraSlot) != kSetCamera) {
