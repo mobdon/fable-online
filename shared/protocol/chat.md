@@ -41,7 +41,7 @@ Hero names: 3 to 16 characters, letters, digits, spaces, `'` and `-`, starting w
 | `region` | everyone in your region (Bowerstone, Oakvale, ...) | 3 s |
 | `realm` | everyone online in the realm (Realm chat) | 10 s |
 | `trade` | everyone online | 30 s |
-| `party` | your party (party system: later) | none |
+| `party` | your party. Parties are run by the world server (docs/parties.md), and the mod sends party chat there; this channel is used only once a server feeds `setParty` | none |
 | `guild` | your guild: every guild, sub guilds included, is its own channel (`guildId` from the login token or the region server) | none |
 | `whisper` | one hero | none |
 

@@ -95,6 +95,8 @@ const char* kHelp[] = {
     "/w Name text: whisper (\"quotes\" for names with spaces)  /r text: reply",
     "/ignore Name  /unignore Name  /report Name reason  /tags: name tags on/off  /clear",
     "/barter: trade items and gold with the hero next to you  /barter Name: with that hero",
+    "Party: /invite Name  /accept [Name]  /decline [Name]  /leave  /regroup",
+    "       /party kick Name  /party lead Name  (leader only)",
 };
 }  // namespace
 
@@ -193,6 +195,43 @@ void ChatModel::send_whisper(const std::string& to, const std::string& text) {
     outbox_.push_back("{\"t\":\"whisper\",\"to\":" + json::quote(to) + ",\"text\":" + json::quote(text) + "}");
 }
 
+void ChatModel::send_party(const char* op, const std::string& name, const std::string& text) {
+    std::string m = "{\"t\":\"party\",\"op\":" + json::quote(op);
+    if (!name.empty()) m += ",\"name\":" + json::quote(name);
+    if (!text.empty()) m += ",\"text\":" + json::quote(text);
+    world_outbox_.push_back(m + "}");
+}
+
+// Party requests, typed as "/party <what>" or the short forms (/invite, /accept, ...).
+// Returns false when `cmd` is not one of them. Without "/party" in front, "kick" and "lead"
+// are not party requests: /kick is the moderators' command.
+bool ChatModel::party_command(const std::string& cmd, std::string rest, double now, bool after_party) {
+    if (!after_party && (cmd == "kick" || cmd == "lead")) return false;
+    static const char* const kNeedsName[] = {"invite", "kick", "lead"};
+    std::string op = cmd;
+    if (op == "inv") op = "invite";
+    else if (op == "promote") op = "lead";
+    else if (op == "pkick") op = "kick";
+    else if (op == "plead") op = "lead";
+    else if (op == "pleave") op = "leave";
+    bool known = op == "invite" || op == "accept" || op == "decline" || op == "leave" || op == "regroup" ||
+                 op == "kick" || op == "lead";
+    if (!known) return false;
+    std::string name = take_word(rest);
+    for (const char* n : kNeedsName)
+        if (op == n && name.empty()) { system("Usage: /party " + op + " Name", now, kColorError); return true; }
+    send_party(op.c_str(), name);
+    return true;
+}
+
+void ChatModel::party_line(const std::string& from, const std::string& text, double now) {
+    push("[Party] " + from + ": " + text, kColorParty, now, tabs_for("party"));
+}
+
+void ChatModel::party_note(const std::string& text, double now, bool error) {
+    push(text, error ? kColorError : kColorParty, now);
+}
+
 void ChatModel::remember_contact(const std::string& name) {
     if (name.empty()) return;
     for (auto it = contacts_.begin(); it != contacts_.end(); ++it)
@@ -209,12 +248,20 @@ void ChatModel::submit(double now) {
 
     if (line[0] != '/') {
         if (channel_ == "whisper") send_whisper(whisper_to_, line);
+        else if (channel_ == "party") send_party("say", "", line);
         else send_say(channel_, line);
         return;
     }
     std::string rest = line.substr(1);
     std::string cmd = lower(take_word(rest));
     rest = trim(rest);
+    // "/party invite Name" and friends; "/party" alone or "/party some words" is party chat.
+    if (cmd == "party") {
+        std::string sub = rest;
+        std::string first = lower(take_word(sub));
+        if (party_command(first, sub, now, true)) return;
+    }
+    if (cmd != "p" && cmd != "party" && party_command(cmd, rest, now, false)) return;
     struct Alias { const char* name; const char* ch; };
     static const Alias talk[] = {
         {"s", "say"}, {"say", "say"}, {"re", "region"}, {"region", "region"}, {"y", "region"}, {"sh", "region"}, {"shout", "region"},
@@ -225,7 +272,10 @@ void ChatModel::submit(double now) {
         if (cmd != a.name) continue;
         channel_ = a.ch;  // typing "/1" alone switches the box to Realm chat
         whisper_to_.clear();
-        if (!rest.empty()) send_say(channel_, rest);
+        if (!rest.empty()) {
+            if (channel_ == "party") send_party("say", "", rest);
+            else send_say(channel_, rest);
+        }
         return;
     }
     if (cmd == "w" || cmd == "whisper" || cmd == "t" || cmd == "tell" || cmd == "r" || cmd == "reply") {
@@ -329,6 +379,12 @@ std::vector<std::pair<std::string, std::string>> ChatModel::take_local() {
 std::vector<std::string> ChatModel::take_outbox() {
     std::vector<std::string> o;
     o.swap(outbox_);
+    return o;
+}
+
+std::vector<std::string> ChatModel::take_world_outbox() {
+    std::vector<std::string> o;
+    o.swap(world_outbox_);
     return o;
 }
 

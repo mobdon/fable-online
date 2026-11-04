@@ -9,6 +9,7 @@ if (!audit.ok) {
   process.exit(1);
 }
 app.director.start();
+const partySweep = setInterval(() => app.parties.sweep(), 5_000);
 const server = await listen(app);
 // Chat and metrics are side services: a busy port is reported, and the world still starts.
 const side = async <T>(what: string, start: () => Promise<T>): Promise<T | null> => {
@@ -40,6 +41,7 @@ const shutdown = () => {
   if (stopping) return;
   stopping = true;
   console.log('Shutting down: saving every hero...');
+  clearInterval(partySweep);
   server.close();
   metricsServer?.close();
   app.close();

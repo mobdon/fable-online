@@ -38,6 +38,7 @@ import { Analytics } from './analytics/analytics.js';
 import { AnalyticsBridge, TeeSink } from './analytics/bridge.js';
 import { JsonlFileSink, type EventSink as AnalyticsLog } from './analytics/event-log.js';
 import { RealmChat } from './chat/realm-chat.js';
+import { Parties } from './party/parties.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -68,6 +69,7 @@ export interface App {
   analytics: Analytics;
   /** Realm chat and name tags; null when FO_CHAT=0. main.ts opens its port. */
   chat: RealmChat | null;
+  parties: Parties;
   /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
   spawnDefs: string[];
   /** True when the hero belongs to a gm or admin account (dev tools such as dev_spawn). */
@@ -187,6 +189,28 @@ export function createApp(
     tick: (dt) => trades.tick(dt),
     left: (heroId) => trades.left(heroId),
   });
+  const parties = new Parties(
+    events,
+    {
+      whereIs: (id) => {
+        const ch = director.channelOf(id);
+        return ch && { channel: ch.id, region: ch.region.name, shared: ch.kind === 'shared' };
+      },
+      canParty: (id) => heroes.get(id)?.phase === 'world',
+      moveToChannel: (id, channelId) => void director.moveToChannel(id, channelId),
+    },
+    { maxSize: cfg.partyMaxSize },
+  );
+  // Party members land in the same channel, and see where the others went.
+  director.companions = (id) => parties.companions(id);
+  const objectHooks = director.hooks;
+  director.hooks = {
+    ...objectHooks,
+    onEnter: (ch, link) => {
+      objectHooks.onEnter?.(ch, link);
+      parties.moved(link.heroId);
+    },
+  };
   director.policies.push({
     placement: (hero) => law.placement(hero.id),
     canEnter: (heroId, _from, to, via) => law.checkEnter(heroId, to, via),
@@ -236,6 +260,7 @@ export function createApp(
     resume: new ResumeTokens(cfg.resumeMs),
     analytics,
     chat,
+    parties,
     spawnDefs,
     staffHero,
     close() {

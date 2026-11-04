@@ -22,6 +22,7 @@
 #include "../ui/json.h"
 #include "../ui/nametags.h"
 #include "../ui/trade_model.h"
+#include "../ui/party_model.h"
 #include "patch.h"
 #include "renderer.h"
 
@@ -75,7 +76,9 @@ ui::ChatModel g_chat;
 ui::TagStore g_tags;
 ui::TradeModel g_trade;
 std::vector<ui::TradeTarget> g_trade_targets;
-std::vector<std::string> g_world_out;   // trade requests for the game connection
+std::vector<std::string> g_world_out;   // trade and party requests for the game connection
+ui::PartyModel g_party;
+std::vector<std::string> g_world_in;    // party frames from the game thread
 game::HeroPos g_hero;
 std::atomic<bool> g_chat_open{false};
 std::atomic<DWORD> g_block_until{0};   // swallow keys briefly after the box closes
@@ -113,6 +116,7 @@ void flush_outbox() {  // caller holds g_mu
     for (auto& line : g_trade.take_outbox()) g_world_out.push_back(std::move(line));
     double now = now_s();
     for (auto& n : g_trade.take_notes()) g_chat.system(n.first, now, n.second);
+    for (auto& line : g_chat.take_world_outbox()) g_world_out.push_back(std::move(line));
     g_chat_open = g_chat.is_open();
     g_trade_keys = g_trade.wants_keys();
 }
@@ -127,6 +131,8 @@ void mul(const D3DMATRIX& a, const D3DMATRIX& b, float out[16]) {
         }
 }
 
+void draw_text_line(float x, float y, float room, const std::string& s, uint32_t c, Face f);
+
 void pump_network(double now) {
     for (auto& e : net::chat_poll()) {
         if (e.kind == net::Event::Kind::Connected) { g_chat.on_connection(true, "", now); continue; }
@@ -135,6 +141,53 @@ void pump_network(double now) {
         if (!json::parse(e.text, m) || !m.is_object()) continue;
         if (m.str("t") == "tags") g_tags.apply(m);
         else g_chat.on_server(m, now);
+    }
+    for (auto& line : g_world_in) {
+        json::Value m;
+        if (json::parse(line, m) && m.is_object()) g_party.on_world(m, g_chat, now);
+    }
+    g_world_in.clear();
+}
+
+// Party members' orbs: a glow in their co-op colour over each one's stand-in, like the
+// spirits of Fable's unused co-op mode (SPRITE_MULTIPLAYER_ORB).
+void draw_party_orbs(const Config& cfg) {
+    if (!g_party.in_party() || !g_have_view || !g_have_proj) return;
+    float vp[16];
+    mul(g_view, g_proj, vp);
+    for (const ui::Orb& o : g_party.layout(vp, g_r.screen_w(), g_r.screen_h(), cfg.up_axis, cfg.tag_height + 0.9f)) {
+        const uint32_t a = o.color >> 24, rgb = o.color & 0x00FFFFFF;
+        g_r.ring(o.x, o.y, 0.0f, o.radius * 2.6f, o.radius * 2.0f, ((a * 0x50 / 255) << 24) | rgb);   // halo
+        g_r.ring(o.x, o.y, 0.0f, o.radius, o.radius * 0.5f, o.color);
+        g_r.ring(o.x, o.y, 0.0f, o.radius * 0.45f, o.radius * 0.3f, (a << 24) | 0xFFF6DC);       // hot centre
+    }
+}
+
+// The party list on the left, under Fable's own health and Will bars: a small pewter panel
+// with each member's colour, name and where they are.
+void draw_party_list() {
+    if (!g_party.in_party()) return;
+    const auto& members = g_party.members();
+    const float lh = g_r.line_height(Face::Chat), sh = g_r.line_height(Face::Small), th = g_r.line_height(Face::Title);
+    const float pad = 12, row_h = lh + sh + 4, w = 210;
+    const float h = pad + th + 6 + row_h * static_cast<float>(members.size()) + pad - 4;
+    const float x = 16, y = std::floor(g_r.screen_h() * 0.24f);
+    const uint32_t kText = 0xFFE9E4D6, kHead = 0xFFC9C0A8, kDim = 0xFF7E786C;
+    g_r.panel(x, y, w, h, 0.92f);
+    g_r.text(x + pad, y + pad - 2, "Party", 0xFFFFF6DC, Face::Title);
+    std::string count = std::to_string(members.size()) + " of 4";
+    g_r.text(x + w - pad - g_r.measure(count, Face::Small), y + pad + th - sh - 4, count, kHead, Face::Small);
+    float ry = y + pad + th + 4;
+    for (const ui::PartyMember& m : members) {
+        const uint32_t c = ui::PartyModel::slot_color(m.slot);
+        const float cx = x + pad + 7, cy = ry + lh / 2;
+        g_r.ring(cx, cy, 0.0f, 9.0f, 5.0f, (0x50u << 24) | (c & 0x00FFFFFF));
+        g_r.ring(cx, cy, 0.0f, 5.0f, 1.5f, m.online ? c : (0xFF000000 | ((c & 0x00FEFEFE) >> 1)));
+        std::string name = m.leader ? m.name + "  (leader)" : m.name;
+        draw_text_line(x + pad + 20, ry, w - pad * 2 - 20, name, m.online ? kText : kDim, Face::Chat);
+        std::string where = !m.online ? "offline" : m.region.empty() ? "on the way" : m.region;
+        draw_text_line(x + pad + 20, ry + lh, w - pad * 2 - 20, where, kDim, Face::Small);
+        ry += row_h;
     }
 }
 
@@ -456,6 +509,8 @@ void draw(IDirect3DDevice9* dev) {
     if (!g_r.begin(dev, art, cfg.font_px)) return;
     draw_crosshair(cfg);
     draw_tags(cfg);
+    draw_party_orbs(cfg);
+    draw_party_list();
     if (cfg.chat_enabled) draw_chat(cfg, now);
     g_trade.step(now);
     flush_outbox();
@@ -855,11 +910,29 @@ void set_trade_targets(std::vector<ui::TradeTarget> targets) {
     g_trade_targets = std::move(targets);
 }
 
+void post_world_frame(const std::string& json) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (g_world_in.size() < 256) g_world_in.push_back(json);
+}
+
+// Trade and party requests share one queue; either name drains it.
+std::vector<std::string> take_world_requests() { return take_world_outbox(); }
+
 std::vector<std::string> take_world_outbox() {
     std::lock_guard<std::mutex> lock(g_mu);
     std::vector<std::string> out;
     out.swap(g_world_out);
     return out;
+}
+
+void set_party_marks(std::vector<ui::PartyMark> marks) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_party.set_marks(std::move(marks));
+}
+
+void clear_party() {
+    // Goes through the same queue as the server's frames, so it lands after any already queued.
+    post_world_frame("{\"t\":\"party\",\"id\":null}");
 }
 
 }  // namespace fo::overlay

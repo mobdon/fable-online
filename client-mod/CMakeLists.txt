@@ -2,11 +2,11 @@ set(FO_MOD_SOURCES
   src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp src/crash.cpp
   src/sync.cpp src/crash_exit.cpp
   src/game/hero.cpp
-  src/game/hook.cpp src/game/puppet.cpp src/game/shop_stock.cpp src/game/shop_stock_hook.cpp src/util/inflate.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
+  src/game/hook.cpp src/game/puppet.cpp src/game/spirits.cpp src/game/shop_stock.cpp src/game/shop_stock_hook.cpp src/util/inflate.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
   src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/held.cpp src/world/spawn_filter.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
-  src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp src/ui/trade_model.cpp
+  src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp src/ui/trade_model.cpp src/ui/party_model.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
   src/modsettings/modsettings.cpp src/modsettings/settings_model.cpp
   src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp src/display/present.cpp src/display/hud_patch.cpp src/display/hud_scale.cpp src/display/mouse_look.cpp src/display/camera_probe.cpp src/display/camera_latch.cpp src/display/target_colour.cpp src/game/pause_menu.cpp

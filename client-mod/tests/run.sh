@@ -9,7 +9,7 @@ out=${TMPDIR:-/tmp}
 cxx=${CXX:-c++}
 flags="-std=c++17 -Wall -Wextra -O1 -fsanitize=address,undefined"
 $cxx $flags -o "$out/fable_online_ui_test" \
-  "$here/ui_test.cpp" "$src/ui/json.cpp" "$src/ui/chat_model.cpp" "$src/ui/nametags.cpp"
+  "$here/ui_test.cpp" "$src/ui/json.cpp" "$src/ui/chat_model.cpp" "$src/ui/nametags.cpp" "$src/ui/party_model.cpp"
 "$out/fable_online_ui_test"
 $cxx $flags -o "$out/fable_online_trade_test" \
   "$here/trade_test.cpp" "$src/ui/json.cpp" "$src/ui/chat_model.cpp" "$src/ui/trade_model.cpp"

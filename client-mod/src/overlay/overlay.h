@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "../game/hero.h"
+#include "../ui/party_model.h"
 #include "../ui/trade_model.h"
 
 namespace fo::overlay {
@@ -27,4 +28,13 @@ void on_world_disconnected();
 void set_trade_targets(std::vector<ui::TradeTarget> targets);
 // From the sync thread: trade requests to send on the game connection.
 std::vector<std::string> take_world_outbox();
+// Parties live on the world server, whose connection the game thread owns (sync.cpp).
+/** A party frame from the world server, for the chat and the party list. Any thread. */
+void post_world_frame(const std::string& json);
+/** Party requests typed in the chat, to send over the world connection. Any thread. */
+std::vector<std::string> take_world_requests();
+/** Where party members' stand-ins are now, for the orbs over their heads. Any thread. */
+void set_party_marks(std::vector<ui::PartyMark> marks);
+/** The world connection went down: the party list is no longer current. */
+void clear_party();
 }  // namespace fo::overlay
