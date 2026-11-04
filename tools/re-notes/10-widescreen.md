@@ -75,3 +75,33 @@ positions (camera code at 0xB327A1, 0xB4A881, 0xB8E315) must keep the real size.
   - Cone half-angle: definition +0x30 or +0x34, in degrees.
 - `aim_at_crosshair` patches the +0x3A read at 0x8040ED (`8A 57 3A`) to `mov dl,1`, so the
   search always uses the camera direction.
+
+## Target highlight colour (red target)
+
+- NPlayerGui::CDrawHighlightingTargetingCursor (vtable 0x125A720, built at 0x6542A4, held at
+  player GUI +0x1F0). Its update 0x64BFBA sorts the target ([this+0x28] handle) into a kind
+  0..4 in [ebp+6Ch]; at 0x64C41D the kind is compared with [esi+44h] and, when it changes,
+  the glow colours are reloaded from the player GUI definition [0x13B878C]: start colours
+  +0x86C, end colours +0x878, fades +0x884/+0x89C/+0x890/+0x8A8, steps +0x8B4.
+- Kind 2 is an enemy (the target's targeting component is aimed at the hero, or 0x76D2F0).
+  When the kind is 2 and the player is in combat (mode 2, or mode 0x28 with 2 on the stack)
+  the screen-space reticle is drawn too (0x64C5FB..).
+- Player mode: 0x449970 (player GUI owner [esi+8]) -> player; 0x633BE0 = current mode id
+  ([+0x210]->[+4]->[+8]); 0x634160(id) = mode on the stack.
+
+## Save screen
+
+- 0x499880 draws the save screen. 0x9BF220 (called at 0x4999B9) switches the render target
+  back to the screen and calls 0x9BEF80 with the real size, which stores the 2D rect at
+  display +0x204 (read by 0xA0AAA0) and sets the viewport. 0x498490 then lays the picture
+  out in virtual pixels and 0x9DC030 turns pixels into clip space with that rect, so with
+  HUD scaling the picture came out 1/scale size in the top-left. The mod re-sets the rect
+  through 0xA0B560 with the whole screen in 2D units ([0x13961E8], [0x13961F0], doubles).
+
+## Pause menu
+
+- The pause menu (UI_TOP_LEVEL_PAUSE_SCREEN, list UI_LIST_PAUSE_MENU, built around 0x483187)
+  comes from frontend data; the code only fills description texts (UI_*_DESC). Options rows
+  (PC_OPTIONS_*_TEXT_SLIDER) are named widgets from the data too (built at 0x58CC40..).
+  A new row needs either data or a runtime-built list (CFrontEndList, as the shop and item
+  action lists are filled in code).
