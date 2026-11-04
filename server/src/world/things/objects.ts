@@ -22,6 +22,8 @@ export const DOOR_CLOSE_MS = 20_000;
 export const PICKUP_RESPAWN_MS = 10 * 60_000;
 /** Cupboards and bookshelves can be searched again by the same hero after this long. */
 export const SEARCH_AGAIN_MS = 24 * 60 * 60_000;
+/** A hero reporting an exit may stand this much outside its radius (reports lag a little). */
+export const EXIT_REACH = 3;
 /** A hero must step this much further than an exit's radius before it can fire again. */
 export const EXIT_REARM = 1.25;
 
@@ -122,9 +124,9 @@ export class WorldObjects {
     try {
       if (!ch) throw new GameError('offline', 'Hero is not in the world');
       if (!t || t.region !== ch.region.name) throw new GameError('not_here', 'That is not here');
-      if (t.kind === 'exit') throw new GameError('walk_through', 'Walk through it');
       if (ch.loading.has(heroId)) throw new GameError('loading', 'Still arriving');
-      const reach = t.kind === 'door' ? DOOR_REACH : t.kind === 'demon_door' ? DEMON_DOOR_REACH : REACH;
+      const reach =
+        t.kind === 'door' ? DOOR_REACH : t.kind === 'demon_door' ? DEMON_DOOR_REACH : t.kind === 'exit' ? t.radius + EXIT_REACH : REACH;
       this.mustReach(ch, heroId, t.pos, reach);
       this.mustPass(heroId, t);
       const out = this.use(ch, heroId, t, action);
@@ -168,7 +170,14 @@ export class WorldObjects {
         this.flushMoves();
         return { t: 'ok', thing: t.id };
       case 'exit':
-        throw new GameError('walk_through', 'Walk through it');
+        // The hero's own game says it walked into this exit. Fable waits with the region
+        // load until the server has moved the hero, so a shut demon door (a gate, checked
+        // above) keeps the hero where they are.
+        if (action !== 'use') throw new GameError('bad_action', 'Walk through it');
+        if (!usableExit(t)) throw new GameError('quest_exit', 'This exit belongs to a quest');
+        this.moves.push({ heroId, link: t.to!, via: 'exit', thing: t.id });
+        this.flushMoves();
+        return { t: 'ok', thing: t.id };
     }
   }
 

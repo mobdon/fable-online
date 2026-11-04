@@ -24,6 +24,11 @@ export interface EntityState {
   yaw: number;
   anim: number;
   health: number;
+  /**
+   * Heroes only, and only from a sim that runs combat: the server's max health. The mod sets
+   * the local hero's Fable health to the same share of Fable's own max (health / max_health).
+   */
+  max_health?: number;
   /** Fable def name for anything that isn't a hero; the client mod picks the puppet's mesh from it. */
   def?: string;
 }
@@ -43,17 +48,32 @@ export interface WireEntity extends EntityState {
  * whole pipeline (accounts -> join -> channel -> ticks -> persistence) can be built and
  * load-tested now.
  */
+/** Health a sim with combat lets the server change outside a fight (src/combat/healing.ts). */
+export interface SimHealing {
+  /** The hero's health now, and what Heal Life would heal if cast now (null: cannot cast). */
+  state(heroId: number): { alive: boolean; health: number; maxHealth: number; spellHeal: number | null } | undefined;
+  /** Cast Heal Life through combat, paying its Will and cooldown. False if refused. */
+  castHealLife(heroId: number): boolean;
+  /** Add health (an item's heal), capped at max. Returns how much was added. */
+  addHealth(heroId: number, amount: number): number;
+}
+
 export interface RegionSim {
+  /** Present on sims that own hero health (the combat sim). */
+  readonly healing?: SimHealing;
   /** The town watch for this channel, when the sim runs guards (see src/law/guards.ts). */
   readonly law?: import('../law/guards.js').ChannelLaw;
+  /** Post a town guard at a spot. Sims without a town watch leave this out. */
+  addGuard?(defName: string, at: Vec3): number;
   addHero(heroId: number, at: Vec3): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
   /**
-   * Dev only: put a hero where the client says it is. The mod needs this until Fable's
-   * own input is mapped, and the server only calls it when trustClientPositions is on.
+   * Put a hero where the client says it is. The mod needs this until Fable's own input is
+   * mapped; the server only calls it after Channel.reportPosition checked the move (or with
+   * clientMovement 'trusted' on a dev machine). Returning false refuses it (a dead hero).
    */
-  placeHero?(heroId: number, at: Vec3, yaw?: number): void;
+  placeHero?(heroId: number, at: Vec3, yaw?: number): boolean | void;
   step(dtMs: number): void;
   snapshot(): EntityState[];
   position(heroId: number): Vec3 | undefined;

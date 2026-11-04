@@ -225,7 +225,8 @@ bool parse_region_change(const std::string& json, RegionChange& out) {
 ObjectFrame WorldObjects::on_frame(const std::string& json, uint32_t nowMs) {
     // Cheap reject: most frames are ticks.
     if (json.find("\"objects\"") == std::string::npos && json.find("\"object\"") == std::string::npos &&
-        json.find("\"loot\"") == std::string::npos && json.find("\"error\"") == std::string::npos)
+        json.find("\"loot\"") == std::string::npos && json.find("\"error\"") == std::string::npos &&
+        json.find("\"ok\"") == std::string::npos)
         return ObjectFrame::None;
     Value v;
     if (!parse(json, v)) return ObjectFrame::None;
@@ -300,6 +301,14 @@ ObjectFrame WorldObjects::on_frame(const std::string& json, uint32_t nowMs) {
         return ObjectFrame::Loot;
     }
 
+    if (t == "ok") {
+        std::string id = v.str("thing");
+        if (!valid_id(id)) return ObjectFrame::None;
+        pending_.erase(id);
+        acks_.push_back(id);
+        return ObjectFrame::Ok;
+    }
+
     if (t == "error") {
         Refusal r;
         r.thing = v.str("thing");
@@ -339,6 +348,12 @@ std::vector<Refusal> WorldObjects::drain_refusals() {
     return out;
 }
 
+std::vector<std::string> WorldObjects::drain_acks() {
+    std::vector<std::string> out;
+    out.swap(acks_);
+    return out;
+}
+
 bool WorldObjects::request(const std::string& id, const char* action, uint32_t nowMs, std::string& frame) {
     if (!valid_id(id) || loading_) return false;
     auto it = pending_.find(id);
@@ -371,6 +386,7 @@ void WorldObjects::clear() {
     changes_.clear();
     loot_.clear();
     refusals_.clear();
+    acks_.clear();
     loading_ = false;
 }
 

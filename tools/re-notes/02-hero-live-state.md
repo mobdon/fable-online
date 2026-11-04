@@ -25,4 +25,4 @@ The position moved smoothly while the hero walked, and jumped when the hero went
 
 ## Still open
 
-- Health. CTCHeroStats +0x064 and +0x06C are timers, not health. CTCHeroStats +0x058/+0x05C read 1000/1000.
+- Health: found, on the thing itself (+0xB4 current, +0xB0 max). See 11-hero-health.md.

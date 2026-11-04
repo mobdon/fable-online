@@ -19,6 +19,8 @@ export interface TownServices {
   /** Walkable ground for a region (the navmesh), if one was extracted. */
   ground?: (region: RegionDef) => Ground | undefined;
   options?: Partial<TownOptions>;
+  /** Guards posted at each village that has a guard def (CVillagePeopleDef's guard). */
+  guardsPerVillage?: number;
 }
 
 /**
@@ -37,6 +39,37 @@ export class TownSim implements RegionSim {
     s: TownServices,
   ) {
     this.town = new TownLife(region.name, s.data, s.clock, s.ground?.(region), s.options);
+    // The town watch: guards at every village, and the town folk as witnesses.
+    if (inner.law && inner.addGuard) {
+      const per = s.guardsPerVillage ?? 2;
+      for (const v of s.data.regions[region.name]?.villages ?? []) {
+        const def = s.data.villages[v.def]?.guard;
+        if (!def) continue;
+        for (let i = 0; i < per; i++) {
+          const a = (i / per) * Math.PI * 2;
+          inner.addGuard(def, { x: v.x + Math.cos(a) * 3, y: v.y + Math.sin(a) * 3, z: v.z });
+        }
+      }
+      inner.law.addWitnessSource(() =>
+        [...this.town.npcs.values()].map((n) => ({
+          id: n.id,
+          defName: n.def,
+          kind: 'creature' as const,
+          pos: n.pos,
+          yaw: n.yaw,
+          health: 1,
+          maxHealth: 1,
+          faction: 'villager',
+          alive: n.state !== 'indoors',
+          anim: n.anim,
+          targetId: null,
+          spawnId: null,
+          attackCooldownMs: 0,
+          blocking: false,
+          stunnedMs: 0,
+        })),
+      );
+    }
   }
 
   addHero(heroId: number, at: Vec3): void {
@@ -81,8 +114,18 @@ export class TownSim implements RegionSim {
     return this.inner.law;
   }
 
-  placeHero(heroId: number, at: Vec3, yaw?: number): void {
-    this.inner.placeHero?.(heroId, at, yaw);
+  get healing() {
+    return this.inner.healing;
+  }
+
+  addGuard(defName: string, at: Vec3): number {
+    if (!this.inner.addGuard) throw new Error('this region has no town watch');
+    return this.inner.addGuard(defName, at);
+  }
+
+  placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
+    if (!this.inner.placeHero) return false;
+    return this.inner.placeHero(heroId, at, yaw) !== false;
   }
 
   dispose(): void {

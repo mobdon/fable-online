@@ -5,7 +5,10 @@
 #include <string>
 
 #include "world/entities.h"
+#include "world/health.h"
+#include "world/reporter.h"
 #include "world/snapshot.h"
+#include "world/spawn_filter.h"
 
 namespace {
 int g_failed = 0;
@@ -193,7 +196,138 @@ void test_real_frame() {
     CHECK(t.entities[1].anim == Anim::Walk);
 }
 
+void test_connection_frames() {
+    Welcome w;
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9,\"name\":\"Mob\",\"tick_rate\":20,"
+                        "\"resume\":\"resume.abcDEF_-123\",\"resume_ms\":300000,\"client_move\":\"checked\"}", w));
+    CHECK(w.resume == "resume.abcDEF_-123");
+    CHECK(w.clientMove == "checked");
+    // An old server says nothing about either: no resume, no reports.
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9}", w));
+    CHECK(w.resume.empty());
+    CHECK(w.clientMove == "off");
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":9,\"client_move\":\"everything\"}", w));
+    CHECK(w.clientMove == "off");
+
+    PosCorrect c;
+    CHECK(frame_type("{\"t\":\"pos_correct\",\"x\":1,\"y\":2,\"z\":3}") == FrameType::PosCorrect);
+    CHECK(parse_pos_correct("{\"t\":\"pos_correct\",\"x\":32.5,\"y\":-4,\"z\":0.25,\"reason\":\"too_fast\"}", c));
+    CLOSE(c.x, 32.5f);
+    CLOSE(c.y, -4.0f);
+    CLOSE(c.z, 0.25f);
+    CHECK(c.reason == "too_fast");
+    CHECK(c.area == 0);
+    CHECK(parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2,\"z\":3,\"reason\":\"too_fast\",\"area\":2147483000}", c));
+    CHECK(c.area == 2147483000u);
+    CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2}", c));
+    CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1e30,\"y\":2,\"z\":3}", c));
+
+    double n = 0;
+    CHECK(parse_pong("{\"t\":\"pong\",\"n\":123456}", n));
+    CHECK(n == 123456);
+    CHECK(!parse_pong("{\"t\":\"tick\",\"n\":1}", n));
+}
+
+void test_reporter() {
+    PositionReporter r;
+    CHECK(r.due(1000, 0, 0, 0, 0));  // first report goes straight out
+    r.sent(1000, 0, 0, 0, 0);
+    CHECK(!r.due(1050, 5, 0, 0, 0));  // too soon, however far
+    CHECK(r.due(1100, 0.5f, 0, 0, 0));  // moving: every 100 ms
+    CHECK(!r.due(1100, 0.01f, 0, 0, 0));  // standing still...
+    CHECK(!r.due(1900, 0.01f, 0, 0, 0));
+    CHECK(r.due(2000, 0.01f, 0, 0, 0));  // ...only a heartbeat a second
+    CHECK(r.due(1200, 0, 0, 0, 0.3f));  // turning on the spot counts
+    CHECK(!r.due(1200, 0, 0, 0, 6.2831853f));  // a full turn is no turn
+    r.reset();
+    CHECK(r.due(1010, 0, 0, 0, 0));  // after a correction, straight away
+
+    CHECK(r.rtt_ms() == -1);
+    CHECK(r.ping_due(5000));
+    CHECK(!r.ping_due(6000));
+    CHECK(r.ping_due(7000));
+    r.pong(5080, 5000);
+    CHECK(r.rtt_ms() == 80);
+    r.pong(7180, 7000);
+    CHECK(r.rtt_ms() == 100);  // smoothed: 80 * 0.8 + 180 * 0.2
+    r.pong(9000, 1e12);  // junk is ignored
+    CHECK(r.rtt_ms() == 100);
+}
+
+void test_health() {
+    // The own hero's state is kept from the frame, max_health included.
+    Tick t;
+    CHECK(parse_tick(R"({"t":"tick","tick":3,"entities":[{"id":7,"kind":"hero","x":1,"y":2,"z":3,"health":40,"max_health":160},{"id":9,"x":0,"y":0,"z":0,"health":5}]})", t));
+    CHECK(t.entities.size() == 2 && t.entities[0].maxHealth == 160 && t.entities[1].maxHealth == 0);
+    EntityTable table;
+    EntityState own;
+    CHECK(!table.own_state(own));
+    table.set_local_id(7);
+    table.on_tick(t, 1000);
+    CHECK(table.own_state(own) && own.health == 40 && own.maxHealth == 160);
+    CHECK(table.size() == 1);  // still no puppet for ourselves
+    table.clear();
+    CHECK(!table.own_state(own));
+
+    CHECK(health_target(40, 160, 300, 300) == 75);    // a quarter of Fable's own max
+    CHECK(health_target(160, 160, 299.8f, 300) < 0); // rounding only: left alone
+    CHECK(health_target(160, 160, 120, 300) == 300);  // healed on the server
+    CHECK(health_target(0, 160, 50, 300) == 1);       // downed: held at 1, never Fable's death
+    CHECK(health_target(0, 160, 1, 300) < 0);         // already there
+    CHECK(health_target(200, 160, 10, 300) == 300);   // over max is max
+    CHECK(health_target(40, 0, 300, 300) < 0);        // no max from the server: leave it
+    CHECK(health_target(40, 160, 300, 0) < 0);        // Fable has no max yet
+    CHECK(health_target(NAN, 160, 300, 300) < 0);
+
+    // A local heal is gathered, reported once as a share of max, and held while the server answers.
+    HealWatch w;
+    float share = 0;
+    w.observe(100, 200, 1000);
+    CHECK(!w.holding(1000));
+    w.observe(150, 200, 1033);  // a potion: +50
+    w.observe(160, 200, 1066);  // still landing: +10
+    CHECK(w.holding(1100));
+    CHECK(!w.take_report(1200, share));  // still gathering
+    CHECK(w.take_report(1340, share) && std::fabs(share - 0.3f) < 1e-4f);
+    CHECK(!w.take_report(1400, share));  // only once
+    CHECK(w.holding(2000));
+    CHECK(!w.holding(3000));
+    // The mod's own writes are not heals.
+    w.wrote(190);
+    w.observe(190, 200, 3100);
+    CHECK(!w.holding(3100) && !w.take_report(3500, share));
+    // Damage is not a heal either.
+    w.observe(120, 200, 3600);
+    CHECK(!w.holding(3600));
+}
+
 }  // namespace
+
+void test_spawn_filter() {
+    Welcome w;
+    CHECK(parse_welcome(R"({"t":"welcome","player_id":3,"spawn_defs":["CREATURE_WOLF","CREATURE_BANDIT_GRUNT_LEVEL1","bad name"],"tick_rate":20})", w));
+    CHECK(w.spawnDefs.size() == 3);
+    CHECK(w.tickRate == 20);
+    // An older server sends no list: nothing is filtered.
+    CHECK(parse_welcome("{\"t\":\"welcome\",\"player_id\":3}", w));
+    CHECK(w.spawnDefs.empty());
+
+    SpawnFilter f;
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", ""));
+    f.set_server_defs({"CREATURE_WOLF", "CREATURE_BANDIT_GRUNT_LEVEL1", "bad name", ""});
+    CHECK(f.active());
+    CHECK(f.def_count() == 2);
+    CHECK(f.should_drop(true, "CREATURE_WOLF", ""));
+    CHECK(f.should_drop(true, "CREATURE_WOLF", "NULL"));
+    // A creature a quest names, something that is not a creature, or a def the server
+    // does not run all stay in the level.
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", "QuestWolfLeader"));
+    CHECK(!f.should_drop(false, "CREATURE_WOLF", ""));
+    CHECK(!f.should_drop(true, "CREATURE_VILLAGER_FARMER", ""));
+    CHECK(!f.should_drop(true, "", ""));
+    f.clear();
+    CHECK(!f.should_drop(true, "CREATURE_WOLF", ""));
+}
 
 int main() {
     std::printf("world tests\n");
@@ -205,6 +339,10 @@ int main() {
     test_table_removal_and_stale();
     test_death_and_angles();
     test_real_frame();
+    test_connection_frames();
+    test_spawn_filter();
+    test_reporter();
+    test_health();
     std::printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed == 0 ? 0 : 1;
 }

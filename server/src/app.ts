@@ -12,7 +12,7 @@ import { Progress } from './heroes/progress.js';
 import { loadGameData, type GameData } from './data/game-data.js';
 import { BALANCE } from './combat/rules.js';
 import { combatSimFactory, type ChannelAi, type AiContext } from './world/combat-sim.js';
-import { loadSpawns } from './world/spawns.js';
+import { loadSpawns, serverSpawnDefs } from './world/spawns.js';
 import path from 'node:path';
 import { TradeSessions } from './economy/trade.js';
 import { RegionTable } from './world/regions.js';
@@ -20,6 +20,7 @@ import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
 import { navSimFactory } from './world/nav-sim.js';
 import { NavStore } from './world/nav/navmesh.js';
+import { monsterAi } from './world/ai/combat-ai.js';
 import { WorldThings } from './world/things/world-things.js';
 import { WorldObjects } from './world/things/objects.js';
 import fs from 'node:fs';
@@ -31,6 +32,7 @@ import { loadTownData, type TownData } from './world/town/town-data.js';
 import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
 import { Scoreboard } from './scoreboard/scoreboard.js';
+import { ResumeTokens } from './net/resume.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -53,6 +55,10 @@ export interface App {
   clock: WorldClock;
   town: TownData;
   scoreboard: Scoreboard;
+  /** Lets a dropped game connection come back without a new launcher ticket. */
+  resume: ResumeTokens;
+  /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
+  spawnDefs: string[];
   close(): void;
 }
 
@@ -64,7 +70,7 @@ export function createApp(
   const db = new Database(cfg.dbPath);
   const events = opts.events ?? (cfg.eventsPath ? new JsonlSink(cfg.eventsPath) : new NullSink());
   const accounts = new Accounts(db, events, cfg.sessionTtlMs);
-  const heroes = new Heroes(db, events, cfg.maxHeroesPerAccount);
+  const heroes = new Heroes(db, events, cfg.maxHeroesPerAccount, cfg.newHeroPhase);
   const data = opts.data ?? loadGameData(cfg.gameDataPath);
   const starterIds = new Set(STARTER_ITEMS.map((i) => i.id));
   const catalog = new ItemCatalog([...STARTER_ITEMS, ...catalogFromGameData(data.items, BALANCE.staffArmour).filter((i) => !starterIds.has(i.id))]);
@@ -93,6 +99,7 @@ export function createApp(
   const lawServices: LawServices = {
     law,
     events,
+    isDay: () => !clock.isNight(),
     stealthPieces: (heroId) => economy.inventory(heroId).filter((i) => i.location === 'equipped' && /STEALTH/i.test(i.def_id)).length,
     out: {
       send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
@@ -101,12 +108,14 @@ export function createApp(
   };
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
+  const spawns = loadSpawns(cfg.spawnsPath);
+  const spawnDefs = !opts.sim && cfg.combat ? serverSpawnDefs(spawns, data) : [];
   const baseSim =
     opts.sim ??
     (cfg.combat
       ? combatSimFactory({
           data,
-          spawns: loadSpawns(cfg.spawnsPath),
+          spawns,
           events,
           economy,
           loot,
@@ -114,8 +123,10 @@ export function createApp(
           loadout: (heroId) => ({
             equipped: economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id),
             staff: staffHero(heroId),
+            pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),
-          ...(opts.ai ? { ai: opts.ai } : {}),
+          ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
+          law: lawServices,
         })
       : cfg.navDir
         ? navSimFactory(new NavStore(cfg.navDir), lawServices)
@@ -158,6 +169,8 @@ export function createApp(
     clock,
     town,
     scoreboard,
+    resume: new ResumeTokens(cfg.resumeMs),
+    spawnDefs,
     close() {
       director.stop();
       law.flush();

@@ -2,7 +2,6 @@
 #include <windows.h>
 #include <cmath>
 #include <cstring>
-#include <vector>
 #include "../log.h"
 
 namespace fo::game {
@@ -32,17 +31,23 @@ uintptr_t scan() {
     GetSystemInfo(&si);
     uintptr_t p = reinterpret_cast<uintptr_t>(si.lpMinimumApplicationAddress);
     uintptr_t end = reinterpret_cast<uintptr_t>(si.lpMaximumApplicationAddress);
-    std::vector<uint32_t> buf;
+    // Read in fixed 64 KB pieces: one buffer the size of a large region (up to 256 MB) could
+    // not be allocated in Fable's crowded 32-bit address space, and the failed allocation
+    // ended the whole game.
+    static uint32_t buf[16384];
+    constexpr size_t kChunk = sizeof(buf);
     while (p < end) {
         MEMORY_BASIC_INFORMATION mbi;
         if (!VirtualQuery(reinterpret_cast<LPCVOID>(p), &mbi, sizeof(mbi))) break;
         uintptr_t lo = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         bool rw = (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD);
         if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && rw && mbi.RegionSize < (256u << 20)) {
-            buf.resize(mbi.RegionSize / 4);
-            if (read(lo, buf.data(), buf.size() * 4))
-                for (size_t i = 0; i < buf.size(); ++i)
-                    if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4)) return lo + i * 4;
+            for (size_t off = 0; off < mbi.RegionSize; off += kChunk) {
+                size_t n = mbi.RegionSize - off < kChunk ? mbi.RegionSize - off : kChunk;
+                if (!read(lo + off, buf, n)) break;
+                for (size_t i = 0; i < n / 4; ++i)
+                    if (buf[i] == kHeroVtable && looks_like_hero(lo + off + i * 4)) return lo + off + i * 4;
+            }
         }
         p = lo + mbi.RegionSize;
     }

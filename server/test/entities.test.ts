@@ -44,7 +44,7 @@ test('frames label heroes with their name and renown, and creatures with their d
 });
 
 test('each player only gets the entities near them', () => {
-  const app = testApp({ interestRadius: 50, trustClientPositions: true });
+  const app = testApp({ interestRadius: 50, clientMovement: 'trusted' });
   const near = makeHero(app).hero;
   const far = makeHero(app).hero;
   const nearInbox: string[] = [];
@@ -76,10 +76,10 @@ test('each player only gets the entities near them', () => {
 });
 
 test('a position from the client is only used when the server is told to trust it', () => {
-  const guarded = testApp({ trustClientPositions: false });
+  const guarded = testApp({ clientMovement: 'off' });
   const hero = makeHero(guarded).hero;
   const ch = guarded.director.join(hero, link(hero.id, 'Mob', []));
-  assert.equal(guarded.cfg.trustClientPositions, false);
+  assert.equal(guarded.cfg.clientMovement, 'off');
 
   // The channel itself still obeys: the refusal is in the socket, which is where the
   // client's say-so arrives. Here we check the default is off and the frame is valid.

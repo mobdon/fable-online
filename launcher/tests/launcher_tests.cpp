@@ -34,6 +34,16 @@ int main(int argc, char** argv) {
     CHECK(http::url_allowed("https://gateway.example.net/x"));
     CHECK(http::url_allowed("http://127.0.0.1:8787/x"));
     CHECK(!http::url_allowed("http://evil.example.net/x"));
+    // Home and VPN test servers: LAN ranges and Tailscale's 100.64/10, nothing public.
+    CHECK(http::url_allowed("http://192.168.1.20:7777/x"));
+    CHECK(http::url_allowed("http://10.0.0.5:7777/x"));
+    CHECK(http::url_allowed("http://172.20.1.1:7777/x"));
+    CHECK(http::url_allowed("http://100.101.102.103:7777/x"));
+    CHECK(!http::url_allowed("http://172.32.0.1:7777/x"));
+    CHECK(!http::url_allowed("http://100.128.0.1:7777/x"));
+    CHECK(!http::url_allowed("http://8.8.8.8:7777/x"));
+    CHECK(!http::url_allowed("http://192.168.1.300/x"));
+    CHECK(!http::url_allowed("http://10.0.0.1.evil.net/x"));
     CHECK(!http::url_allowed("file:///C:/x"));
 
     // crypto

@@ -11,6 +11,7 @@ import type { PlayerInput } from '../world/sim.js';
  * whether they can reach it and what happens.
  */
 export type ClientMessage =
+  /** `token` is the launcher's one-time join ticket, or the `resume` token from the last welcome. */
   | { t: 'hello'; protocol: number; exe_timestamp: string; token: string }
   | ({ t: 'input' } & PlayerInput)
   | { t: 'chat'; text: string }
@@ -20,11 +21,12 @@ export type ClientMessage =
   /** The client's Fable finished a quest. The server checks the reward before paying anything. */
   | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] }
   /**
-   * Dev only. The mod reporting where the local game put its hero, used until Fable's
-   * own input is mapped. The server throws it away unless trustClientPositions is on,
-   * because a position from a client is a position a cheat can choose.
+   * The mod reporting where the local game put its hero, used until Fable's own input is
+   * mapped. A position from a client is a position a cheat can choose, so with
+   * clientMovement 'checked' (the default) the server only takes moves the hero could have
+   * made (src/world/movement.ts) and answers anything else with `pos_correct`.
    */
-  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number }
+  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number; load?: boolean }
   /**
    * Shops. `shop` is the shop building's UID from the level file, as the client's Fable knows it;
    * the server adds the region from where it has the hero. `key` is the client's idempotency key
@@ -33,6 +35,12 @@ export type ClientMessage =
   | { t: 'shop_open'; shop: string }
   | { t: 'shop_buy'; shop: string; def: string; qty: number; key: string }
   | { t: 'shop_sell'; shop: string; item: string; key: string }
+  /**
+   * The local game healed the hero by `share` of its max (a potion, food or Heal Life the mod
+   * cannot tell apart yet). The server decides what was used, spends it and heals by its own
+   * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
+   */
+  | { t: 'heal'; share: number; key: string }
   | LawRequest;
 
 /**
@@ -115,6 +123,7 @@ export function decode(raw: string): ClientMessage {
         z: m.z,
         yaw: isNum(m.yaw) ? wrapAngle(m.yaw) : undefined,
         area: isNum(m.area) ? m.area >>> 0 : 0,
+        load: m.load === 1 || m.load === true,
       };
     }
     case 'ping':
@@ -128,6 +137,9 @@ export function decode(raw: string): ClientMessage {
       return decodeLaw(m);
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
+    case 'heal':
+      if (!isNum(m.share) || m.share <= 0 || m.share > 2) throw new ProtocolError('bad heal');
+      return { t: 'heal', share: m.share, key: clientKey(m.key) };
     case 'shop_buy': {
       if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');
       const qty = isNum(m.qty) ? m.qty : 1;

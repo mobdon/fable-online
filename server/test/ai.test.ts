@@ -186,3 +186,26 @@ test('snapshot carries creatures with their def name for the client', () => {
   const c = snap.find((e) => e.id >= 1_000_000)!;
   assert.equal(c.def, 'CREATURE_HOBBE');
 });
+
+test('in a combat channel the AI drives spawned monsters: a bandit walks up and hits the hero', async () => {
+  const { CombatSim } = await import('../src/world/combat-sim.js');
+  const { FALLBACK_DATA } = await import('../src/data/game-data.js');
+  const { MemorySink } = await import('../src/analytics/events.js');
+  const { monsterAi } = await import('../src/world/ai/combat-ai.js');
+  const table = { creatures: [{ uid: '1', def: 'CREATURE_BANDIT_GRUNT_LEVEL1', x: 0, y: 10, z: 0, yaw: Math.PI, script: null }], generators: [] };
+  const sim = new CombatSim({ name: 'TestRegion', uid: 1, sea: false, neighbours: [] }, 'TestRegion#1', {
+    data: FALLBACK_DATA,
+    spawns: { regions: { TestRegion: table } },
+    events: new MemorySink(),
+    ai: monsterAi(),
+    spawnOptions: { rng: () => 0.5 },
+  });
+  sim.addHero(1, { x: 0, y: 0, z: 0 });
+  const bandit = [...sim.spawns.creatures()][0]!;
+  const startHp = sim.combat.get(1)!.health;
+  // The bandit faces the hero (yaw pi = -y) 10 m away: inside its sight.
+  for (let t = 0; t < 8000; t += 50) sim.step(50);
+  assert.equal(bandit.targetId, 1);
+  assert.ok(Math.hypot(bandit.pos.x, bandit.pos.y) < 3, `bandit at ${bandit.pos.x},${bandit.pos.y} never closed in`);
+  assert.ok(sim.combat.get(1)!.health < startHp, 'the hero took hits');
+});

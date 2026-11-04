@@ -25,6 +25,8 @@ export interface DeathInfo {
   damageBy: Map<number, number>;
 }
 export type DeathListener = (d: DeathInfo) => void;
+/** Every landed hit, after armour and shields. `killed` is true when it was the killing blow. */
+export type HitListener = (attacker: Combatant, target: Combatant, damage: number, killed: boolean) => void;
 
 /** Heroes only hurt heroes when both have PvP on. Creatures don't fight each other. */
 export const defaultHarmPolicy: HarmPolicy = (a, t) => {
@@ -46,6 +48,7 @@ export class CombatSystem implements CombatPort {
   private knockedDown = new Set<number>();
   private spellCooldown = new Map<string, number>();
   private deathListeners: DeathListener[] = [];
+  private hitListeners: HitListener[] = [];
   private healLevels: readonly number[];
 
   constructor(
@@ -55,6 +58,10 @@ export class CombatSystem implements CombatPort {
   ) {
     // Heal Life's per-level amounts come straight from game.bin when the extractor found them.
     this.healLevels = data.spells['SPECIAL_ABILITIES_HEAL_LIFE_DEF_INSTANCE']?.levels['2dda34f8'] ?? SPELLS.heal_life.heal;
+  }
+
+  onHit(fn: HitListener): void {
+    this.hitListeners.push(fn);
   }
 
   onDeath(fn: DeathListener): void {
@@ -168,6 +175,30 @@ export class CombatSystem implements CombatPort {
     return { ok: true, hit: true, targetId: first.id, damage: total, blocked: false, killed: !first.alive };
   }
 
+  /**
+   * What Heal Life would heal this hero for right now, or null when they could not cast it
+   * (dead, stunned, not learned, on cooldown or short of Will). Nothing is spent.
+   */
+  healLifePreview(heroId: number): number | null {
+    const c = this.all.get(heroId);
+    if (!c || !c.alive || c.kind !== 'hero') return null;
+    const h = c as Hero;
+    if (h.stunnedMs > 0) return null;
+    const level = Math.min(4, Math.max(0, Math.floor(h.spells.heal_life ?? 0)));
+    if (level === 0 || (this.spellCooldown.get(`${h.id}:heal_life`) ?? 0) > 0) return null;
+    if (h.will < SPELLS.heal_life.cost[level - 1]!) return null;
+    return this.healLevels[level - 1] ?? SPELLS.heal_life.heal[level - 1]!;
+  }
+
+  /** Add health to a living combatant, capped at max. Returns how much was added. */
+  addHealth(id: number, amount: number): number {
+    const c = this.all.get(id);
+    if (!c || !c.alive || !(amount > 0)) return 0;
+    const before = c.health;
+    c.health = Math.min(c.maxHealth, c.health + amount);
+    return c.health - before;
+  }
+
   /** Advance timers: cooldowns, stuns, shields, Will regeneration, flourish charge. */
   step(dtMs: number, charging?: ReadonlySet<number>): void {
     for (const c of this.all.values()) {
@@ -256,7 +287,10 @@ export class CombatSystem implements CombatPort {
       if (o.stunMs > BALANCE.flinchMs) this.knockedDown.add(t.id);
     }
     if (t.kind === 'creature') this.hooks.onDamaged?.(t.id, a.id, dmg);
-    if (t.health <= 0) this.kill(t, a);
+    const killed = t.health <= 0;
+    // Listeners hear the hit before the death, so a crime is on the record before any death handling.
+    for (const fn of this.hitListeners) fn(a, t, dmg, killed);
+    if (killed) this.kill(t, a);
     return dmg;
   }
 

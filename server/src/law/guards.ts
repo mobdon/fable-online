@@ -90,6 +90,7 @@ export class ChannelLaw {
   private nextThink = 0;
   private lastLevel = new Map<number, number>();
   private rng: () => number;
+  private witnessSources: (() => Iterable<Creature>)[] = [];
 
   constructor(
     private ch: LawChannel,
@@ -510,6 +511,19 @@ export class ChannelLaw {
 
   // ---------------------------------------------------------------- sight
 
+  /**
+   * Add people who can witness crimes but aren't combat creatures (the town layer's
+   * villagers and shopkeepers). They are matched by def name like creatures.
+   */
+  addWitnessSource(fn: () => Iterable<Creature>): void {
+    this.witnessSources.push(fn);
+  }
+
+  private *everyone(): Iterable<Creature> {
+    yield* this.ch.creatures();
+    for (const fn of this.witnessSources) yield* fn();
+  }
+
   private *guards(): Iterable<Creature> {
     for (const c of this.ch.creatures()) if (GUARD_DEF.test(c.defName)) yield c;
   }
@@ -530,7 +544,7 @@ export class ChannelLaw {
   private seenBy(p: { x: number; y: number }, who: 'guard' | 'villager'): Creature | undefined {
     let best: Creature | undefined;
     let bestD = Infinity;
-    for (const c of this.ch.creatures()) {
+    for (const c of this.everyone()) {
       if (!c.alive) continue;
       const isGuard = GUARD_DEF.test(c.defName);
       if (who === 'guard' ? !isGuard : isGuard || !VILLAGER_DEF.test(c.defName)) continue;
@@ -568,7 +582,7 @@ export class ChannelLaw {
   }
 
   private creature(id: number): Creature | undefined {
-    for (const c of this.ch.creatures()) if (c.id === id) return c;
+    for (const c of this.everyone()) if (c.id === id) return c;
     return undefined;
   }
 

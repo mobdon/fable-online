@@ -49,13 +49,29 @@ bool loopback(const std::wstring& host) {
     return host == L"localhost" || host == L"127.0.0.1" || host == L"[::1]" || host == L"::1";
 }
 
+// A home or VPN network address: 10/8, 172.16/12, 192.168/16, and 100.64/10 (the range
+// Tailscale and carrier NAT use). A test server on a friend's PC is reached this way, with
+// no certificate, and traffic on those networks does not cross the open internet in clear
+// (a VPN like Tailscale encrypts it).
+bool private_network(const std::wstring& host) {
+    unsigned a[4];
+    wchar_t tail = 0;
+    if (swscanf(host.c_str(), L"%u.%u.%u.%u%lc", &a[0], &a[1], &a[2], &a[3], &tail) != 4) return false;
+    for (unsigned v : a)
+        if (v > 255) return false;
+    return a[0] == 10 || (a[0] == 172 && a[1] >= 16 && a[1] <= 31) || (a[0] == 192 && a[1] == 168) ||
+           (a[0] == 100 && a[1] >= 64 && a[1] <= 127);
+}
+
+bool plain_http_ok(const std::wstring& host) { return loopback(host) || private_network(host); }
+
 // Opens a request and sends it; the caller reads the response.
 Response open(const std::string& method, const std::string& url, const std::string& body,
               const std::string& bearer, Handle& session, Handle& conn, Handle& req) {
     Response r;
     Url u;
     if (!crack(url, u)) { r.error = "bad URL: " + url; return r; }
-    if (!u.https && !loopback(u.host)) { r.error = "refusing plain http to " + narrow(u.host); return r; }
+    if (!u.https && !plain_http_ok(u.host)) { r.error = "refusing plain http to " + narrow(u.host); return r; }
     session.h = WinHttpOpen(L"ChaptersOfTheLostLauncher/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) { r.error = win_error("WinHttpOpen"); return r; }
@@ -94,7 +110,7 @@ Response open(const std::string& method, const std::string& url, const std::stri
 
 bool url_allowed(const std::string& url) {
     Url u;
-    return crack(url, u) && (u.https || loopback(u.host));
+    return crack(url, u) && (u.https || plain_http_ok(u.host));
 }
 
 Response request(const std::string& method, const std::string& url,

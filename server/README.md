@@ -9,7 +9,11 @@ npm install
 npm run dev          # http://localhost:7777, game socket ws://localhost:7777/play
 npm test             # economy invariants, accounts, channels, combat, spawns, loot, quests, end-to-end join
 npm run bots -- 1000 20   # 1,000 bots over real WebSockets for 20 s
+npm run walkers -- --near Mob   # bot players walking around a hero on a running server
+npm run admin -- list           # heroes and where they are
 ```
+
+To host a test server on a Windows PC, use `ops/local-host/` (README there).
 
 ### Game data from your own install
 
@@ -39,10 +43,10 @@ Needs Node 22.13 or newer (uses the built-in `node:sqlite`).
 ## The rules it enforces
 
 **The server owns everything.** A client can send exactly these things: `hello` (a one-time
-join ticket), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id of a door,
-chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server checks,
-below), and `ping`. It never sends a position,
-health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
+join ticket or resume token), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id
+of a door, chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server
+checks, below), `hero_pos` (where its Fable put the hero, accepted only if the hero could have
+got there: `docs/connection.md`), and `ping`. It never sends health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
 inputs are rate limited, and junk frames disconnect. The hero's region and position come
 from the database on join and are written back by the server.
 
@@ -143,11 +147,11 @@ Admin (`/admin/v1`, admin accounts only): `GET stats`, `GET economy/audit`.
 - **`StubSim`** walks heroes around at run speed with no ground. Regions with an extracted
   navmesh (`node tools/extractor/navmesh.mjs <install>`, then `FO_NAV_DIR=../shared/defs/nav`)
   run on `NavSim` instead: heroes stay on walkable ground and monsters are run by the
-  server's AI, when `FO_COMBAT=0`. With combat on (the default), `CombatSim` runs and the AI
-  isn't wired into it yet.
-- **Movement** in `CombatSim` is still kinematic (run speed along the stick, no walls). The
-  navmesh and monster AI are separate work that plugs into `ChannelAi`. `FO_COMBAT=0` falls
-  back to the movement-only `StubSim`.
+  server's AI, when `FO_COMBAT=0`. With combat on (the default), `CombatSim` runs and the
+  monster AI drives its creatures through `ChannelAi` (`src/world/ai/combat-ai.ts`), using
+  the region's navmesh when `FO_NAV_DIR` is set and straight-line movement otherwise.
+- **Hero movement** in `CombatSim` is still kinematic (run speed along the stick, no walls).
+  `FO_COMBAT=0` falls back to `NavSim` or the movement-only `StubSim`.
 - **Armour class values and hero levels.** Armour ratings come from the armour balance
   design, not game.bin (no per-piece rating was found there). Strength, Skill and Will levels
   aren't stored yet, so heroes fight at level 0 plus their gear.

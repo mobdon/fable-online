@@ -72,6 +72,22 @@ void set_free(ThingRef& t);
 /** Turns the thing to face `yaw` radians. */
 void look_in_direction(ThingRef& t, float yaw);
 
+/**
+ * Queues an animation on a creature's scripted-control component, the way a quest script's
+ * `.PlayLoopingAnim` does, without needing the script runner's own handle for the thing.
+ * `anim` is a name from the creature's animation map: "ST_IDLE", "ST_WALK", "ST_RUN" and
+ * so on resolve to that creature's own animations. `clear_first` drops whatever the
+ * component was running. Returns false (and changes nothing) when the thing has no
+ * scripted-control component or any pointer looks wrong.
+ */
+bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence);
+/** The same, played once the way `.PlayAnimation` does. Queues behind anything already queued. */
+bool play_anim_once(ThingRef& t, const char* anim, bool clear_first, uint32_t sequence);
+/** True when the thing's scripted-control queue is empty (or the thing has none). */
+bool scripted_queue_empty(ThingRef& t);
+/** Drops everything queued on the thing's scripted-control component. */
+void clear_scripted(ThingRef& t);
+
 /** Hero health, through the same calls the scripts use. Returns false if not readable. */
 bool hero_health(float& current, float& max);
 

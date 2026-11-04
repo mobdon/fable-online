@@ -49,8 +49,9 @@ export function createHttpHandler(app: App) {
     const channel = url.searchParams.get('channel') ?? 'live';
     if (!/^[a-z0-9-]{1,32}$/.test(channel)) throw new GameError('bad_channel', 'Bad channel');
     const m = readContent(cfg.contentDir, `manifest-${channel}.json`, null);
-    if (!m) throw new GameError('no_manifest', `No manifest for ${channel}`, 404);
-    return m;
+    // No manifest published: nothing to patch. The launcher still has to see one to let the
+    // player in, and on a home test server everyone brings their own build.
+    return m ?? { version: cfg.minClientVersion, protocol: cfg.protocolVersion, files: [] };
   });
 
   route('POST', '/launcher/v1/register', (req, b) =>
@@ -78,7 +79,11 @@ export function createHttpHandler(app: App) {
     if (b.region !== undefined && b.region !== cfg.realmId) throw new GameError('bad_region', `Unknown region ${String(b.region)}`, 404);
     if (versionLess(String(b.client_version ?? '0'), cfg.minClientVersion))
       throw new GameError('outdated', `Please update: client ${cfg.minClientVersion} or newer is required`, 409);
-    const hero = heroes.pick(acct.id, b.hero_id === undefined ? undefined : Number(b.hero_id));
+    const wanted = b.hero_id === undefined ? undefined : Number(b.hero_id);
+    const hero =
+      wanted === undefined && cfg.autoHero && heroes.listForAccount(acct.id).length === 0
+        ? heroes.create(acct.id, heroNameFor(acct.username))
+        : heroes.pick(acct.id, wanted);
     if (director.online >= director.capacity) throw new GameError('region_full', 'The server is full', 503);
     return {
       ticket: accounts.issueJoinTicket(acct.id, hero.id, cfg.realmId),
@@ -231,4 +236,12 @@ export function versionLess(a: string, b: string): boolean {
     if (d !== 0) return d < 0;
   }
   return false;
+}
+
+/** "mob_99" -> "Mob": the letters of a username, as a Fable-style hero name. */
+export function heroNameFor(username: string): string {
+  const letters = username.replace(/[^A-Za-z]/g, '').slice(0, 16).toLowerCase();
+  const name = letters.charAt(0).toUpperCase() + letters.slice(1);
+  if (name.length < 3) throw new GameError('no_hero', 'Make a hero first: the account name has too few letters to name one after', 404);
+  return name;
 }
