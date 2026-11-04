@@ -3,14 +3,18 @@
 //   node tools/extractor/spawns.mjs "C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters"
 // Sources:
 //   data/Levels/FinalAlbion.wad   archive of .lev and .tng files ("BBBB" header)
-//   data/Levels/FinalAlbion.wld   maps each level file to its LevelScriptName (the region key)
+//   data/Levels/FinalAlbion.wld   maps each level file to its LevelScriptName, and levels to regions
 // Each .tng is plain text: NewThing <kind>; ... EndThing; blocks. We keep:
 //   AICreature things            a creature placed in the level, with its def and position
 //   MARKER_CREATURE_GENERATOR    a spawner that picks from CREATURE_GENERATION_FAMILY defs
-// Positions are in the level's local frame (metres, z up), the same frame as the navmesh.
+// Spawns are grouped by region (the region graph's names, which the server's channels use) and
+// positions are converted into the region's frame (its anchor level's; see regionFrames in
+// things.mjs), the frame the server's level data and RegionTable.origin() share. Uids are
+// prefixed with the level script so two levels of one region never clash.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseWld, regionFrames } from './things.mjs';
 
 /** WAD index: 32-byte header, then entries at entriesOffset. */
 export function readWadIndex(fd) {
@@ -75,6 +79,28 @@ export function parseTng(text) {
   return { creatures, generators };
 }
 
+/**
+ * Level tables -> region tables in each region's frame. `tables` is [{ script, creatures,
+ * generators }] in level-local positions; `levelInfo` comes from regionFrames(). A level in
+ * no region keeps its own script as the key and its own frame.
+ */
+export function groupByRegion(tables, levelInfo) {
+  const regions = {};
+  for (const t of tables) {
+    if (!t.creatures.length && !t.generators.length) continue;
+    const L = levelInfo[t.script];
+    const dx = L?.dx ?? 0;
+    const dy = L?.dy ?? 0;
+    const move = (s) => ({ ...s, uid: `${t.script}:${s.uid}`, x: round(s.x + dx), y: round(s.y + dy) });
+    const r = (regions[L?.region ?? t.script] ??= { creatures: [], generators: [] });
+    r.creatures.push(...t.creatures.map(move));
+    r.generators.push(...t.generators.map(move));
+  }
+  return regions;
+}
+
+const round = (n) => Math.round(n * 1000) / 1000;
+
 function main() {
   const game = process.argv[2];
   if (!game) {
@@ -82,31 +108,26 @@ function main() {
     process.exit(1);
   }
   const levels = path.join(game, 'data', 'Levels');
-  const wld = fs.readFileSync(path.join(levels, 'FinalAlbion.wld'), 'latin1');
-  // LevelName "FinalAlbion\Foo.lev" -> LevelScriptName "Foo"
-  const scriptOf = new Map();
-  for (const block of wld.split(/\bNewMap\s+/).slice(1)) {
-    const lev = block.match(/\bLevelName\s+"?([^";]+)"?;/)?.[1];
-    const script = block.match(/\bLevelScriptName\s+"?([^";]+)"?;/)?.[1];
-    if (lev && script) scriptOf.set(path.basename(lev.replace(/\\/g, '/'), '.lev').toLowerCase(), script);
-  }
+  const wldText = fs.readFileSync(path.join(levels, 'FinalAlbion.wld'), 'latin1');
+  const wld = parseWld(wldText);
+  const { levelInfo } = regionFrames(wld);
+  const scriptOf = new Map([...wld.maps.values()].filter((m) => m.level && m.script).map((m) => [path.basename(m.level, '.lev'), m.script]));
   const fd = fs.openSync(path.join(levels, 'FinalAlbion.wad'), 'r');
-  const regions = {};
-  let nc = 0;
-  let ng = 0;
+  const tables = [];
   for (const e of readWadIndex(fd)) {
     if (!e.name.toLowerCase().endsWith('.tng')) continue;
     const base = path.basename(e.name.replace(/\\/g, '/'), '.tng');
-    const region = scriptOf.get(base.toLowerCase()) ?? base;
+    const script = scriptOf.get(base.toLowerCase()) ?? base;
     const buf = Buffer.alloc(e.size);
     fs.readSync(fd, buf, 0, e.size, e.offset);
-    const { creatures, generators } = parseTng(buf.toString('latin1'));
-    if (!creatures.length && !generators.length) continue;
-    const r = (regions[region] ??= { creatures: [], generators: [] });
-    r.creatures.push(...creatures);
-    r.generators.push(...generators);
-    nc += creatures.length;
-    ng += generators.length;
+    tables.push({ script, ...parseTng(buf.toString('latin1')) });
+  }
+  const regions = groupByRegion(tables, levelInfo);
+  let nc = 0;
+  let ng = 0;
+  for (const r of Object.values(regions)) {
+    nc += r.creatures.length;
+    ng += r.generators.length;
   }
   fs.closeSync(fd);
   const here = path.dirname(fileURLToPath(import.meta.url));

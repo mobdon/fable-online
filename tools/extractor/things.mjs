@@ -141,26 +141,40 @@ const contents = (c) =>
 // ---------------------------------------------------------------- build
 
 /**
- * Turn parsed levels into the server's table. `levels` is [{ script, things }], `entrances`
- * are the region entrance things from the .gtg with their map id already resolved to a
- * level script. Positions are converted into each region's frame: the frame of the region's
- * anchor level (the contained level whose script matches the region name, else the first).
+ * Which region each level belongs to and how far its frame is from the region's frame.
+ * A region's frame is its anchor level's: the contained level whose script matches the
+ * region name, else the first contained level in .wld order. That is the same rule as the
+ * server's RegionTable.origin() (server/src/world/regions.ts), which reads regions.json in
+ * .wld order, so positions converted here line up with the world coordinates Fable reports.
+ * Returns { levelInfo: script -> { region, mapUid, mapX, mapY, dx, dy }, regionAnchor: region -> script }.
  */
-export function build(wld, levels, gtgEntrances) {
+export function regionFrames(wld) {
   const byLevelFile = new Map([...wld.maps.values()].map((m) => [m.level, m]));
-  const byScript = new Map([...wld.maps.values()].map((m) => [m.script, m]));
-  const levelInfo = {}; // script -> { region, mapX, mapY, dx, dy }
+  const order = new Map([...wld.maps.values()].map((m, i) => [m, i]));
+  const levelInfo = {};
   const regionAnchor = {};
   for (const r of wld.regions) {
     const maps = r.contains.map((f) => byLevelFile.get(f)).filter(Boolean);
     if (!maps.length) continue;
-    const anchor = maps.find((m) => m.script === r.name) ?? maps[0];
+    const anchor = maps.find((m) => m.script === r.name) ?? [...maps].sort((a, b) => order.get(a) - order.get(b))[0];
     regionAnchor[r.name] = anchor.script;
     for (const m of maps) {
       if (levelInfo[m.script]) continue; // a level belongs to the first region that contains it
       levelInfo[m.script] = { region: r.name, mapUid: m.uid, mapX: m.mapX, mapY: m.mapY, dx: m.mapX - anchor.mapX, dy: m.mapY - anchor.mapY };
     }
   }
+  return { levelInfo, regionAnchor };
+}
+
+/**
+ * Turn parsed levels into the server's table. `levels` is [{ script, things }], `entrances`
+ * are the region entrance things from the .gtg with their map id already resolved to a
+ * level script. Positions are converted into each region's frame: the frame of the region's
+ * anchor level (the contained level whose script matches the region name, else the first).
+ */
+export function build(wld, levels, gtgEntrances) {
+  const byScript = new Map([...wld.maps.values()].map((m) => [m.script, m]));
+  const { levelInfo, regionAnchor } = regionFrames(wld);
   const toRegion = (level, pos) => {
     const L = levelInfo[level];
     return pos && L ? [num(pos[0] + L.dx), num(pos[1] + L.dy), pos[2]] : pos;
