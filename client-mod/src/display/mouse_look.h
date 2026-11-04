@@ -17,6 +17,8 @@ const char* assist_status();
 void poll_mouse();
 // True while the mouse-look camera has updated in the last 300 ms (playing, not in a menu).
 bool in_game();
+/** Like in_game, with a longer window: interiors update the camera only a few times a second. */
+bool in_game_within(unsigned ms);
 // Camera (mouse-look) updates since the last call.
 unsigned take_updates();
 // Mouse reads (CMouseDX updates) since the last call.

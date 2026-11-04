@@ -248,8 +248,8 @@ constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
 void draw_tags(const Config& cfg) {
     if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
     // Only over the world: loading screens, menus and area changes stop Fable's camera
-    // updates (and lose the hero), and the last view would leave tags floating over them.
-    if (!display::mouse_look::in_game() || !g_hero.valid) return;
+    // updates (and lose the hero). Interiors update it only about twice a second, and the last view would leave tags floating over them.
+    if (!display::mouse_look::in_game_within(2000) || !g_hero.valid) return;
     float vp[16];
     mul(g_view, g_proj, vp);
     ui::TagSettings s;
