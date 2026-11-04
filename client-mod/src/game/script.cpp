@@ -61,6 +61,7 @@ constexpr uint32_t kThingAnimTables = 0x134;
 constexpr unsigned kThingNearValue = 0x18;
 
 std::atomic<bool> g_disabled{false};
+const char* g_lastRefusal = "";  // why the last animation call returned false (game thread only)
 
 bool readable(uintptr_t addr, size_t n) {
     if (!addr || addr < 0x10000) return false;
@@ -438,8 +439,10 @@ bool vtable_like(uintptr_t obj) {
 
 
 bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool clear_first, uint32_t sequence) {
+    g_lastRefusal = "no reference";
     if (!anim || !*anim || !iface() || !t.held()) return false;
     uintptr_t thing = t.thing();
+    g_lastRefusal = "dead or not a creature";
     if (!creature_ok(thing)) return false;
     // online-7 crashed inside 0x0042B0A2 with thing+0x70 pointing at string data: never
     // call into the animation lookup unless that field looks like a real object.
@@ -449,6 +452,7 @@ bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool cle
             ++logged;
             fo::log("anims: refused %s on %08X: %s", anim, static_cast<unsigned>(thing), problem);
         }
+        g_lastRefusal = problem;
         return false;
     }
     if (read_ptr(kCreatureAnimActionCtor) != 0x2C24448B) {  // mov eax, [esp+0x2C]: the ctor's first bytes
@@ -456,7 +460,9 @@ bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool cle
         return false;
     }
     void* self = reinterpret_cast<void*>(thing);
+    g_lastRefusal = "busy (in a mode that takes no new actions)";
     if (as<bool(__thiscall*)(void*)>(reinterpret_cast<void*>(kCreatureIsBusy))(self)) return false;
+    g_lastRefusal = "out of memory";
 
     Str name(anim);
     void* handle = as<void*(__thiscall*)(void*, void*, int)>(reinterpret_cast<void*>(kCreatureAnimByName))(
@@ -482,9 +488,12 @@ bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool cle
     // Both calls keep a copy (action vtable +0x2C clones), so ours is deleted, as the engine does.
     uintptr_t vt = read_ptr(reinterpret_cast<uintptr_t>(action));
     as<void(__thiscall*)(void*, int)>(reinterpret_cast<void*>(read_ptr(vt)))(action, 1);
+    g_lastRefusal = ok ? "" : "the creature turned the action down";
     return ok;
 }
 }  // namespace
+
+const char* last_anim_refusal() { return g_lastRefusal; }
 
 bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence) {
     return queue_anim(t, anim, true, loops, clear_first, sequence);
