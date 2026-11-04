@@ -29,6 +29,11 @@ export const MOVE_RULES = {
   arrivalSlack: 40,
   /** Fewest milliseconds between two corrections sent to the same client. */
   correctEveryMs: 500,
+  /**
+   * Fewest milliseconds between two area changes the client loads by itself. A real load
+   * takes seconds, so anything faster is a client faking area changes to teleport.
+   */
+  areaChangeEveryMs: 3_000,
   /** Ground speed thresholds for the stand-in's animation (metres per second). */
   walkFrom: 0.4,
   runFrom: 4,
@@ -55,6 +60,10 @@ export class MoveGuard {
   speed = 0;
   lastCorrectionAt = -Infinity;
   rejected = 0;
+  /** The client's own area hash from its last report (0: not known yet). */
+  area = 0;
+  private lastAreaChangeAt = -Infinity;
+  private refusedArea = 0;
 
   constructor(
     now: number,
@@ -69,6 +78,35 @@ export class MoveGuard {
   /** Allow one report from up to `radius` metres away (a region arrival, a server teleport). */
   reanchor(radius: number): void {
     this.anchor = Math.max(this.anchor, radius);
+  }
+
+  /**
+   * The client's Fable loaded another area on its own (the hero walked out of the town, into
+   * a house, through a Cullis Gate) before the server knows the exits. The coordinates jump
+   * to the new area's, so the next report is let through from anywhere, once. Returns true
+   * when that happened. Too many changes too quickly are not believed.
+   */
+  noteArea(area: number, now: number): 'same' | 'changed' | 'too_soon' {
+    if (!area) return 'same';
+    const before = this.area;
+    if (before === area) return 'same';
+    // The first area a client tells us about is where it already is.
+    if (!before) {
+      this.area = area;
+      return 'same';
+    }
+    // Not believed yet: keep the old area so the change is tried again once the wait is over.
+    if (now - this.lastAreaChangeAt < this.rules.areaChangeEveryMs) {
+      if (this.refusedArea === area) return 'same';
+      this.refusedArea = area;
+      return 'too_soon';
+    }
+    this.area = area;
+    this.refusedArea = 0;
+    this.lastAreaChangeAt = now;
+    this.reanchor(Infinity);
+    this.speed = 0;
+    return 'changed';
   }
 
   get anchored(): boolean {

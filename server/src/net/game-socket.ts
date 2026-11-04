@@ -121,6 +121,12 @@ export class GameSocket {
     const ch = app.director.channelOf(heroId);
     if (!ch) return;
     const at = { x: msg.x, y: msg.y, z: msg.z };
+    const g = ch.moves.get(heroId);
+    if (g) {
+      const from = g.area;
+      const area = g.noteArea(msg.area, Date.now());
+      if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon' });
+    }
     if (mode === 'trusted') {
       ch.placeHero(heroId, at, msg.yaw);
       return;
@@ -138,10 +144,9 @@ export class GameSocket {
       return;
     }
     if (verdict.reason === 'loading' || verdict.reason === 'not_here') return;
-    const g = ch.moves.get(heroId);
     // One event per run of refusals, not one per packet.
     if (g && g.rejected === 1) app.events.emit({ type: 'move_rejected', heroId, channelId: ch.id, reason: verdict.reason, count: g.rejected });
-    if (correct) this.send({ t: 'pos_correct', x: correct.x, y: correct.y, z: correct.z, reason: verdict.reason });
+    if (correct) this.send({ t: 'pos_correct', x: correct.x, y: correct.y, z: correct.z, reason: verdict.reason, area: ch.areaOf(heroId) });
   }
 
   private law(heroId: number, m: LawRequest): void {

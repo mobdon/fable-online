@@ -303,3 +303,41 @@ test('an account with no hero gets one named after it on its first join', async 
     s.stop();
   }
 });
+
+test('an area the client loaded by itself lets the jump through once, and not too often', () => {
+  const g = new MoveGuard(0);
+  assert.equal(g.noteArea(111, 0), 'same', 'the first area is where the hero already is');
+  assert.equal(g.check(at(0), at(500), 100).ok, false, 'no jump without an area change');
+  assert.equal(g.noteArea(222, 5_000), 'changed');
+  assert.ok(g.check(at(0), at(3947, 4286, 20), 5_100).ok, 'out of the town into the next area');
+  assert.equal(g.check(at(3947, 4286, 20), at(0), 5_200).ok, false, 'one jump per change');
+  // Flicking between areas faster than Fable can load them is not believed.
+  assert.equal(g.noteArea(333, 6_000), 'too_soon');
+  assert.equal(g.noteArea(333, 6_100), 'same', 'reported once, then quiet until the wait is over');
+  assert.equal(g.area, 222);
+  assert.equal(g.noteArea(333, 8_100), 'changed');
+  assert.equal(g.noteArea(0, 9_000), 'same', 'an unknown area changes nothing');
+});
+
+test('heroes in different areas of one channel do not see each other', () => {
+  const app = testApp({ joinAnchor: false });
+  const a = makeHero(app).hero;
+  const b = makeHero(app).hero;
+  const framesB: string[] = [];
+  const ch = app.director.join(app.heroes.get(a.id)!, link(a.id, 'A', []));
+  app.director.join(app.heroes.get(b.id)!, link(b.id, 'B', framesB));
+  const ids = () => {
+    framesB.length = 0;
+    ch.step(50);
+    const tick = framesB.map((f) => JSON.parse(f)).filter((f) => f.t === 'tick').pop();
+    return (tick.entities as { id: number }[]).map((e) => e.id);
+  };
+  assert.ok(ids().includes(a.id));
+  ch.moves.get(a.id)!.noteArea(1, 0);
+  ch.moves.get(b.id)!.noteArea(1, 0);
+  assert.ok(ids().includes(a.id), 'same area');
+  ch.moves.get(a.id)!.noteArea(2, 10_000);
+  assert.ok(!ids().includes(a.id), 'A walked into another area');
+  assert.ok(ids().includes(b.id), 'B still sees itself');
+  app.close();
+});

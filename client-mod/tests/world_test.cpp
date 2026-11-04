@@ -214,6 +214,9 @@ void test_connection_frames() {
     CLOSE(c.y, -4.0f);
     CLOSE(c.z, 0.25f);
     CHECK(c.reason == "too_fast");
+    CHECK(c.area == 0);
+    CHECK(parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2,\"z\":3,\"reason\":\"too_fast\",\"area\":2147483000}", c));
+    CHECK(c.area == 2147483000u);
     CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1,\"y\":2}", c));
     CHECK(!parse_pos_correct("{\"t\":\"pos_correct\",\"x\":1e30,\"y\":2,\"z\":3}", c));
 

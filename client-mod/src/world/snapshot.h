@@ -63,6 +63,8 @@ struct Welcome {
 struct PosCorrect {
     float x = 0, y = 0, z = 0;
     std::string reason;
+    /** The area the server believes the hero is in (game::area_id hash), 0 if it does not know. */
+    uint32_t area = 0;
 };
 
 enum class FrameType { Unknown, Tick, Welcome, EnterRegion, Error, PosCorrect, Pong };

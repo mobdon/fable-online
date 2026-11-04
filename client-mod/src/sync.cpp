@@ -44,6 +44,8 @@ struct State {
     world::WorldObjects objects;
     /** The hero's area when a region change began, to see the local load finish. */
     uint32_t areaBeforeLoad = 0;
+    /** The hero's area at the last report, to notice Fable loading another area by itself. */
+    uint32_t lastArea = 0;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
     /** What the server said it does with position reports ("off" until the welcome says). */
@@ -107,6 +109,12 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         // The server refused a move (too fast, through a wall, while dead): put the local hero
         // back where the server has it, so both agree and the next report starts from there.
         uintptr_t hero = game::local_hero();
+        // A correction sent before Fable loaded another area holds the last area's coordinates.
+        // Applying it would drop the hero somewhere in the new map, so it is skipped.
+        if (hero && c.area && game::area_id(hero) != c.area) {
+            fo::log("sync: skipped a correction meant for the last area");
+            return;
+        }
         bool moved = hero && game::write_pos(hero, game::Pos{c.x, c.y, c.z}, false, 0);
         s.reporter.reset();
         ++s.corrections;
@@ -150,6 +158,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.puppets->clear_all();
         game::forget_hero();
         s.reporter.reset();
+        s.lastArea = 0;
         return;
     }
     case world::FrameType::Error: {
@@ -176,6 +185,16 @@ void report_position(uint32_t nowMs) {
     if (!hero) return;
     game::Pos p;
     if (!game::read_pos(hero, p)) return;
+    uint32_t area = game::area_id(hero);
+    if (area && area != s.lastArea) {
+        // Walking out of a town, into a house or through a Cullis Gate loads another area
+        // locally. Tell the server straight away: its new coordinates belong to that area.
+        if (s.lastArea) {
+            fo::log("sync: Fable loaded another area (%08x), telling the server", area);
+            s.reporter.reset();
+        }
+        s.lastArea = area;
+    }
     float yaw = 0;
     bool haveYaw = game::read_yaw(hero, yaw);
     if (!s.reporter.due(nowMs, p.x, p.y, p.z, yaw)) return;
@@ -183,10 +202,10 @@ void report_position(uint32_t nowMs) {
     char frame[224];
     if (haveYaw)
         std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"yaw\":%.3f,\"area\":%u}",
-                      p.x, p.y, p.z, yaw, game::area_id(hero));
+                      p.x, p.y, p.z, yaw, area);
     else
         std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x,
-                      p.y, p.z, game::area_id(hero));
+                      p.y, p.z, area);
     net::world_send(frame);
 }
 

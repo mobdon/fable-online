@@ -266,6 +266,9 @@ bool parse_pos_correct(const std::string& json, PosCorrect& out) {
     }
     Reader r(json);
     if (seek_key(r, "reason")) r.read_string(out.reason);
+    Reader ra(json);
+    double area = 0;
+    if (seek_key(ra, "area") && ra.read_number(area) && area >= 0 && area <= 4294967295.0) out.area = static_cast<uint32_t>(area);
     return true;
 }
 

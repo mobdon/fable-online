@@ -37,6 +37,15 @@ join may be anywhere in the region (`FO_JOIN_ANCHOR`, on by default; recorded as
 region arrival allows 40 m between the server's entrance and Fable's. A resumed connection
 gets none.
 
+**Areas Fable loads by itself.** Walking out of a town, into a house or through a Cullis
+Gate makes the client's Fable load another area, and the hero's coordinates jump to that
+area's. Each report carries the area hash (`area`). When it changes, the guard lets the next
+report through from anywhere, once (`area_change`), but no more than once every 3 seconds: a
+real load takes longer than that. A `pos_correct` carries the area it was meant for, and the
+mod skips one that arrives after its Fable has already moved on. Until the server follows
+those exits itself, the hero stays in the same channel. Heroes in different areas of one
+channel don't see each other's stand-ins.
+
 **Walk and run.** A hero moved by reports has no stick input, so the channel sets the
 stand-in's animation from the reported speed (walk from 0.4 m/s, run from 4 m/s). The mod
 sends reports while the hero moves (at most ten a second) and one a second while it stands
@@ -80,6 +89,7 @@ has. The launcher accepts plain http only for loopback, home networks (10/8, 172
 ## Not done yet
 
 - The server cannot tell which region the client's Fable has loaded (the mod only has a hash
-  of the area anchor). Until that is mapped, a player whose save is in another region than
-  the server's record should be moved with `admin place`, or both disagree about the map.
+  of the area anchor). An area change is let through and tracked by hash, but the server's
+  region (and so its creatures, exits and the region chat channel) stays the one it had.
+  Mapping hashes to region names is what moves the hero to the right channel.
 - Moves are checked against speed, not walls: the navmesh (`FO_NAV_DIR`) is the next check.

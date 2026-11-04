@@ -146,8 +146,9 @@ export class Channel {
     const all = this.entities();
     const head = `{"t":"tick","tick":${this.tick},"last_input_seq":`;
 
-    // Without an interest radius every player sees the same thing, so encode it once.
-    if (this.interestRadius <= 0) {
+    // Without an interest radius, and with everyone in the same area, every player sees the
+    // same thing, so encode it once.
+    if (this.interestRadius <= 0 && this.oneArea()) {
       const encoded = JSON.stringify(all);
       for (const p of this.players.values()) p.send(`${head}${p.lastSeq},"entities":${encoded}}`);
       return;
@@ -156,12 +157,42 @@ export class Channel {
     const r2 = this.interestRadius * this.interestRadius;
     for (const p of this.players.values()) {
       const me = this.sim.position(p.heroId);
+      const myArea = this.areaOf(p.heroId);
       // A player whose own position is unknown gets everything rather than nothing.
-      const near = me
-        ? all.filter((e) => e.id === p.heroId || (e.x - me.x) ** 2 + (e.y - me.y) ** 2 <= r2)
-        : all;
+      const near = all.filter(
+        (e) =>
+          e.id === p.heroId ||
+          (this.sameArea(myArea, e) && (!me || r2 <= 0 || (e.x - me.x) ** 2 + (e.y - me.y) ** 2 <= r2)),
+      );
       p.send(`${head}${p.lastSeq},"entities":${JSON.stringify(near)}}`);
     }
+  }
+
+  /** The client's own area hash for a hero, 0 if it has not said. */
+  areaOf(heroId: number): number {
+    return this.moves.get(heroId)?.area ?? 0;
+  }
+
+  /**
+   * Until the server follows every exit, heroes whose Fable loaded a different area stay in
+   * this channel. Their coordinates belong to another map, so their stand-ins are hidden
+   * from each other. Creatures and unknown areas are always shown.
+   */
+  private sameArea(myArea: number, e: WireEntity): boolean {
+    if (!myArea || e.kind !== 'hero') return true;
+    const theirs = this.areaOf(e.id);
+    return !theirs || theirs === myArea;
+  }
+
+  private oneArea(): boolean {
+    let seen = 0;
+    for (const id of this.players.keys()) {
+      const a = this.areaOf(id);
+      if (!a) continue;
+      if (seen && a !== seen) return false;
+      seen = a;
+    }
+    return true;
   }
 
   broadcast(frame: string): void {

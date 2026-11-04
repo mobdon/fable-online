@@ -20,6 +20,8 @@ export type GameEvent =
   | { type: 'input_rejected'; heroId: number; reason: string }
   | { type: 'move_rejected'; heroId: number; channelId: string; reason: string; count: number }
   | { type: 'move_anchor'; heroId: number; channelId: string; distance: number }
+  /** The client's Fable loaded another area by itself; `refused` when it came too soon after the last. */
+  | { type: 'area_change'; heroId: number; channelId: string; from: number; to: number; refused: boolean }
   | { type: 'player_resumed'; heroId: number }
   | { type: 'kill'; heroId: number; creature: string; channelId: string; experience: number; gold: number; items: number }
   | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
