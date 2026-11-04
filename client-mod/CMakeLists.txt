@@ -1,5 +1,5 @@
 set(FO_MOD_SOURCES
-  src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp
+  src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp src/crash.cpp
   src/sync.cpp src/crash_exit.cpp
   src/game/hero.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
@@ -8,7 +8,7 @@ set(FO_MOD_SOURCES
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
-  src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp src/display/present.cpp src/display/hud_patch.cpp src/display/hud_scale.cpp
+  src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp src/display/present.cpp src/display/hud_patch.cpp src/display/hud_scale.cpp src/display/mouse_look.cpp src/display/camera_probe.cpp src/display/camera_latch.cpp
   src/assets/fable_font.cpp src/assets/fable_ui.cpp
   ../shared/art/big.cpp ../shared/art/lzo1x.cpp ../shared/art/dxt.cpp)
 

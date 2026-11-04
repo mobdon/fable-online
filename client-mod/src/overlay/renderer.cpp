@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include <windows.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include "../log.h"
 #include "../ui/chat_model.h"
@@ -223,6 +224,44 @@ void Renderer::quad(float x0, float y0, float x1, float y1, float u0, float v0, 
 void Renderer::sprite(const Rect& r, float x, float y, float w, float h, uint32_t c) {
     quad(x, y, x + w, y + h, static_cast<float>(r.x) / tex_w_, static_cast<float>(r.y) / tex_h_,
          static_cast<float>(r.x + r.w) / tex_w_, static_cast<float>(r.y + r.h) / tex_h_, c);
+}
+
+void Renderer::tri(float x0, float y0, uint32_t c0, float x1, float y1, uint32_t c1, float x2, float y2, uint32_t c2) {
+    const float u = (white_.x + 2.0f) / tex_w_, v = (white_.y + 2.0f) / tex_h_;
+    verts_.insert(verts_.end(), {Vertex{x0 - 0.5f, y0 - 0.5f, 0, 1, c0, u, v}, Vertex{x1 - 0.5f, y1 - 0.5f, 0, 1, c1, u, v},
+                                 Vertex{x2 - 0.5f, y2 - 0.5f, 0, 1, c2, u, v}});
+    if (verts_.size() > 6000) flush();
+}
+
+void Renderer::ring(float cx, float cy, float r0, float r1, float feather, uint32_t argb) {
+    const uint32_t clear = argb & 0x00FFFFFF;
+    // Bands from the inside out: fade in, solid, fade out.
+    const float radii[4] = {r0 - feather, r0, r1, r1 + feather};
+    const uint32_t cols[4] = {clear, argb, argb, clear};
+    const int segs = std::max(24, static_cast<int>(r1 * 1.5f));
+    for (int i = 0; i < segs; ++i) {
+        const float a0 = 6.2831853f * i / segs, a1 = 6.2831853f * (i + 1) / segs;
+        const float c0 = std::cos(a0), s0 = std::sin(a0), c1 = std::cos(a1), s1 = std::sin(a1);
+        for (int b = 0; b < 3; ++b) {
+            const float ri = std::max(0.0f, radii[b]), ro = radii[b + 1];
+            if (ro <= ri) continue;
+            tri(cx + c0 * ri, cy + s0 * ri, cols[b], cx + c0 * ro, cy + s0 * ro, cols[b + 1], cx + c1 * ro, cy + s1 * ro, cols[b + 1]);
+            tri(cx + c0 * ri, cy + s0 * ri, cols[b], cx + c1 * ro, cy + s1 * ro, cols[b + 1], cx + c1 * ri, cy + s1 * ri, cols[b]);
+        }
+    }
+}
+
+void Renderer::soft_rect(float x, float y, float w, float h, float f, uint32_t argb) {
+    const uint32_t clear = argb & 0x00FFFFFF;
+    rect(x, y, w, h, argb);
+    const float x1 = x + w, y1 = y + h;
+    // Four fading edges and four fading corners.
+    tri(x, y - f, clear, x1, y - f, clear, x1, y, argb);  tri(x, y - f, clear, x1, y, argb, x, y, argb);
+    tri(x, y1, argb, x1, y1, argb, x1, y1 + f, clear);    tri(x, y1, argb, x1, y1 + f, clear, x, y1 + f, clear);
+    tri(x - f, y, clear, x, y, argb, x, y1, argb);        tri(x - f, y, clear, x, y1, argb, x - f, y1, clear);
+    tri(x1, y, argb, x1 + f, y, clear, x1 + f, y1, clear); tri(x1, y, argb, x1 + f, y1, clear, x1, y1, argb);
+    tri(x - f, y - f, clear, x, y - f, clear, x, y, argb); tri(x1, y - f, clear, x1 + f, y - f, clear, x1, y, argb);
+    tri(x - f, y1 + f, clear, x, y1, argb, x, y1 + f, clear); tri(x1, y1, argb, x1 + f, y1 + f, clear, x1, y1 + f, clear);
 }
 
 void Renderer::rect(float x, float y, float w, float h, uint32_t argb) {

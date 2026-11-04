@@ -6,6 +6,8 @@
 #include "../log.h"
 #include "camera_patch.h"
 #include "hud_scale.h"
+#include "camera_latch.h"
+#include "mouse_look.h"
 
 namespace fo::display {
 namespace {
@@ -79,6 +81,11 @@ void on_backbuffer(UINT w, UINT h, HWND window) {
 void log_status() {
     fo::log("display: %s", g_status);
     hud::log_status();
+    fo::log("display: %s", mouse_look::status());
+    fo::log("display: %s", mouse_look::center_status());
+    fo::log("display: %s", mouse_look::aim_status());
+    fo::log("display: %s", mouse_look::assist_status());
+    fo::log("display: %s", camera_latch::status());
     if (g_w && g_h) {
         const float a = static_cast<float>(g_w) / static_cast<float>(g_h);
         fo::log("display: back buffer %ux%u (aspect %.3f)%s", g_w, g_h, a,

@@ -30,6 +30,8 @@ enabled=1
 enabled=1
 font_px=15
 chat_rows=8
+; A mark at the centre of the view while you play: off, ring, dot or cross.
+crosshair=off
 
 [display]
 ; 1 = widescreen field of view: on screens wider than 4:3 you see more to the sides
@@ -55,7 +57,28 @@ vsync=game
 ; 1 = keep the CPU at most one frame ahead of the graphics card, so the camera follows
 ; the mouse sooner. Experimental.
 low_latency=0
+; Mouse-look smoothing: off = the camera follows each mouse movement; game = Fable's own
+; (averages the last few frames, so the view trails the mouse); or a number of frames.
+mouse_smoothing=off
+; 1 = Fable pulls the camera back to level while you walk (faster at high frame rates).
+camera_auto_center=0
+; 1 = keep Fable's camera assist, which turns and shifts the view on its own (toward a
+; target, or the way the hero faces) and makes it sway while you turn. 0 = only the mouse
+; turns the camera.
+camera_assist=0
+; 1 = turn the view with the mouse on every frame (experimental). Fable moves its camera only 15 times a
+; second and blends the frames between, so without this the view trails the mouse.
+camera_latch=0
+; Over-the-shoulder camera: how far to move the view sideways (metres), so the crosshair
+; isn't on the hero. Negative = over the left shoulder, positive = the right. 0 = Fable's own.
+camera_shoulder=0
+; 1 = melee, spells and target lock pick the enemy you're looking at (the centre of the
+; view) instead of the one in front of the hero. Experimental.
+aim_at_crosshair=0
 ; HUD, minimap and menu size. auto = as big as on a 900-pixel-tall screen (x1.6 at 1440p,
 ; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4. Experimental: menus
 ; aren't stretched to fill the screen yet.
 hud_scale=off
+; In game, draw the HUD along the bottom edge at this scale instead (for example 1.6 with
+; hud_scale=1.8 keeps the top HUD bigger). 0 = same as the rest.
+hud_bottom_scale=0

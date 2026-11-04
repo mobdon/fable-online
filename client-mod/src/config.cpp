@@ -89,10 +89,23 @@ void config_load(HMODULE self) {
     if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = 0;
     std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
     c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
+    c.camera_auto_center = ini_bool(f, L"display", L"camera_auto_center", c.camera_auto_center);
+    c.camera_shoulder = static_cast<float>(_wtof(ini_str(f, L"display", L"camera_shoulder", L"0").c_str()));
+    if (c.camera_shoulder > 3.0f || c.camera_shoulder < -3.0f) c.camera_shoulder = 0;
+    c.camera_latch = ini_bool(f, L"display", L"camera_latch", c.camera_latch);
+    c.camera_assist = ini_bool(f, L"display", L"camera_assist", c.camera_assist);
+    std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
+    c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
+    if (c.mouse_smoothing < -1 || c.mouse_smoothing > 60) c.mouse_smoothing = 0;
     std::wstring hs = ini_str(f, L"display", L"hud_scale", L"off");
     c.hud_scale = hs == L"auto" ? 0.0f : hs == L"off" ? -1.0f : static_cast<float>(_wtof(hs.c_str()));
     if (c.hud_scale > 4.0f) c.hud_scale = 4.0f;
+    c.hud_bottom_scale = static_cast<float>(_wtof(ini_str(f, L"display", L"hud_bottom_scale", L"0").c_str()));
+    if (c.hud_bottom_scale < 0 || c.hud_bottom_scale > 4.0f) c.hud_bottom_scale = 0;
     c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);
+    c.aim_at_crosshair = ini_bool(f, L"display", L"aim_at_crosshair", c.aim_at_crosshair);
+    std::wstring ch = ini_str(f, L"overlay", L"crosshair", L"off");
+    c.crosshair = ch == L"ring" ? Crosshair::Ring : ch == L"dot" ? Crosshair::Dot : ch == L"cross" ? Crosshair::Cross : Crosshair::Off;
 
     set_server(c, env("FABLE_ONLINE_CHAT_SERVER"));
     if (auto n = env("FABLE_ONLINE_NAME"); !n.empty()) c.name = n;

@@ -45,10 +45,14 @@ std::wstring inject(HANDLE process, const std::wstring& dll) {
         VirtualFreeEx(process, remote, 0, MEM_RELEASE);
         return e;
     }
-    WaitForSingleObject(t, 15000);
+    const DWORD waited = WaitForSingleObject(t, 15000);
     DWORD module = 0;
     GetExitCodeThread(t, &module);  // low 32 bits of the HMODULE; 0 = LoadLibrary failed
     CloseHandle(t);
+    // A load that hasn't finished still holds the loader lock: resuming the game would leave
+    // it frozen, so the caller ends it instead. The path string stays allocated, as the
+    // loader may still read it.
+    if (waited != WAIT_OBJECT_0) return L"the mod took too long to load inside Fable.exe";
     VirtualFreeEx(process, remote, 0, MEM_RELEASE);
     if (module == 0) return L"LoadLibraryW failed inside Fable.exe";
     return L"";
@@ -105,6 +109,7 @@ LaunchResult launch_fable(const std::wstring& game, const std::wstring& dll,
     std::wstring err = inject(pi.hProcess, dll);
     if (!err.empty()) {
         TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 5000);
         r.error = err;
     } else {
         ResumeThread(pi.hThread);

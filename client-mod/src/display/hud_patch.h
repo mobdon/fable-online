@@ -10,7 +10,8 @@
 // up to the real screen (see hud_scale.cpp), and mouse positions are scaled down to match.
 //
 // The renderer itself (code from 0x00990000 up, apart from the 2D helpers at 0x009E1D00 to
-// 0x009E2430) still gets the real size, so the 3D view keeps its full resolution.
+// 0x009E2430 and the 2D primitive managers listed in layout_callers) still gets the real
+// size, so the 3D view keeps its full resolution.
 #include <cstdint>
 #include <vector>
 
@@ -20,13 +21,20 @@ struct ScreenSizeSite {
     uint32_t func = 0x009BEDC0;
     uint32_t renderer_from = 0x00990000;
     uint32_t gui_helpers_from = 0x009E1D00, gui_helpers_to = 0x009E2430;
+    // Renderer code that turns layout pixels into clip space, so it needs the same virtual
+    // size as the layout (return addresses of its GetScreenSize calls):
+    // CEnginePrimitiveManager2DSprites (two), CEnginePrimitiveManagerText,
+    // CEngineInternalPrimitive2DViewport, and CEnginePrimitiveRenderer2D's camera
+    // (0x00B4A700: its rectangle maps layout pixels for sprites drawn through the camera,
+    // such as the loading and save screen picture).
+    uint32_t layout_callers[5] = {0x00BB047F, 0x00BB128B, 0x00BC6E5E, 0x00BE1C99, 0x00B4A886};
 };
 
 extern const uint8_t kScreenSizeBytes[12];
 
 // Layout of the block: code, then at kVirtualSizeOffset two int32s (virtual width, height).
 // A width of 0 means "no scaling": everyone gets the real size.
-constexpr uint32_t kVirtualSizeOffset = 0x60;
+constexpr uint32_t kVirtualSizeOffset = 0x80;
 std::vector<uint8_t> build_screen_size_cave(uint32_t cave, const ScreenSizeSite& site);
 std::vector<uint8_t> build_screen_size_jump(uint32_t cave, const ScreenSizeSite& site);
 
