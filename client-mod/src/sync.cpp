@@ -15,6 +15,7 @@
 #include "game/things.h"
 #include "log.h"
 #include "net/world_client.h"
+#include "overlay/overlay.h"
 #include "world/entities.h"
 #include "world/objects.h"
 #include "world/reporter.h"
@@ -70,6 +71,11 @@ struct State {
     /** A puppet the player asked for with F8, to test spawning without a server. */
     uint32_t testId = 0;
     uint32_t testStartMs = 0;
+    /** Keys sent to the server as attack and block (virtual-key codes, 0 = not sent). */
+    int attackVk = VK_LBUTTON;
+    int blockVk = 0;
+    unsigned lastButtons = 0;
+    uint32_t inputSeq = 0;
 };
 
 State* g_state = nullptr;
@@ -233,6 +239,37 @@ void report_position(uint32_t nowMs) {
     net::world_send(frame);
 }
 
+/**
+ * The hero's swings and guard, sent as the server's `input` buttons so the server's combat
+ * decides who is hit (stand-ins are never hit by the local game: see puppet.cpp).
+ *
+ * Only sent while Fable has the focus and the chat box is closed, and only on a change: the
+ * server fires an attack when the button is released.
+ */
+void report_combat(uint32_t nowMs) {
+    State& s = *g_state;
+    (void)nowMs;
+    if (!net::world_connected() || !s.attackVk) return;
+    DWORD pid = 0;
+    HWND fg = GetForegroundWindow();
+    if (fg) GetWindowThreadProcessId(fg, &pid);
+    bool focused = pid == GetCurrentProcessId() && !overlay::input_blocked_now();
+    auto down = [&](int vk) { return focused && vk && (GetAsyncKeyState(vk) & 0x8000) != 0; };
+    unsigned buttons = (down(s.attackVk) ? 1u : 0u) | (down(s.blockVk) ? 2u : 0u);
+    if (buttons == s.lastButtons) return;
+    s.lastButtons = buttons;
+    float yaw = 0;
+    uintptr_t hero = game::local_hero();
+    bool haveYaw = hero && game::read_yaw(hero, yaw);
+    char frame[160];
+    if (haveYaw)
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u,\"camera_yaw\":%.3f}",
+                      ++s.inputSeq, buttons, yaw);
+    else
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"input\",\"seq\":%u,\"buttons\":%u}", ++s.inputSeq, buttons);
+    net::world_send(frame);
+}
+
 /** Region-change handshake, and the server's door / chest / item answers. */
 void sync_objects(uint32_t nowMs) {
     State& s = *g_state;
@@ -295,6 +332,7 @@ void tick() {
     }
 
     report_position(now);
+    report_combat(now);
     sync_objects(now);
 
     auto spawned = s.table.drain_spawned();
@@ -326,6 +364,10 @@ void start() {
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
     s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
+    // Fable's PC controls attack on the left mouse button. Block has no fixed key yet, so it
+    // is only sent when a key is named (FABLE_ONLINE_BLOCK_KEY, a virtual-key code).
+    if (const char* v = std::getenv("FABLE_ONLINE_ATTACK_KEY")) s.attackVk = std::atoi(v);
+    if (const char* v = std::getenv("FABLE_ONLINE_BLOCK_KEY")) s.blockVk = std::atoi(v);
 
     fo::log("sync: stand-in heroes use %s, local spawning %s, position reports %s", heroDef.c_str(),
             s.suppressSpawns ? "suppressed in server regions" : "left alone", s.reportPos ? "on" : "off");

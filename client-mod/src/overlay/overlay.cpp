@@ -631,4 +631,6 @@ void log_stats() {
             g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags),
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
+bool input_blocked_now() { return input_blocked(); }
+
 }  // namespace fo::overlay

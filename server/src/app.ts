@@ -119,6 +119,7 @@ export function createApp(
           loadout: (heroId) => ({
             equipped: economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id),
             staff: staffHero(heroId),
+            pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),
           ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
           law: lawServices,

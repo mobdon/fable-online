@@ -18,6 +18,8 @@ rem The launcher has no hero screen yet: an account's first join makes a hero na
 set FO_AUTO_HERO=1
 rem The server checks every position the mod reports (speed, climbs, falls) and corrects cheats.
 set FO_CLIENT_MOVE=checked
+rem Test realm: every hero can fight every other hero (no Guild mission needed).
+set FO_PVP_ALL=1
 echo Players connect to %FO_PUBLIC_HOST% port 7777. Press Ctrl+C to stop (heroes are saved).
 call npm run dev
 pause
