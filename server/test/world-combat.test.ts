@@ -182,7 +182,8 @@ test('quest rewards: only real quests, never over the card, never twice, daily c
   const ok = q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 999_999, renown: 101, items: ['OBJECT_HEALTH_POTION'] });
   assert.deepEqual(ok, { ok: true, gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'], trimmed: true });
   assert.equal(app.economy.balance(hero.id), 500);
-  assert.equal(app.heroes.get(hero.id)!.renown, 100);
+  // Renown comes from the hero's reported total, not from the claim.
+  assert.equal(app.heroes.get(hero.id)!.renown, 0);
   assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500 }), { ok: false, reason: 'already_claimed' });
   // Rejected and trimmed attempts are logged for the cheat dashboards.
   assert.equal(app.sink.events.filter((e) => e.type === 'quest_reward_rejected').length, 3);

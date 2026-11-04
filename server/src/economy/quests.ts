@@ -143,7 +143,9 @@ export class QuestRewards {
         this.db.run('UPDATE quest_claims SET tx_id = ? WHERE id = ?', r.txId, claimId);
       }
       items.forEach((it, i) => this.economy.mintItem(heroId, it, 1, 'quest_reward', `${key}:item:${i}`));
-      if (renown > 0) this.db.run('UPDATE heroes SET renown = renown + ? WHERE id = ?', renown, heroId);
+      // Renown is recorded on the claim only. The hero's renown comes from the client's running
+      // total (renown_report, under its import and daily caps), which already includes this
+      // quest's renown; adding it here as well would count it twice.
       if (trimmed)
         this.events.emit({ type: 'quest_reward_trimmed', heroId, quest: c.quest, claimedGold, gold, claimedRenown, renown });
       this.events.emit({ type: 'quest_reward', heroId, quest: c.quest, gold, items: items.length });
