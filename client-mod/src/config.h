@@ -43,7 +43,7 @@ struct Config {
     float camera_shoulder = 0;       // sideways camera offset: > 0 over the right shoulder, < 0 the left
     bool camera_latch = false;       // turn the view with the mouse every frame between world updates
     bool camera_smooth = true;       // blend the camera between Fable's 15-a-second camera moves
-    int camera_shoulder_key = VK_F6; // virtual key that swaps the shoulder in game (0 = none)
+    int camera_shoulder_key = VK_F11; // virtual key that swaps the shoulder in game (0 = none)
     bool camera_assist = false;       // Fable swings the camera toward the hero's facing and target
     int mouse_smoothing = 0;     // mouse-look frames averaged: 0 = off, -1 = Fable's own, else N
     float hud_bottom_scale = 0;  // > 0: in game, the HUD along the bottom edge is drawn at this scale instead
