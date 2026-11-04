@@ -12,4 +12,6 @@ void install_late();
 // From the mod thread, a few times a second.
 void set_hero(const game::HeroPos& pos);
 void log_stats();
+/** True while the chat box or the start-up menu has the keyboard and mouse. */
+bool input_blocked_now();
 }  // namespace fo::overlay

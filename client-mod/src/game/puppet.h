@@ -22,12 +22,20 @@ struct PuppetStats {
     uint32_t parked = 0;
     uint32_t lost = 0;  // the engine freed the thing under us
     uint32_t live = 0;
+    uint32_t animsPlayed = 0;
+    uint32_t animsRefused = 0;  // no scripted-control component, or a pointer looked wrong
 };
+
+/** What a puppet is playing, picked from the server's anim field (world::Anim). */
+enum class Gait : uint8_t { None, Idle, Walk, Run, Attack, Alert, Hit, Death, Leap, Block, Taunt };
 
 class PuppetPool {
   public:
     /** `heroDef` is the creature def used to stand in for another player. */
     explicit PuppetPool(std::string heroDef) : heroDef_(std::move(heroDef)) {}
+
+    /** Off: puppets are only moved, never animated (the behaviour before gaits). */
+    void set_animate(bool on) { animate_ = on; }
 
     /** Applies one round of table output. Must run on a thread that may call the engine. */
     void sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
@@ -55,14 +63,22 @@ class PuppetPool {
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        Gait gait = Gait::None;
+        Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
+        uint32_t wantedSinceMs = 0;
+        uint32_t lastAnimMs = 0;
+        uint32_t animSeq = 0;
+        uint32_t strikes = 0;  // alternates left and right swings
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);
     void park(uint32_t id);
     void drive(const world::Pose& p, uint32_t nowMs);
+    void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
     const std::string& def_for(const world::Spawn& s) const;
 
     std::string heroDef_;
+    bool animate_ = true;
     std::unordered_map<uint32_t, Puppet> live_;
     /** Parked puppets by def, ready to be shown again instead of spawning another. */
     std::unordered_multimap<std::string, Puppet> pool_;
