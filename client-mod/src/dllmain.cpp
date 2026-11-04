@@ -15,6 +15,7 @@
 #include <thread>
 #include "config.h"
 #include "game/hero.h"
+#include "crash.h"
 #include "log.h"
 #include "net/chat_client.h"
 #include "display/hud_scale.h"
@@ -81,6 +82,7 @@ void online_thread() {
 
 DWORD WINAPI main_thread(LPVOID) {
     fo::log_open();
+    fo::crash::install();
     HMODULE exe = GetModuleHandleW(nullptr);
     wchar_t path[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, path, MAX_PATH);

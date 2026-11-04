@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include "../config.h"
 #include "../log.h"
 #include "../overlay/patch.h"
@@ -10,20 +11,26 @@
 
 namespace fo::display::hud {
 namespace {
-constexpr int kGetRenderTarget = 38, kSetViewport = 47, kSetScissorRect = 75, kSetVertexShaderConstantF = 94;
+constexpr int kGetRenderTarget = 38, kSetViewport = 47, kSetScissorRect = 75, kDrawPrimitiveUP = 83,
+              kDrawIndexedPrimitiveUP = 84, kGetFVF = 90, kSetVertexShaderConstantF = 94;
 using SetVertexShaderConstantF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, UINT, const float*, UINT);
 using SetScissorRect_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*);
 using SetViewport_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
+using DrawPrimitiveUP_t = HRESULT(WINAPI*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, const void*, UINT);
+using DrawIndexedPrimitiveUP_t = HRESULT(WINAPI*)(IDirect3DDevice9*, D3DPRIMITIVETYPE, UINT, UINT, UINT, const void*, D3DFORMAT,
+                                                  const void*, UINT);
 
 SetVertexShaderConstantF_t o_SetVertexShaderConstantF = nullptr;
 SetScissorRect_t o_SetScissorRect = nullptr;
 SetViewport_t o_SetViewport = nullptr;
+DrawPrimitiveUP_t o_DrawPrimitiveUP = nullptr;
+DrawIndexedPrimitiveUP_t o_DrawIndexedPrimitiveUP = nullptr;
 
 char g_status[200] = "not installed";
 volatile int32_t* g_virtual = nullptr;      // [0] width, [1] height inside the code block
 std::atomic<float> g_scale{1.0f};
 UINT g_w = 0, g_h = 0, g_vw = 0, g_vh = 0;
-std::atomic<unsigned> g_c20_fixed{0}, g_scissor_fixed{0}, g_viewport_fixed{0};
+std::atomic<unsigned> g_c20_fixed{0}, g_scissor_fixed{0}, g_viewport_fixed{0}, g_rhw_fixed{0};
 
 bool active() { return g_virtual && g_virtual[0] != 0 && g_scale.load() > 1.001f; }
 
@@ -99,6 +106,68 @@ HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     return o_SetViewport(d, v);
 }
 
+// Pre-transformed (XYZRHW) 2D from Fable's own code, such as loading-screen text, comes in
+// layout pixels and skips the shaders, so its positions are scaled here. Only draws whose
+// vertices all fit the virtual screen are touched: real-pixel full-screen quads are left
+// alone, and so is the mod's own overlay (called from outside Fable.exe).
+bool from_fable(void* ret) {
+    const uintptr_t a = reinterpret_cast<uintptr_t>(ret);
+    return a >= 0x00400000 && a < 0x01500000;
+}
+
+UINT vertex_count(D3DPRIMITIVETYPE t, UINT prims) {
+    switch (t) {
+    case D3DPT_POINTLIST: return prims;
+    case D3DPT_LINELIST: return prims * 2;
+    case D3DPT_LINESTRIP: return prims + 1;
+    case D3DPT_TRIANGLELIST: return prims * 3;
+    case D3DPT_TRIANGLESTRIP:
+    case D3DPT_TRIANGLEFAN: return prims + 2;
+    default: return 0;
+    }
+}
+
+// Returns scaled copies of `count` vertices from `first`, or nullptr to draw them as they are.
+const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
+    if (!data || !count || stride < 16 || count > 65536 || !active()) return nullptr;
+    DWORD fvf = 0;
+    if (FAILED(d->GetFVF(&fvf)) || (fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW) return nullptr;
+    const uint8_t* src = static_cast<const uint8_t*>(data) + static_cast<size_t>(first) * stride;
+    const float lim_x = static_cast<float>(g_vw) + 4.0f, lim_y = static_cast<float>(g_vh) + 4.0f;
+    for (UINT i = 0; i < count; ++i) {
+        const float* p = reinterpret_cast<const float*>(src + static_cast<size_t>(i) * stride);
+        if (p[0] > lim_x || p[1] > lim_y) return nullptr;
+    }
+    if (!drawing_to_screen(d)) return nullptr;
+    static thread_local std::vector<uint8_t> buf;
+    const size_t bytes = static_cast<size_t>(first + count) * stride;
+    if (buf.size() < bytes) buf.resize(bytes);
+    std::memcpy(buf.data() + static_cast<size_t>(first) * stride, src, static_cast<size_t>(count) * stride);
+    const float s = g_scale.load();
+    for (UINT i = 0; i < count; ++i) {
+        float* p = reinterpret_cast<float*>(buf.data() + static_cast<size_t>(first + i) * stride);
+        // Keep Fable's half-pixel offset: (x + 0.5) * s - 0.5.
+        p[0] = (p[0] + 0.5f) * s - 0.5f;
+        p[1] = (p[1] + 0.5f) * s - 0.5f;
+    }
+    ++g_rhw_fixed;
+    return buf.data();
+}
+
+HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT prims, const void* data, UINT stride) {
+    if (from_fable(__builtin_return_address(0)))
+        if (const void* v = scaled_rhw(d, data, 0, vertex_count(t, prims), stride)) return o_DrawPrimitiveUP(d, t, prims, v, stride);
+    return o_DrawPrimitiveUP(d, t, prims, data, stride);
+}
+
+HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT min_index, UINT verts, UINT prims,
+                                         const void* idx, D3DFORMAT fmt, const void* data, UINT stride) {
+    if (from_fable(__builtin_return_address(0)))
+        if (const void* v = scaled_rhw(d, data, min_index, verts, stride))
+            return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
+    return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, data, stride);
+}
+
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
@@ -160,6 +229,10 @@ void hook_device(IDirect3DDevice9* dev) {
         o_SetScissorRect = reinterpret_cast<SetScissorRect_t>(o);
     if (auto o = fo::patch::vtable(dev, kSetViewport, reinterpret_cast<void*>(hk_SetViewport)))
         o_SetViewport = reinterpret_cast<SetViewport_t>(o);
+    if (auto o = fo::patch::vtable(dev, kDrawPrimitiveUP, reinterpret_cast<void*>(hk_DrawPrimitiveUP)))
+        o_DrawPrimitiveUP = reinterpret_cast<DrawPrimitiveUP_t>(o);
+    if (auto o = fo::patch::vtable(dev, kDrawIndexedPrimitiveUP, reinterpret_cast<void*>(hk_DrawIndexedPrimitiveUP)))
+        o_DrawIndexedPrimitiveUP = reinterpret_cast<DrawIndexedPrimitiveUP_t>(o);
 }
 
 LPARAM map_mouse(UINT msg, LPARAM l) {
@@ -177,8 +250,8 @@ float scale() { return active() ? g_scale.load() : 1.0f; }
 void log_status() {
     fo::log("display: %s", g_status);
     if (active())
-        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u",
+        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u, screen-space draws %u",
                 g_vw, g_vh, g_w, g_h, static_cast<double>(g_scale.load()), g_c20_fixed.load(), g_scissor_fixed.load(),
-                g_viewport_fixed.load());
+                g_viewport_fixed.load(), g_rhw_fixed.load());
 }
 }  // namespace fo::display::hud
