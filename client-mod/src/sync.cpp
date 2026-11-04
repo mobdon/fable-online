@@ -17,13 +17,13 @@
 #include "net/world_client.h"
 #include "world/entities.h"
 #include "world/objects.h"
+#include "world/reporter.h"
 #include "world/snapshot.h"
 
 namespace fo::sync {
 namespace {
 
 constexpr unsigned kTickMs = 33;        // the puppets are driven about 30 times a second
-constexpr unsigned kReportPosMs = 100;  // how often the hero's position goes to the server
 constexpr unsigned kStatusMs = 10000;
 
 std::string env(const char* name, const char* fallback = "") {
@@ -46,9 +46,13 @@ struct State {
     uint32_t areaBeforeLoad = 0;
     std::unique_ptr<game::PuppetPool> puppets;
     bool reportPos = true;
+    /** What the server said it does with position reports ("off" until the welcome says). */
+    std::string serverMove = "off";
+    world::PositionReporter reporter;
+    uint32_t corrections = 0;
+    uint32_t lastCorrectionLogMs = 0;
     bool suppressSpawns = true;
     bool dev = false;
-    uint32_t lastReportMs = 0;
     uint32_t lastStatusMs = 0;
     uint32_t ownId = 0;
     std::string ownName;
@@ -61,6 +65,7 @@ State* g_state = nullptr;
 
 void on_connected() {
     if (!g_state) return;
+    g_state->reporter.reset();
     g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
@@ -88,7 +93,33 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.ownId = w.playerId;
         s.ownName = w.name;
         s.table.set_local_id(w.playerId);
-        fo::log("sync: joined as %s (entity %u), server ticks %u a second", w.name.c_str(), w.playerId, w.tickRate);
+        s.serverMove = w.clientMove;
+        s.reporter.reset();
+        // Kept for the next connection: a dropped link comes back without a new ticket.
+        if (!w.resume.empty()) net::world_set_resume(w.resume);
+        fo::log("sync: joined as %s (entity %u), server ticks %u a second, position reports %s%s", w.name.c_str(),
+                w.playerId, w.tickRate, w.clientMove.c_str(), w.resume.empty() ? "" : ", can resume");
+        return;
+    }
+    case world::FrameType::PosCorrect: {
+        world::PosCorrect c;
+        if (!world::parse_pos_correct(json, c)) return;
+        // The server refused a move (too fast, through a wall, while dead): put the local hero
+        // back where the server has it, so both agree and the next report starts from there.
+        uintptr_t hero = game::local_hero();
+        bool moved = hero && game::write_pos(hero, game::Pos{c.x, c.y, c.z}, false, 0);
+        s.reporter.reset();
+        ++s.corrections;
+        if (nowMs - s.lastCorrectionLogMs > 5000) {
+            s.lastCorrectionLogMs = nowMs;
+            fo::log("sync: server corrected the hero to %.1f, %.1f, %.1f (%s)%s; %u corrections so far", c.x, c.y, c.z,
+                    c.reason.c_str(), moved ? "" : ", could not move it", s.corrections);
+        }
+        return;
+    }
+    case world::FrameType::Pong: {
+        double n = 0;
+        if (world::parse_pong(json, n)) s.reporter.pong(nowMs, n);
         return;
     }
     case world::FrameType::Tick: {
@@ -118,6 +149,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         s.table.clear();
         s.puppets->clear_all();
         game::forget_hero();
+        s.reporter.reset();
         return;
     }
     case world::FrameType::Error: {
@@ -132,16 +164,29 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
 
 void report_position(uint32_t nowMs) {
     State& s = *g_state;
-    if (!s.reportPos || nowMs - s.lastReportMs < kReportPosMs) return;
-    s.lastReportMs = nowMs;
+    if (!net::world_connected()) return;
+    if (s.reporter.ping_due(nowMs)) {
+        char ping[64];
+        std::snprintf(ping, sizeof(ping), "{\"t\":\"ping\",\"n\":%u}", nowMs);
+        net::world_send(ping);
+    }
+    // While the next region loads the hero's coordinates still belong to the last one.
+    if (!s.reportPos || s.serverMove == "off" || s.objects.loading()) return;
     uintptr_t hero = game::local_hero();
     if (!hero) return;
     game::Pos p;
     if (!game::read_pos(hero, p)) return;
-    char frame[192];
-    std::snprintf(frame, sizeof(frame),
-                  "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x, p.y, p.z,
-                  game::area_id(hero));
+    float yaw = 0;
+    bool haveYaw = game::read_yaw(hero, yaw);
+    if (!s.reporter.due(nowMs, p.x, p.y, p.z, yaw)) return;
+    s.reporter.sent(nowMs, p.x, p.y, p.z, yaw);
+    char frame[224];
+    if (haveYaw)
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"yaw\":%.3f,\"area\":%u}",
+                      p.x, p.y, p.z, yaw, game::area_id(hero));
+    else
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hero_pos\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f,\"area\":%u}", p.x,
+                      p.y, p.z, game::area_id(hero));
     net::world_send(frame);
 }
 
@@ -208,8 +253,8 @@ void tick() {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
         const game::PuppetStats& st = s.puppets->stats();
-        fo::log("sync: %s, %u entities, puppets live %u spawned %u reused %u failed %u lost %u, frames in %llu out %llu, stale %u",
-                net::world_connected() ? "online" : "offline", static_cast<unsigned>(s.table.size()), st.live,
+        fo::log("sync: %s (ping %d ms, %u corrections), %u entities, puppets live %u spawned %u reused %u failed %u lost %u, frames in %llu out %llu, stale %u",
+                net::world_connected() ? "online" : "offline", s.reporter.rtt_ms(), s.corrections, static_cast<unsigned>(s.table.size()), st.live,
                 st.spawned, st.reused, st.spawnFailed, st.lost, static_cast<unsigned long long>(received),
                 static_cast<unsigned long long>(sent), s.table.stale_frames());
     }
@@ -268,8 +313,9 @@ void dev_key(int vk) {
     case VK_F7: {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
-        fo::log("sync: %s as %s (entity %u); %u entities, %u puppets; frames in %llu out %llu; local spawning %s",
-                net::world_connected() ? "online" : "offline", s.ownName.c_str(), s.ownId,
+        fo::log("sync: %s as %s (entity %u), ping %d ms, position reports %s; %u entities, %u puppets; frames in %llu out %llu; local spawning %s",
+                net::world_connected() ? "online" : "offline", s.ownName.c_str(), s.ownId, s.reporter.rtt_ms(),
+                s.serverMove.c_str(),
                 static_cast<unsigned>(s.table.size()), static_cast<unsigned>(s.puppets->live_count()),
                 static_cast<unsigned long long>(received), static_cast<unsigned long long>(sent),
                 game::spawns::suppressed() ? "off" : "on");

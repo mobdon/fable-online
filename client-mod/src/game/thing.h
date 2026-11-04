@@ -25,6 +25,8 @@ uintptr_t local_hero();
 void forget_hero();
 
 bool read_pos(uintptr_t thing, Pos& out);
+/** Facing in radians, the same convention write_pos uses (forward = -sin, cos). */
+bool read_yaw(uintptr_t thing, float& yaw);
 /** Writes position and facing straight into the physics component. */
 bool write_pos(uintptr_t thing, const Pos& p, bool have_yaw, float yaw);
 /** The thing's physics component, or 0 when it has none yet. */

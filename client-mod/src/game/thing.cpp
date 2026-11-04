@@ -100,6 +100,16 @@ bool read_pos(uintptr_t thing, Pos& out) {
     return true;
 }
 
+bool read_yaw(uintptr_t thing, float& yaw) {
+    uintptr_t phys = physics_of(thing);
+    if (!phys) return false;
+    float f[2];
+    if (!read(phys + kForwardOffset, f, sizeof(f))) return false;
+    if (!sane(f[0]) || !sane(f[1]) || (f[0] == 0 && f[1] == 0)) return false;
+    yaw = std::atan2(-f[0], f[1]);
+    return true;
+}
+
 bool write_pos(uintptr_t thing, const Pos& p, bool have_yaw, float yaw) {
     if (!sane(p.x) || !sane(p.y) || !sane(p.z)) return false;
     uintptr_t phys = physics_of(thing);

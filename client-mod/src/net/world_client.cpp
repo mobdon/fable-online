@@ -30,6 +30,10 @@ std::atomic<uint64_t> g_received{0};
 std::atomic<uint64_t> g_sent{0};
 std::thread g_thread;
 WorldConfig g_cfg;
+/** The credential for the next hello: the ticket first, then each resume token. Guarded by g_mu. */
+std::string g_nextToken;
+/** Set when the server closed us for a reason another try cannot fix. */
+std::atomic<bool> g_giveUp{false};
 
 void push_event(WorldEvent::Kind kind, std::string text) {
     std::lock_guard<std::mutex> lock(g_mu);
@@ -188,12 +192,12 @@ bool read_frame(SOCKET s, uint8_t& opcode, std::string& payload) {
     return true;
 }
 
-std::string hello_frame(const WorldConfig& cfg) {
+std::string hello_frame(const WorldConfig& cfg, const std::string& token) {
     std::string out = "{\"t\":\"hello\",\"protocol\":" + std::to_string(cfg.protocol) + ",\"exe_timestamp\":\"";
     for (char c : cfg.exeTimestamp)
         if (c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20) out.push_back(c);
     out += "\",\"token\":\"";
-    for (char c : cfg.ticket)
+    for (char c : token)
         if (c != '"' && c != '\\' && static_cast<unsigned char>(c) >= 0x20) out.push_back(c);
     out += "\"}";
     return out;
@@ -201,7 +205,17 @@ std::string hello_frame(const WorldConfig& cfg) {
 
 void session(SOCKET s) {
     if (!handshake(s, g_cfg)) return;
-    if (!send_frame(s, 0x1, hello_frame(g_cfg))) return;
+    std::string token;
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        token.swap(g_nextToken);  // tickets and resume tokens are good once either way
+    }
+    if (token.empty()) {
+        fo::log("world: no ticket or resume token left; start again from the launcher");
+        g_giveUp = true;
+        return;
+    }
+    if (!send_frame(s, 0x1, hello_frame(g_cfg, token))) return;
     g_connected = true;
     push_event(WorldEvent::Kind::Connected, g_cfg.host + ":" + std::to_string(g_cfg.port));
     fo::log("world: connected to %s:%u", g_cfg.host.c_str(), g_cfg.port);
@@ -231,7 +245,17 @@ void session(SOCKET s) {
     std::string payload;
     while (g_running.load()) {
         if (!read_frame(s, opcode, payload)) break;
-        if (opcode == 0x8) break;                               // close
+        if (opcode == 0x8) {                                    // close
+            unsigned code = payload.size() >= 2 ? (static_cast<unsigned char>(payload[0]) << 8 | static_cast<unsigned char>(payload[1])) : 0;
+            // 4000: the server refused the ticket or token; 4003: this hero logged in
+            // elsewhere. Retrying cannot fix either, and the second would fight the new login.
+            if (code == 4000 || code == 4003) {
+                fo::log("world: server closed the connection (%u: %s); not reconnecting", code,
+                        payload.size() > 2 ? payload.substr(2).c_str() : "");
+                g_giveUp = true;
+            }
+            break;
+        }
         if (opcode == 0x9) { send_frame(s, 0xA, payload); continue; }  // ping -> pong
         if (opcode == 0xA) continue;                            // pong
         if (opcode != 0x1 && opcode != 0x0) continue;           // binary and fragments unused
@@ -251,7 +275,7 @@ void run() {
         return;
     }
     unsigned backoffMs = 1000;
-    while (g_running.load()) {
+    while (g_running.load() && !g_giveUp.load()) {
         SOCKET s = connect_to(g_cfg.host, g_cfg.port);
         if (s == INVALID_SOCKET) {
             push_event(WorldEvent::Kind::Disconnected, "cannot reach the server");
@@ -270,6 +294,10 @@ void run() {
             std::lock_guard<std::mutex> lock(g_mu);
             g_out.clear();  // a ticket is one-time, and stale input is worse than none
         }
+        if (g_giveUp.load()) {
+            push_event(WorldEvent::Kind::Disconnected, "the server will not take us back; start again from the launcher");
+            break;
+        }
         for (unsigned waited = 0; waited < 1000 && g_running.load(); waited += 100) Sleep(100);
     }
     WSACleanup();
@@ -286,6 +314,11 @@ void world_start(const WorldConfig& cfg) {
     }
     g_received = 0;
     g_sent = 0;
+    g_giveUp = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mu);
+        g_nextToken = g_cfg.ticket;
+    }
     g_running = true;
     g_thread = std::thread(run);
 }
@@ -297,6 +330,11 @@ void world_stop() {
     std::lock_guard<std::mutex> lock(g_mu);
     g_in.clear();
     g_out.clear();
+}
+
+void world_set_resume(const std::string& token) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_nextToken = token;
 }
 
 void world_send(const std::string& json) {
