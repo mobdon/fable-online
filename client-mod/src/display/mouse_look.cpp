@@ -1,5 +1,6 @@
 #include "mouse_look.h"
 #include <windows.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -26,6 +27,17 @@ constexpr uint8_t kCenterOriginal[2] = {0x0F, 0x84};
 constexpr uint32_t kAimSite = 0x008040ED;
 constexpr uint8_t kAimOriginal[3] = {0x8A, 0x57, 0x3A};
 char g_aim_status[120] = "targeting: Fable's own (hero's facing)";
+
+// CPCMouseLook's vtable; slot 1 (0x873E10) is its per-update camera step. Counting its calls
+// shows whether the in-game camera follows the mouse every rendered frame or at a lower rate.
+constexpr uint32_t kMouseLookVtable = 0x01277784, kMouseLookUpdate = 0x00873E10;
+std::atomic<unsigned> g_updates{0};
+using Update_t = void(__thiscall*)(void*);
+Update_t o_update = nullptr;
+void __fastcall hk_update(void* self, void*) {
+    ++g_updates;
+    o_update(self);
+}
 
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
@@ -71,8 +83,20 @@ void install_aim() {
     std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: along the camera's view (crosshair)");
 }
 
+void install_counter() {
+    uint32_t* slot = reinterpret_cast<uint32_t*>(kMouseLookVtable + 4);
+    if (!readable(kMouseLookVtable + 4, 4) || *slot != kMouseLookUpdate) return;
+    o_update = reinterpret_cast<Update_t>(kMouseLookUpdate);
+    const uint32_t hook = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&hk_update));
+    DWORD old = 0;
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) return;
+    *slot = hook;
+    VirtualProtect(slot, 4, old, &old);
+}
+
 void install() {
     install_center();
+    install_counter();
     install_aim();
     const int frames = config().mouse_smoothing;   // -1 = Fable's own, else frames to average
     if (frames < 0) return;
@@ -92,4 +116,5 @@ void install() {
 const char* status() { return g_status; }
 const char* center_status() { return g_center_status; }
 const char* aim_status() { return g_aim_status; }
+unsigned take_updates() { return g_updates.exchange(0); }
 }  // namespace fo::display::mouse_look

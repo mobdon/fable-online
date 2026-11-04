@@ -3,6 +3,7 @@
 #include "../config.h"
 #include "../log.h"
 #include "hud_scale.h"
+#include "mouse_look.h"
 
 namespace fo::display {
 namespace {
@@ -185,8 +186,9 @@ void log_frame_rate() {
     unsigned f = g_frames.load();
     if (t == last_tick) return;
     double fps = 1000.0 * (f - last_frames) / (t - last_tick);
-    fo::log("display: %.0f frames a second (slowest frame %.0f ms)%s", fps, g_worst_ms.load(),
-            config().low_latency ? ", low latency on" : "");
+    const double cam = 1000.0 * mouse_look::take_updates() / (t - last_tick);
+    fo::log("display: %.0f frames a second (slowest frame %.0f ms), camera updates %.0f a second%s", fps, g_worst_ms.load(),
+            cam, config().low_latency ? ", low latency on" : "");
     g_worst_ms = 0;
     last_tick = t;
     last_frames = f;
