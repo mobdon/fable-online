@@ -94,77 +94,65 @@ double lead(double now) {
     return r;
 }
 
-// Smoothing. Fable moves its camera 15 times a second and the frames between show the same
-// view, while the world itself is drawn blended between its last two updates. At high frame
-// rates the view then jumps 15 times a second against a smoothly moving hero, which reads as
-// the camera bouncing while turning. Each frame here shows the camera part of the way from the
-// view on screen when Fable last moved it to Fable's newest one, finishing as the next update
-// is due: the same one-update blend the world is drawn with.
+// Smoothing. Fable sets its camera every frame, but the heading only steps when the game's
+// camera update runs (15 times a second), and the camera's height follows the hero's feet, so
+// every bump in the ground under the hero shakes the view up and down. Each frame here eases
+// the camera toward Fable's: the direction over kDirTau (hides the turn steps), the position
+// across the ground over kFlatTau, and the height over kHeightTau, long enough that small bumps
+// in the ground don't reach the view while hills and stairs still do.
+constexpr double kDirTau = 0.05, kFlatTau = 0.03, kHeightTau = 0.25;
 struct Smooth {
     bool have = false;
-    float from[9] = {}, to[9] = {}, shown[9] = {};
-    double to_at = 0;          // when Fable's camera last changed
-    double period = kTickSeconds;
-    unsigned keys = 0, blended = 0, snaps = 0, passed = 0;
+    float shown[9] = {};
+    double at = 0;
+    unsigned frames = 0, snaps = 0;
+    double raw_dz = 0, shown_dz = 0;   // summed frame-to-frame height change, Fable's vs shown
+    float last_raw_z = 0;
 } sm;
-
-bool same(const float* a, const float* b) {
-    for (int i = 0; i < 9; ++i)
-        if (std::fabs(a[i] - b[i]) > 1e-5f) return false;
-    return true;
-}
 
 void normalize(float* v) {
     const double l = std::sqrt(static_cast<double>(v[0]) * v[0] + static_cast<double>(v[1]) * v[1] + static_cast<double>(v[2]) * v[2]);
     if (l > 1e-6) for (int i = 0; i < 3; ++i) v[i] = static_cast<float>(v[i] / l);
 }
 
+void ease(float* v, const float* to, double k) {
+    *v = static_cast<float>(*v + (*to - *v) * k);
+}
+
 // Writes the camera to show this frame into out[9]; false = show Fable's as it is.
 bool smooth(const float* desc, double now, float* out) {
-    if (!sm.have) {
-        std::memcpy(sm.from, desc, sizeof sm.from);
-        std::memcpy(sm.to, desc, sizeof sm.to);
-        std::memcpy(sm.shown, desc, sizeof sm.shown);
-        sm.to_at = now;
-        sm.have = true;
-        return false;
-    }
-    if (!same(desc, sm.to)) {
-        const double gap = now - sm.to_at;
+    if (sm.have) {
+        const double dt = now - sm.at;
         const double dx = desc[0] - sm.shown[0], dy = desc[1] - sm.shown[1], dz = desc[2] - sm.shown[2];
         const double dot = static_cast<double>(desc[3]) * sm.shown[3] + static_cast<double>(desc[4]) * sm.shown[4] +
                            static_cast<double>(desc[5]) * sm.shown[5];
-        std::memcpy(sm.to, desc, sizeof sm.to);
-        sm.to_at = now;
-        if (gap < 0.03) {
-            // Fable's camera is moving every frame here (it blends on its own): nothing to do.
-            std::memcpy(sm.from, desc, sizeof sm.from);
-            std::memcpy(sm.shown, desc, sizeof sm.shown);
-            ++sm.passed;
-            return false;
-        }
-        if (dx * dx + dy * dy + dz * dz > 6.0 * 6.0 || dot < 0.5 || gap > 0.3) {
-            // A cut, a teleport or a pause: jump straight there.
-            std::memcpy(sm.from, desc, sizeof sm.from);
-            std::memcpy(sm.shown, desc, sizeof sm.shown);
+        if (dt > 0.3 || dt < 0 || dx * dx + dy * dy + dz * dz > 6.0 * 6.0 || dot < 0.5) {
+            sm.have = false;   // a cut, a teleport or a pause: jump straight there
             ++sm.snaps;
-            return false;
         }
-        sm.period = 0.8 * sm.period + 0.2 * (gap < 0.04 ? 0.04 : gap > 0.12 ? 0.12 : gap);
-        std::memcpy(sm.from, sm.shown, sizeof sm.from);
-        ++sm.keys;
     }
-    double t = (now - sm.to_at) / sm.period;
-    if (t >= 1.0) {
-        std::memcpy(sm.shown, sm.to, sizeof sm.shown);
+    if (!sm.have) {
+        std::memcpy(sm.shown, desc, sizeof sm.shown);
+        sm.at = now;
+        sm.last_raw_z = desc[2];
+        sm.have = true;
         return false;
     }
-    if (t < 0) t = 0;
-    for (int i = 0; i < 9; ++i) out[i] = static_cast<float>(sm.from[i] + (sm.to[i] - sm.from[i]) * t);
-    normalize(out + 3);
-    normalize(out + 6);
-    std::memcpy(sm.shown, out, sizeof sm.shown);
-    ++sm.blended;
+    const double dt = now - sm.at;
+    sm.at = now;
+    const double kd = 1.0 - std::exp(-dt / kDirTau), kf = 1.0 - std::exp(-dt / kFlatTau), kh = 1.0 - std::exp(-dt / kHeightTau);
+    const float old_z = sm.shown[2];
+    ease(&sm.shown[0], &desc[0], kf);
+    ease(&sm.shown[1], &desc[1], kf);
+    ease(&sm.shown[2], &desc[2], kh);
+    for (int i = 3; i < 9; ++i) ease(&sm.shown[i], &desc[i], kd);
+    normalize(sm.shown + 3);
+    normalize(sm.shown + 6);
+    sm.raw_dz += std::fabs(desc[2] - sm.last_raw_z);
+    sm.shown_dz += std::fabs(sm.shown[2] - old_z);
+    sm.last_raw_z = desc[2];
+    std::memcpy(out, sm.shown, sizeof sm.shown);
+    ++sm.frames;
     return true;
 }
 
@@ -304,11 +292,12 @@ void log_stats() {
             config().camera_latch ? "on" : "off", g.turns_per_count, g.s_cc > 0 ? g.s_jc / g.s_cc : 0.0, fit_r2, g.fit_samples,
             rad_per_count() != 0 ? "" : " (not trusted yet)", g.moved_between > 2 * g.still_between ? "blend" : "hold", g.turned,
             g.frames, g.max_lead);
-    fo::log("camera: smoothing %s: %u Fable camera moves blended over %u frames (every %.0f ms), %u cuts, %u already moving; "
+    fo::log("camera: smoothing %s: %u frames eased, %u cuts; height moved %.2f by Fable, %.2f on screen; "
             "shoulder offset on %u frames (%.2f)",
-            config().camera_smooth ? "on" : "off", sm.keys, sm.blended, sm.period * 1000.0, sm.snaps, sm.passed, g_shoulder_frames,
+            config().camera_smooth ? "on" : "off", sm.frames, sm.snaps, sm.raw_dz, sm.shown_dz, g_shoulder_frames,
             static_cast<double>(g_swapped ? -config().camera_shoulder : config().camera_shoulder));
-    sm.keys = sm.blended = sm.snaps = sm.passed = 0;
+    sm.frames = sm.snaps = 0;
+    sm.raw_dz = sm.shown_dz = 0;
     g_shoulder_frames = 0;
     g.frames = g.turned = 0;
     g.max_lead = 0;
