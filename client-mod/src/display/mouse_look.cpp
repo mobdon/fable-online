@@ -8,6 +8,7 @@
 #include "../log.h"
 #include "camera_latch.h"
 #include "camera_probe.h"
+#include "menu_cursor.h"
 #include "../game/pause_menu.h"
 
 namespace fo::display::mouse_look {
@@ -73,7 +74,9 @@ long g_poll_x = 0, g_poll_y = 0;
 void __fastcall hk_mouse(void* self, void*) {
     ++g_mouse_reads;
     g_mouse_dx = self;
+    menu_cursor::before_read();
     o_mouse(self);
+    menu_cursor::after_read();
 }
 
 // What each camera update did, logged every two seconds while the mouse moves: how far the
@@ -219,6 +222,7 @@ void hook_slot(uint32_t addr, uint32_t expect, void* hook, Update_t& orig) {
 
 void install_counter() {
     hook_slot(kMouseDxVtable + 5 * 4, kMouseDxUpdate, reinterpret_cast<void*>(&hk_mouse), o_mouse);
+    menu_cursor::install();
     uint32_t* slot = reinterpret_cast<uint32_t*>(kMouseLookVtable + 4);
     if (!readable(kMouseLookVtable + 4, 4) || *slot != kMouseLookUpdate) return;
     o_update = reinterpret_cast<Update_t>(kMouseLookUpdate);
