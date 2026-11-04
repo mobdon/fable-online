@@ -105,3 +105,15 @@ positions (camera code at 0xB327A1, 0xB4A881, 0xB8E315) must keep the real size.
   (PC_OPTIONS_*_TEXT_SLIDER) are named widgets from the data too (built at 0x58CC40..).
   A new row needs either data or a runtime-built list (CFrontEndList, as the shop and item
   action lists are filled in code).
+
+## Pause screen detection
+
+- The pause screen is player mode 23. Mode handlers live in a table at 0x013B8C88, 0x20 bytes
+  per mode id (filled by a static initialiser around 0x0121B006): +0x00 runs when the mode
+  starts, +0x10 when it ends, each a member function pointer with a this-adjust at +0x04/+0x14
+  (dispatch at 0x00633CC6 and 0x00633C06: `shl eax,5 ; call [edi+0x13B8C88]`).
+- Mode 23: 0x00636270 gets the hero's CTCInGameMenu (component 0xC6), builds the pause screen
+  (0x004830A1, which sets the component's +0x0C open flag) and pushes CInputProcessInGameMenu
+  (kept at +0x194). 0x006362D0 closes it through 0x0047D78B.
+- `client-mod/src/game/pause_menu.cpp` swaps the two table entries for thunks that record
+  open/closed and jump on to Fable's handlers; `pause_menu::open()` reports it.

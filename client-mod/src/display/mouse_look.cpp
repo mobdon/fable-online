@@ -8,6 +8,7 @@
 #include "../log.h"
 #include "camera_latch.h"
 #include "camera_probe.h"
+#include "../game/pause_menu.h"
 
 namespace fo::display::mouse_look {
 namespace {
@@ -98,6 +99,7 @@ namespace {
 void __fastcall hk_update(void* self, void*) {
     ++g_updates;
     sync_aim();
+    fo::game::pause_menu::open();   // keeps the pause screen watch in place
     if (!g_chain_logged.exchange(true)) {
         // Once: return addresses in Fable.exe on the stack, to trace the loop that runs the camera.
         const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
