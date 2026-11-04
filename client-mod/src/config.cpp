@@ -98,7 +98,7 @@ void config_load(HMODULE self) {
     c.camera_latch = ini_bool(f, L"display", L"camera_latch", c.camera_latch);
     c.camera_assist = ini_bool(f, L"display", L"camera_assist", c.camera_assist);
     c.camera_smooth = ini_bool(f, L"display", L"camera_smooth", c.camera_smooth);
-    c.camera_shoulder_key = static_cast<int>(_wtoi(ini_str(f, L"display", L"camera_shoulder_key", L"122").c_str()));
+    c.camera_shoulder_key = static_cast<int>(_wtoi(ini_str(f, L"display", L"camera_shoulder_key", L"0").c_str()));
     std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
     c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
     if (c.mouse_smoothing < -1 || c.mouse_smoothing > 60) c.mouse_smoothing = 0;

@@ -96,18 +96,22 @@ double lead(double now) {
 
 // Smoothing. Fable sets its camera every frame, but the heading only steps when the game's
 // camera update runs (15 times a second), and the camera's height follows the hero's feet, so
-// every bump in the ground under the hero shakes the view up and down. Each frame here eases
-// the camera toward Fable's: the direction over kDirTau (hides the turn steps), the position
-// across the ground over kFlatTau, and the height over kHeightTau, long enough that small bumps
-// in the ground don't reach the view while hills and stairs still do.
-constexpr double kDirTau = 0.05, kFlatTau = 0.03, kHeightTau = 0.25;
+// every bump in the ground under the hero shakes the view up and down. The camera is eased as
+// an orbit around the point it looks at near the hero: the direction over kDirTau (hides the
+// turn steps), the look-at point across the ground over kFlatTau and in height over
+// kHeightTau (small bumps don't reach the view, hills and stairs still do), and the distance
+// over kDistTau. Turning then swings the camera rigidly round the hero, so the hero keeps
+// their place on screen instead of sliding from side to side.
+constexpr double kDirTau = 0.05, kFlatTau = 0.06, kHeightTau = 0.3, kDistTau = 0.3;
 struct Smooth {
     bool have = false;
-    float shown[9] = {};
+    float target[3] = {}, dir[6] = {};   // look-at point; forward and up
+    double dist = 0;
     double at = 0;
     unsigned frames = 0, snaps = 0;
-    double raw_dz = 0, shown_dz = 0;   // summed frame-to-frame height change, Fable's vs shown
+    double raw_dz = 0, shown_dz = 0;   // summed frame-to-frame look-at height change, Fable's vs shown
     float last_raw_z = 0;
+    float shown_pos[3] = {};
 } sm;
 
 void normalize(float* v) {
@@ -115,70 +119,67 @@ void normalize(float* v) {
     if (l > 1e-6) for (int i = 0; i < 3; ++i) v[i] = static_cast<float>(v[i] / l);
 }
 
-void ease(float* v, const float* to, double k) {
-    *v = static_cast<float>(*v + (*to - *v) * k);
+void ease(float* v, double to, double k) {
+    *v = static_cast<float>(*v + (to - *v) * k);
+}
+
+// Distance from the camera to the hero along its view, or `fallback` when that makes no sense.
+double hero_distance(const float* desc, double fallback) {
+    const double d = (g.focus[0] - desc[0]) * desc[3] + (g.focus[1] - desc[1]) * desc[4] + (g.focus[2] - desc[2]) * desc[5];
+    return d > 0.5 && d < 30.0 ? d : fallback;
 }
 
 // Writes the camera to show this frame into out[9]; false = show Fable's as it is.
 bool smooth(const float* desc, double now, float* out) {
     if (sm.have) {
         const double dt = now - sm.at;
-        const double dx = desc[0] - sm.shown[0], dy = desc[1] - sm.shown[1], dz = desc[2] - sm.shown[2];
-        const double dot = static_cast<double>(desc[3]) * sm.shown[3] + static_cast<double>(desc[4]) * sm.shown[4] +
-                           static_cast<double>(desc[5]) * sm.shown[5];
+        const double dx = desc[0] - sm.shown_pos[0], dy = desc[1] - sm.shown_pos[1], dz = desc[2] - sm.shown_pos[2];
+        const double dot = static_cast<double>(desc[3]) * sm.dir[0] + static_cast<double>(desc[4]) * sm.dir[1] +
+                           static_cast<double>(desc[5]) * sm.dir[2];
         if (dt > 0.3 || dt < 0 || dx * dx + dy * dy + dz * dz > 6.0 * 6.0 || dot < 0.5) {
             sm.have = false;   // a cut, a teleport or a pause: jump straight there
             ++sm.snaps;
         }
     }
     if (!sm.have) {
-        std::memcpy(sm.shown, desc, sizeof sm.shown);
+        sm.dist = hero_distance(desc, 4.0);
+        for (int i = 0; i < 3; ++i) sm.target[i] = static_cast<float>(desc[i] + desc[3 + i] * sm.dist);
+        std::memcpy(sm.dir, desc + 3, sizeof sm.dir);
+        std::memcpy(sm.shown_pos, desc, sizeof sm.shown_pos);
         sm.at = now;
-        sm.last_raw_z = desc[2];
+        sm.last_raw_z = sm.target[2];
         sm.have = true;
         return false;
     }
     const double dt = now - sm.at;
     sm.at = now;
-    const double kd = 1.0 - std::exp(-dt / kDirTau), kf = 1.0 - std::exp(-dt / kFlatTau), kh = 1.0 - std::exp(-dt / kHeightTau);
-    const float old_z = sm.shown[2];
-    ease(&sm.shown[0], &desc[0], kf);
-    ease(&sm.shown[1], &desc[1], kf);
-    ease(&sm.shown[2], &desc[2], kh);
-    for (int i = 3; i < 9; ++i) ease(&sm.shown[i], &desc[i], kd);
-    normalize(sm.shown + 3);
-    normalize(sm.shown + 6);
-    sm.raw_dz += std::fabs(desc[2] - sm.last_raw_z);
-    sm.shown_dz += std::fabs(sm.shown[2] - old_z);
-    sm.last_raw_z = desc[2];
-    std::memcpy(out, sm.shown, sizeof sm.shown);
+    const double kd = 1.0 - std::exp(-dt / kDirTau), kf = 1.0 - std::exp(-dt / kFlatTau),
+                 kh = 1.0 - std::exp(-dt / kHeightTau), kr = 1.0 - std::exp(-dt / kDistTau);
+    sm.dist += (hero_distance(desc, sm.dist) - sm.dist) * kr;
+    // Where Fable's camera looks this frame, at the eased distance.
+    const double tx = desc[0] + desc[3] * sm.dist, ty = desc[1] + desc[4] * sm.dist, tz = desc[2] + desc[5] * sm.dist;
+    const float old_z = sm.target[2];
+    ease(&sm.target[0], tx, kf);
+    ease(&sm.target[1], ty, kf);
+    ease(&sm.target[2], tz, kh);
+    for (int i = 0; i < 6; ++i) ease(&sm.dir[i], desc[3 + i], kd);
+    normalize(sm.dir);
+    normalize(sm.dir + 3);
+    sm.raw_dz += std::fabs(tz - sm.last_raw_z);
+    sm.shown_dz += std::fabs(sm.target[2] - old_z);
+    sm.last_raw_z = static_cast<float>(tz);
+    for (int i = 0; i < 3; ++i) out[i] = static_cast<float>(sm.target[i] - sm.dir[i] * sm.dist);
+    std::memcpy(out + 3, sm.dir, sizeof sm.dir);
+    std::memcpy(sm.shown_pos, out, sizeof sm.shown_pos);
     ++sm.frames;
     return true;
 }
 
-// Which shoulder: config sign, flipped with the swap key.
-bool g_swapped = false, g_key_down = false;
-HWND g_game_window = nullptr;
+// Which shoulder: the config sign (Mod settings > Extras). No key swaps it in game.
 unsigned g_shoulder_frames = 0;
+bool g_swapped = false;   // kept for the stats line; always false
 
-float shoulder_now() {
-    const float base = config().camera_shoulder;
-    if (base == 0.0f) return 0.0f;
-    const int key = config().camera_shoulder_key;
-    if (key > 0) {
-        const bool down = (GetAsyncKeyState(key) & 0x8000) != 0;
-        if (down && !g_key_down) {
-            DWORD pid = 0;
-            GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-            if (pid == GetCurrentProcessId()) {
-                g_swapped = !g_swapped;
-                fo::log("camera: over the %s shoulder", (base < 0) != g_swapped ? "left" : "right");
-            }
-        }
-        g_key_down = down;
-    }
-    return g_swapped ? -base : base;
-}
+float shoulder_now() { return config().camera_shoulder; }
 
 void __fastcall hk_set_camera(void* self, void*, float* desc) {
     if (!desc || !readable(desc, 0x24)) { o_set_camera(self, desc); return; }
@@ -292,9 +293,9 @@ void log_stats() {
             config().camera_latch ? "on" : "off", g.turns_per_count, g.s_cc > 0 ? g.s_jc / g.s_cc : 0.0, fit_r2, g.fit_samples,
             rad_per_count() != 0 ? "" : " (not trusted yet)", g.moved_between > 2 * g.still_between ? "blend" : "hold", g.turned,
             g.frames, g.max_lead);
-    fo::log("camera: smoothing %s: %u frames eased, %u cuts; height moved %.2f by Fable, %.2f on screen; "
+    fo::log("camera: smoothing %s: %u frames eased, %u cuts; look-at height moved %.2f by Fable, %.2f on screen, distance %.2f; "
             "shoulder offset on %u frames (%.2f)",
-            config().camera_smooth ? "on" : "off", sm.frames, sm.snaps, sm.raw_dz, sm.shown_dz, g_shoulder_frames,
+            config().camera_smooth ? "on" : "off", sm.frames, sm.snaps, sm.raw_dz, sm.shown_dz, sm.dist, g_shoulder_frames,
             static_cast<double>(g_swapped ? -config().camera_shoulder : config().camera_shoulder));
     sm.frames = sm.snaps = 0;
     sm.raw_dz = sm.shown_dz = 0;

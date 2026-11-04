@@ -28,10 +28,23 @@ constexpr int kModeCombat = 2, kModeOverlay = 0x28;
 using GetPtr_t = void*(__fastcall*)(void*, void*);
 using GetInt_t = int(__fastcall*)(void*, void*);
 using HasMode_t = bool(__fastcall*)(void*, void*, int);
+// Weapon in hand. The player's hero is the thing behind the handle at player +0x34. Its
+// components are a sorted vector of {type, component} at thing +0x44/+0x48; CTCCarrying is
+// type 0x46. Carry slot ids come from the symbol map at [[0x013B8A1C]+0x20] (0x009AD410 with a
+// CCharString); the slot names are global strings built at start-up (CARRY_SLOT_LEFT_HAND at
+// 0x013BACEC, CARRY_SLOT_RIGHT_HAND at 0x013BACF0). 0x006A11F0 (carrying, slot id) gives the
+// thing in that slot, or null. Fable's melee weapon moves from the sheathe slot to a hand when
+// drawn; a bow is held in the left hand.
+constexpr uint32_t kSymbols = 0x013B8A1C, kSlotLeft = 0x013BACEC, kSlotRight = 0x013BACF0;
+constexpr uint32_t kSymbolLookup = 0x009AD410, kThingInSlot = 0x006A11F0;
+constexpr int kCarrying = 0x46;
+using Lookup_t = int(__fastcall*)(void*, void*, const void*);
+using InSlot_t = void*(__fastcall*)(void*, void*, int);
 
 char g_status[120] = "red target: Fable's own colours";
 std::atomic<int> g_logged{0};
-int g_last_kind = -1, g_last_out = -1, g_last_mode = -1;
+int g_last_kind = -1, g_last_out = -1, g_last_mode = -1, g_last_held = -1;
+int g_slot_left = -1, g_slot_right = -1;
 bool g_table_logged = false;
 
 bool readable(uint32_t addr, size_t n) {
@@ -58,6 +71,32 @@ void log_table() {
     fo::log("%s", line);
 }
 
+void* component(uint8_t* thing, int type) {
+    const uint32_t b = word(reinterpret_cast<uint32_t>(thing) + 0x44), e = word(reinterpret_cast<uint32_t>(thing) + 0x48);
+    if (!b || e < b || e - b > 8 * 256 || !readable(b, e - b)) return nullptr;
+    for (uint32_t p = b; p < e; p += 8)
+        if (static_cast<int>(word(p)) == type) return reinterpret_cast<void*>(word(p + 4));
+    return nullptr;
+}
+
+// True while the hero has something in either hand (a drawn sword, axe, hammer or bow).
+bool weapon_in_hand(uint8_t* player) {
+    auto* hero = static_cast<uint8_t*>(reinterpret_cast<GetPtr_t>(kHandleGet)(player + 0x34, nullptr));
+    if (!hero) return false;
+    void* carrying = component(hero, kCarrying);
+    if (!carrying) return false;
+    if (g_slot_right < 0) {
+        const uint32_t sym = word(kSymbols);
+        void* map = sym ? reinterpret_cast<void*>(word(sym + 0x20)) : nullptr;
+        if (!map) return false;
+        g_slot_left = reinterpret_cast<Lookup_t>(kSymbolLookup)(map, nullptr, reinterpret_cast<const void*>(kSlotLeft));
+        g_slot_right = reinterpret_cast<Lookup_t>(kSymbolLookup)(map, nullptr, reinterpret_cast<const void*>(kSlotRight));
+        fo::log("red target: hand slots left %d, right %d", g_slot_left, g_slot_right);
+    }
+    return (g_slot_right > 0 && reinterpret_cast<InSlot_t>(kThingInSlot)(carrying, nullptr, g_slot_right)) ||
+           (g_slot_left > 0 && reinterpret_cast<InSlot_t>(kThingInSlot)(carrying, nullptr, g_slot_left));
+}
+
 int __stdcall adjust(int kind, uint8_t* cursor) {
     if (!config().red_target) return kind;   // read live: the mod settings screen can change it
     if (!g_table_logged) log_table();
@@ -65,17 +104,20 @@ int __stdcall adjust(int kind, uint8_t* cursor) {
     int mode = -1;
     void* player = reinterpret_cast<GetPtr_t>(kPlayerOf)(*reinterpret_cast<void**>(cursor + 8), nullptr);
     if (player) mode = reinterpret_cast<GetInt_t>(kPlayerMode)(player, nullptr);
-    const bool combat = player && (mode == kModeCombat ||
+    const bool held = player && weapon_in_hand(static_cast<uint8_t*>(player));
+    const bool combat = player && (held || mode == kModeCombat ||
                                    (mode == kModeOverlay && reinterpret_cast<HasMode_t>(kPlayerHasMode)(player, nullptr, kModeCombat)));
     if (combat && kind != kEnemy && kind != 0) {
         // Same creature test the highlight code uses (thing type byte +0x10 == 1).
         auto* thing = static_cast<uint8_t*>(reinterpret_cast<GetPtr_t>(kHandleGet)(cursor + 0x28, nullptr));
         if (thing && thing[0x10] == 1) out = kEnemy;
     }
-    if ((kind != g_last_kind || out != g_last_out || mode != g_last_mode) && g_logged < 200) {
+    if ((kind != g_last_kind || out != g_last_out || mode != g_last_mode || held != (g_last_held == 1)) && g_logged < 200) {
         ++g_logged;
-        fo::log("red target: kind %d -> %d, hero mode %d%s", kind, out, mode, combat ? " (combat)" : "");
+        fo::log("red target: kind %d -> %d, hero mode %d, weapon %s%s", kind, out, mode, held ? "in hand" : "away",
+                combat ? " (combat)" : "");
     }
+    g_last_held = held ? 1 : 0;
     g_last_kind = kind;
     g_last_out = out;
     g_last_mode = mode;

@@ -175,6 +175,41 @@ const void* bottom_sprites(IDirect3DDevice9* d, const void* data, UINT first, UI
     return buf.data();
 }
 
+// Text and other textured quads drawn through a vertex shader (DrawIndexedPrimitiveUP returning
+// to 0x00A0AF76, e.g. the gold count): positions in virtual pixels (float2 at the start of each
+// vertex), turned into clip space by the shader. Like the sprites they keep the full HUD scale
+// unless shrunk here with the bottom HUD, toward the same corner as the box they sit in.
+constexpr uintptr_t kQuadDraw = 0x00A0AF76;
+std::atomic<unsigned> g_bottom_quads{0};
+const void* bottom_quads(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
+    if (!data || !count || stride < 8 || count > 4096) return nullptr;
+    const float f = bottom_factor();
+    if (f >= 1.0f) return nullptr;
+    const float vw = static_cast<float>(g_vw), vh = static_cast<float>(g_vh);
+    const uint8_t* src = static_cast<const uint8_t*>(data) + static_cast<size_t>(first) * stride;
+    float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f;
+    for (UINT i = 0; i < count; ++i) {
+        const float* p = reinterpret_cast<const float*>(src + static_cast<size_t>(i) * stride);
+        if (!(p[0] > -8.0f && p[0] < vw + 8.0f && p[1] > -8.0f && p[1] < vh + 8.0f)) return nullptr;
+        if (p[0] < x0) x0 = p[0];
+        if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1];
+    }
+    if (y0 < 0.65f * vh || !drawing_to_screen(d)) return nullptr;   // not wholly in the bottom part
+    const float ax = anchor_x((x0 + x1) / 2, 0.0f, vw), ay = vh;
+    static thread_local std::vector<uint8_t> buf;
+    const size_t bytes = static_cast<size_t>(first + count) * stride;
+    if (buf.size() < bytes) buf.resize(bytes);
+    std::memcpy(buf.data() + static_cast<size_t>(first) * stride, src, static_cast<size_t>(count) * stride);
+    for (UINT i = 0; i < count; ++i) {
+        float* p = reinterpret_cast<float*>(buf.data() + static_cast<size_t>(first + i) * stride);
+        p[0] = ax + (p[0] - ax) * f;
+        p[1] = ay + (p[1] - ay) * f;
+    }
+    ++g_bottom_quads;
+    return buf.data();
+}
+
 // Returns scaled copies of `count` vertices from `first`, or nullptr to draw them as they are.
 const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
     if (!data || !count || stride < 16 || count > 65536 || !active()) return nullptr;
@@ -232,6 +267,13 @@ HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t
         if (const void* v = bottom_sprites(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
     } else if (from_fable(ret)) {
+        if (reinterpret_cast<uintptr_t>(ret) == kQuadDraw) {
+            // Shader-drawn quads (not XYZRHW, so scaled_rhw leaves them alone).
+            DWORD fvf = 0;
+            if (SUCCEEDED(d->GetFVF(&fvf)) && (fvf & D3DFVF_POSITION_MASK) != D3DFVF_XYZRHW)
+                if (const void* v = bottom_quads(d, data, min_index, verts, stride))
+                    return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
+        }
         if (const void* v = scaled_rhw(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
     }
@@ -374,8 +416,8 @@ float scale() { return active() ? g_scale.load() : 1.0f; }
 void log_status() {
     fo::log("display: %s", g_status);
     if (active())
-        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u, screen-space draws %u",
+        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u, screen-space draws %u, bottom text quads %u",
                 g_vw, g_vh, g_w, g_h, static_cast<double>(g_scale.load()), g_c20_fixed.load(), g_scissor_fixed.load(),
-                g_viewport_fixed.load(), g_rhw_fixed.load());
+                g_viewport_fixed.load(), g_rhw_fixed.load(), g_bottom_quads.load());
 }
 }  // namespace fo::display::hud
