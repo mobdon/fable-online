@@ -63,6 +63,9 @@ export interface QuestCardData {
   gold: number;
   renown: number;
   items: string[];
+  /** Most the quest's boasts add on top (script.bin), when it has any. */
+  boastGold?: number;
+  boastRenown?: number;
 }
 
 export interface GameData {

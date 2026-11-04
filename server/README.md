@@ -35,7 +35,8 @@ day, night and weather clock.
 `npm run extract` decodes `data/CompiledDefs/game.bin` (format notes in
 `tools/re-notes/07-game-bin.md`) into `data/game-data.json`: weapon type, class and damage,
 item base values, hero clothing coverage and armour class, creature health, faction, weapon,
-experience and reward values, creature generation families, quest card rewards, and the
+experience and reward values, creature generation families, quest card rewards (plus boast
+bonuses from `script.bin`), and the
 per-level spell tables. Without these files the server runs on a small made-up fallback set.
 
 Needs Node 22.13 or newer (uses the built-in `node:sqlite`).
@@ -93,12 +94,16 @@ prices are the catalog's (base value to buy, 25% back on sale). Platinum armour 
 it can't be minted for players, sold, dropped, traded or worn by a non-staff hero, and every
 attempt is logged as `staff_item_blocked`.
 
-**Quests run on the client, so their rewards are capped** (`src/economy/quests.ts`). A
-`quest_complete` claim names a quest card (rewards from game.bin) or a quest script name
-(capped at `FO_QUEST_DEFAULT_MAX_GOLD`). It pays only if the quest is real, hasn't been paid
-before (or its repeat interval passed), gold and renown are within the card, every item is
-one the card gives, and the hero is under the daily quest-gold cap. Anything else pays
-nothing and is logged as `quest_reward_rejected`. Overrides go in `content/quest-rewards.json`.
+**Quests run on the client, so their rewards are capped** (`src/economy/quests.ts`). When
+Fable finishes a quest, the mod reads the quest card and sends a `quest_complete` claim naming
+it. The card's gold, renown and items come from game.bin, and the most its boasts can add
+from `script.bin` (`src/data/boasts.ts`), both read by `npm run extract`. A claim by a quest
+script name with no card pays at most `FO_QUEST_DEFAULT_MAX_GOLD` (0 by default). A claim pays
+only if the quest is real, hasn't been paid before (or its repeat interval passed), every item
+is one the card gives, and the hero is under the daily quest-gold cap; anything else pays
+nothing and is logged as `quest_reward_rejected`. Gold and renown above the quest's cap are
+cut down to it and logged as `quest_reward_trimmed`. Overrides go in
+`content/quest-rewards.json`.
 
 **Region channels that autoscale** (`src/world/director.ts`). One channel is one copy of one
 Albion region, and in production one server-mode Fable.exe. A graduated hero joins the

@@ -5,17 +5,22 @@ import { MINT_REASONS, type Economy } from './economy.js';
 
 /**
  * Quest rewards. Quests run on each player's own Fable, so the server can't see them
- * happen; it can only refuse to pay what a real quest could never pay. A claim names the
- * quest card (OBJECT_QUEST_CARD_*, whose gold, renown and reward items come from game.bin)
- * or a quest script name (shared/defs/quests.json, paid at most the default cap). A claim
- * is paid only when all of these hold, otherwise nothing is paid and the attempt is logged:
+ * happen; it can only refuse to pay what a real quest could never pay. The mod reports a
+ * finished quest by its quest card (OBJECT_QUEST_CARD_*): the card's gold, renown and reward
+ * items come from game.bin, and the most its boasts can add from script.bin, both read from
+ * the operator's own install. A claim by a quest script name (shared/defs/quests.json) with
+ * no card pays at most the default cap, which is 0 unless the operator sets one.
+ *
+ * A claim is paid only when all of these hold, otherwise nothing is paid and the attempt
+ * is logged:
  *  - the quest is a known card or script, or has an explicit rule,
  *  - the hero hasn't been paid for it already (or the repeat interval has passed),
- *  - the gold is within the quest's cap (and the ledger's quest_reward cap),
  *  - every item is one the rule allows, and is not staff-only,
  *  - the hero is under the daily quest-gold cap.
- * The cap is a ceiling: a claim over it is rejected whole, not trimmed, because it means
- * the client is lying about the reward.
+ * Gold and renown over the quest's cap are cut down to the cap (and logged as
+ * quest_reward_trimmed), not refused: the cap counts every boast's reward, and a boast whose
+ * value isn't in the data would otherwise cost an honest hero the whole reward. A hero who
+ * edits the number gets no more than the real quest pays, once.
  */
 export interface QuestRule {
   maxGold: number;
@@ -35,7 +40,17 @@ export interface QuestClaim {
   items?: string[];
 }
 
-export type ClaimResult = { ok: true; gold: number; renown: number; items: string[] } | { ok: false; reason: string };
+export type ClaimResult =
+  | { ok: true; gold: number; renown: number; items: string[]; trimmed?: boolean }
+  | { ok: false; reason: string };
+
+export interface QuestCardRewards {
+  gold: number;
+  renown: number;
+  items: string[];
+  boastGold?: number;
+  boastRenown?: number;
+}
 
 const DAY = 24 * 3600_000;
 const QUEST_RE = /^[A-Za-z0-9_]{1,64}$/;
@@ -49,8 +64,8 @@ export class QuestRewards {
     private events: EventSink,
     private rules: Record<string, QuestRule> = {},
     knownQuests: Iterable<string> = [],
-    private cards: Record<string, { gold: number; renown: number; items: string[] }> = {},
-    private opts = { defaultMaxGold: 2_000, dailyGoldCap: 50_000 },
+    private cards: Record<string, QuestCardRewards> = {},
+    private opts = { defaultMaxGold: 0, dailyGoldCap: 50_000 },
   ) {
     this.known = new Set(knownQuests);
   }
@@ -70,7 +85,7 @@ export class QuestRewards {
     const r = this.rules[quest];
     if (r) return r;
     const card = this.cards[quest];
-    if (card) return { maxGold: card.gold, maxRenown: card.renown, items: card.items };
+    if (card) return { maxGold: card.gold + (card.boastGold ?? 0), maxRenown: card.renown + (card.boastRenown ?? 0), items: card.items };
     return this.known.has(quest) ? { maxGold: this.opts.defaultMaxGold, maxRenown: 0 } : undefined;
   }
 
@@ -80,18 +95,19 @@ export class QuestRewards {
       return { ok: false, reason };
     };
     if (typeof c.quest !== 'string' || !QUEST_RE.test(c.quest)) return reject('bad_quest');
-    const gold = c.gold;
-    if (!Number.isSafeInteger(gold) || gold < 0) return reject('bad_gold');
+    const claimedGold = c.gold;
+    if (!Number.isSafeInteger(claimedGold) || claimedGold < 0) return reject('bad_gold');
     const items = c.items ?? [];
     if (!Array.isArray(items) || items.length > 8 || items.some((i) => typeof i !== 'string')) return reject('bad_items');
 
     const rule = this.rule(c.quest);
     if (!rule) return reject('unknown_quest');
     if (rule.enabled === false) return reject('quest_disabled');
-    if (gold > Math.min(rule.maxGold, MINT_REASONS.quest_reward)) return reject('over_cap');
-    const renown = c.renown ?? 0;
-    if (!Number.isSafeInteger(renown) || renown < 0) return reject('bad_renown');
-    if (renown > (rule.maxRenown ?? 0)) return reject('over_cap');
+    const claimedRenown = c.renown ?? 0;
+    if (!Number.isSafeInteger(claimedRenown) || claimedRenown < 0) return reject('bad_renown');
+    const gold = Math.min(claimedGold, rule.maxGold, MINT_REASONS.quest_reward);
+    const renown = Math.min(claimedRenown, rule.maxRenown ?? 0);
+    const trimmed = gold < claimedGold || renown < claimedRenown;
     // Each item at most as many times as the rule lists it: a quest that gives one sword
     // can't be claimed as eight.
     const left = new Map<string, number>();
@@ -127,9 +143,13 @@ export class QuestRewards {
         this.db.run('UPDATE quest_claims SET tx_id = ? WHERE id = ?', r.txId, claimId);
       }
       items.forEach((it, i) => this.economy.mintItem(heroId, it, 1, 'quest_reward', `${key}:item:${i}`));
-      if (renown > 0) this.db.run('UPDATE heroes SET renown = renown + ? WHERE id = ?', renown, heroId);
+      // Renown itself arrives as the running total in renown_report (heroes/renown.ts), which
+      // brings heroes.renown up to Fable's figure under its own caps. Adding the quest's renown
+      // here too would count it twice when the report lands first, so the claim only records it.
+      if (trimmed)
+        this.events.emit({ type: 'quest_reward_trimmed', heroId, quest: c.quest, claimedGold, gold, claimedRenown, renown });
       this.events.emit({ type: 'quest_reward', heroId, quest: c.quest, gold, items: items.length });
-      return { ok: true as const, gold, renown, items };
+      return trimmed ? { ok: true as const, gold, renown, items, trimmed } : { ok: true as const, gold, renown, items };
     });
   }
 }

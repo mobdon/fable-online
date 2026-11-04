@@ -35,6 +35,8 @@ export type GameEvent =
   /** The mod reported the hero's renown in its own Fable; what the server took from it. */
   | { type: 'renown_report'; heroId: number; reported: number; gained: number; renown: number; kind: 'import' | 'daily'; capped: boolean }
   | { type: 'quest_reward_rejected'; heroId: number; quest: string; gold: number; reason: string }
+  /** A claim over the quest's cap, paid at the cap: a boast missing from the data, or an edited number. */
+  | { type: 'quest_reward_trimmed'; heroId: number; quest: string; claimedGold: number; gold: number; claimedRenown: number; renown: number }
   | { type: 'interact'; heroId: number; thing: string; kind: string; ok: boolean; reason?: string }
   | { type: 'loot'; heroId: number; thing: string; txId: number; gold: number; items: number; blocked: string[] }
   | { type: 'theft'; heroId: number; thing: string; def: string; region: string }
