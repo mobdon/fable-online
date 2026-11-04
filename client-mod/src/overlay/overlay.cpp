@@ -288,8 +288,8 @@ void draw_crosshair(const Config& cfg) {
     constexpr uint32_t kGold = 0xD8E9D6A0, kHalo = 0x70000000;
     switch (cfg.crosshair) {
     case Crosshair::Ring:
-        g_r.ring(cx, cy, 7.0f * k, 10.5f * k, 1.2f * k, kHalo);
-        g_r.ring(cx, cy, 8.0f * k, 9.5f * k, 0.8f * k, kGold);
+        g_r.ring(cx, cy, 7.9f * k, 9.6f * k, 0.8f * k, kHalo);
+        g_r.ring(cx, cy, 8.45f * k, 9.05f * k, 0.5f * k, kGold);
         g_r.ring(cx, cy, 0.0f, 2.2f * k, 1.0f * k, kHalo);
         g_r.ring(cx, cy, 0.0f, 1.3f * k, 0.6f * k, kGold);
         break;
