@@ -11,6 +11,7 @@
 #include "config.h"
 #include "crash_exit.h"
 #include "game/hook.h"
+#include "game/menu_pages.h"
 #include "game/puppet.h"
 #include "game/spawns.h"
 #include "game/spirits.h"
@@ -618,6 +619,8 @@ void start() {
     // Before Fable loads its first level, so the level's own monsters can be left out.
     if (s.suppressSpawns) game::spawns::install_level_hook();
     game::hook::install();
+    // Stand-in heroes must not take over the hero's menu pages (map, inventory...).
+    game::menu_pages::install();
     game::hook::on_tick(tick, kTickMs);
     if (s.dev) game::hook::on_key([](int vk) { if (config().dev_hotkeys) dev_key(vk); });
 
@@ -638,6 +641,7 @@ void start() {
 void stop() {
     net::world_stop();
     game::things::remove();
+    game::menu_pages::remove();
     if (g_state) {
         g_state->spirits.clear_all();
         g_state->puppets->clear_all();
