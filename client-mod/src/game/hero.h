@@ -11,4 +11,6 @@ struct HeroPos {
 };
 // Call from a background thread a few times a second. Scans for the hero when it's lost.
 HeroPos hero_read();
+// The last found hero's position, read now, without scanning: cheap enough for every frame.
+HeroPos hero_peek();
 }  // namespace fo::game
