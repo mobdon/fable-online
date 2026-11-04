@@ -241,7 +241,7 @@ void draw_party_list() {
     }
 }
 
-constexpr uint32_t kTagGold = 0xFFFFC85A;      // own tag: Fable's warm bar tinted gold
+constexpr uint32_t kTagGold = 0xFFFFD84A;      // own tag: Fable's pewter bar tinted gold
 constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
 
 void draw_tags(const Config& cfg) {
@@ -263,8 +263,8 @@ void draw_tags(const Config& cfg) {
         const float name_w = g_r.measure(l.name_line, Face::Title);
         const float plate_w = name_w + end_w * 2 + 10;                 // the name sits on the plain middle of the bar
         const float top = l.y - plate_h - info_h - 2;
-        // Your own hero sits on a gold plate (the warm bar, tinted), everyone else on pewter.
-        g_r.bar(l.x - plate_w / 2, top, plate_w, plate_h, alpha * 0.95f, l.pvp || l.self, true, l.self ? kTagGold : 0xFFFFFFFF);
+        // Your own hero sits on a gold plate (the pewter bar, tinted), everyone else on pewter.
+        g_r.bar(l.x - plate_w / 2, top, plate_w, plate_h, alpha * 0.95f, l.pvp && !l.self, true, l.self ? kTagGold : 0xFFFFFFFF);
         g_r.text(l.x - name_w / 2, top + (plate_h - name_h) / 2, l.name_line, l.name_color, Face::Title, true);
         g_r.text(l.x - g_r.measure(l.info_line, Face::Small) / 2, top + plate_h + 1, l.info_line, l.info_color, Face::Small, true);
         // Staff (from the account role the server signed, never from the client): the same
