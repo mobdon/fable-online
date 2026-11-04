@@ -121,7 +121,7 @@ std::vector<Label> TagStore::layout(const float m[16], float w, float h, const T
         l.pvp = t.pvp;
         l.self = &t == &self_;
         l.badge = t.staff;
-        if (l.self) l.name_color = with_alpha(0xFFFFE9A8, a);   // warm gold on the gold plate
+        if (l.self) l.name_color = with_alpha(0xFFFFF4C8, a);   // pale gold on the gold plate
         out.push_back(std::move(l));
     };
     for (const auto& [id, t] : tags_) place(t);
