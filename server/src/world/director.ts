@@ -371,6 +371,16 @@ export class Director {
     if (ch.count) ch.broadcast(JSON.stringify({ t: 'sky', ...this.clock!.sky(ch.region.name, now) }));
   }
 
+  /** Sends every channel the sky now (after a staff time or weather change). */
+  resyncSky(): void {
+    if (!this.clock) return;
+    const now = Date.now();
+    for (const c of this.channels.values()) {
+      c.skyKey = '';
+      this.syncSky(c, now);
+    }
+  }
+
   private pickShared(region: string, heroId?: number): Channel {
     const list = this.shared.get(region) ?? [];
     let best: Channel | undefined;

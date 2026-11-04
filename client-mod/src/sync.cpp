@@ -15,6 +15,8 @@
 #include "game/spawns.h"
 #include "game/spirits.h"
 #include "game/thing.h"
+#include "game/weather.h"
+#include "game/world_time.h"
 #include "game/things.h"
 #include "log.h"
 #include "modsettings/modsettings.h"
@@ -28,6 +30,7 @@
 #include "world/held.h"
 #include "world/objects.h"
 #include "world/reporter.h"
+#include "world/sky.h"
 #include "world/snapshot.h"
 
 namespace fo::sync {
@@ -96,6 +99,20 @@ struct State {
     int blockVk = 0;
     unsigned lastButtons = 0;
     uint32_t inputSeq = 0;
+    /** The realm's time of day and weather (server `sky` frames) and Fable's clock kept on it. */
+    world::Sky sky;
+    bool syncClock = true;
+    uint32_t lastClockMs = 0;
+    uint32_t lastClockLogMs = 0;
+    uint32_t clockSnaps = 0;
+    /** Fable's own clock speed before the mod first changed it, put back when offline. */
+    float fableSpeed = -1;
+    /** Fable's own script or cutscene was holding the clock last tick (logged once). */
+    bool clockHeld = false;
+    /** Rain and snow follow the realm's weather (FABLE_ONLINE_SYNC_WEATHER=0 leaves them alone). */
+    bool syncWeather = true;
+    /** The mod turned Fable's rain or snow override on, so it has to turn it off again. */
+    bool rainSet = false, snowSet = false;
 };
 
 State* g_state = nullptr;
@@ -109,8 +126,12 @@ void on_connected() {
     if (g_state->suppressSpawns) game::spawns::suppress();
 }
 
+void restore_clock();
+void sync_weather();
+
 void on_disconnected(const std::string& why) {
     if (!g_state) return;
+    restore_clock();
     fo::log("sync: offline (%s); dropping %u puppets", why.c_str(),
             static_cast<unsigned>(g_state->puppets->live_count()));
     g_state->table.clear();
@@ -164,6 +185,110 @@ void mark_party(const std::vector<world::Pose>& poses, uint32_t nowMs) {
     }
     overlay::set_party_marks(std::move(marks));
     s.spirits.sync(poses, !s.puppets->holding(nowMs) && game::local_hero() != 0, nowMs);
+}
+
+/** The server's time of day and weather for the region the hero is in. */
+void on_sky_frame(const std::string& json, uint32_t nowMs) {
+    State& s = *g_state;
+    world::Sky next;
+    if (!world::parse_sky(json, nowMs, next)) return;
+    bool weatherChanged = !s.sky.have || next.weather != s.sky.weather || next.climate != s.sky.climate;
+    s.sky = next;
+    s.lastClockMs = 0;   // check Fable's clock against it on the next tick
+    int h = 0, m = 0;
+    world::day_hm(next.dayFraction, h, m);
+    if (weatherChanged)
+        fo::log("sync: realm sky %02d:%02d (%s), %s %s at %.0f%% (was %s)", h, m,
+                next.night ? "night" : "day", next.climate.c_str(), next.weather.c_str(), next.intensity * 100.0f,
+                next.previous.c_str());
+}
+
+/**
+ * Keeps Fable's clock on the realm's: runs it a little faster or slower to close a small gap,
+ * snaps it on a big one (a join, a load, a staff change). Fable's own scripts and cutscenes
+ * that hold or ease the clock are left to finish first, then the clock is brought back.
+ */
+void sync_clock(uint32_t nowMs) {
+    State& s = *g_state;
+    if ((!s.syncClock && !s.syncWeather) || !s.sky.have || !net::world_connected()) return;
+    if (s.lastClockMs && nowMs - s.lastClockMs < 250) return;
+    s.lastClockMs = nowMs;
+    sync_weather();
+    if (!s.syncClock) return;
+    game::world_time::Clock c;
+    if (!game::world_time::read(c)) return;   // menus and area loads
+    if (c.transition || c.paused) {
+        if (!s.clockHeld) fo::log("sync: Fable's clock is %s by the game; the realm time waits", c.paused ? "held" : "being moved");
+        s.clockHeld = true;
+        return;
+    }
+    s.clockHeld = false;
+    if (s.fableSpeed < 0) {
+        s.fableSpeed = c.speed;
+        fo::log("sync: Fable's own day speed %.6f a second (a %.0f minute day); the realm's is %.0f minutes", c.speed,
+                c.speed > 0 ? 1.0 / c.speed / 60.0 : 0.0, s.sky.dayMs / 60000.0);
+    }
+    double realm = world::sky_fraction(s.sky, nowMs);
+    world::ClockStep st = world::clock_step(c.time, realm, s.sky.dayMs);
+    if (st.snap) {
+        bool ok = game::world_time::write_time(c, static_cast<float>(st.fraction));
+        ++s.clockSnaps;
+        int fh = 0, fm = 0, rh = 0, rm = 0;
+        world::day_hm(c.time, fh, fm);
+        world::day_hm(realm, rh, rm);
+        fo::log("sync: Fable's clock %02d:%02d -> realm %02d:%02d%s", fh, fm, rh, rm, ok ? "" : " (write failed)");
+    }
+    game::world_time::write_speed(c, static_cast<float>(st.speed));
+    if (s.dev && nowMs - s.lastClockLogMs > 30000) {
+        s.lastClockLogMs = nowMs;
+        fo::log("sync: clock game %.4f realm %.4f gap %+.4f speed %.6f, %u snaps", c.time, realm,
+                world::day_delta(c.time, realm), st.speed, s.clockSnaps);
+    }
+}
+
+/** One kind of precipitation: put the override where the realm wants it, or hand it back. */
+void apply_precip(const char* what, float want, bool& set, bool (*write)(float), float current) {
+    if (want < 0) {
+        // Only an override the mod made is turned off; a quest's own rain is left alone.
+        if (set && write(-1.0f)) {
+            set = false;
+            fo::log("sync: %s back to the area's own", what);
+        }
+        return;
+    }
+    if (set && std::fabs(current - want) < 0.005f) return;
+    if (write(want)) {
+        if (!set || std::fabs(current - want) >= 0.05f) fo::log("sync: %s at %.0f%%", what, want * 100.0f);
+        set = true;
+    }
+}
+
+/**
+ * Rain and snow from the realm's weather. Fable resets the override on area loads, so this
+ * checks four times a second and puts it back.
+ */
+void sync_weather() {
+    State& s = *g_state;
+    if (!s.syncWeather || !net::world_connected()) return;
+    game::weather::State w;
+    if (!game::weather::read(w)) return;
+    world::Precip p = world::precip_for(s.sky);
+    apply_precip("rain", p.rain, s.rainSet, game::weather::set_rain, w.rainOverride);
+    apply_precip("snow", p.snow, s.snowSet, game::weather::set_snow, w.snowOverride);
+}
+
+/** Offline: Fable's clock runs at its own speed again (the time of day stays where it is). */
+void restore_clock() {
+    if (!g_state) return;
+    State& s = *g_state;
+    s.sky = world::Sky{};
+    if (s.rainSet && game::weather::set_rain(-1.0f)) s.rainSet = false;
+    if (s.snowSet && game::weather::set_snow(-1.0f)) s.snowSet = false;
+    if (s.fableSpeed < 0) return;
+    game::world_time::Clock c;
+    if (game::world_time::read(c)) game::world_time::write_speed(c, s.fableSpeed);
+    fo::log("sync: Fable's clock back on its own speed");
+    s.fableSpeed = -1;
 }
 
 void handle_frame(const std::string& json, uint32_t nowMs) {
@@ -272,6 +397,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
     }
     case world::FrameType::Unknown:
         if (json.rfind("{\"t\":\"party", 0) == 0) return on_party_frame(json);
+        if (json.rfind("{\"t\":\"sky\"", 0) == 0) return on_sky_frame(json, nowMs);
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -570,6 +696,7 @@ void tick() {
     report_combat(now);
     sync_objects(now);
     apply_health(now);
+    sync_clock(now);
     sync_trade(now);
 
     send_party_requests();
@@ -601,6 +728,9 @@ void start() {
     s.dev = env_flag("FABLE_ONLINE_DEV", false);
     s.reportPos = env_flag("FABLE_ONLINE_REPORT_POS", true);
     s.suppressSpawns = env_flag("FABLE_ONLINE_SUPPRESS_SPAWNS", true);
+    // Fable's clock follows the realm's (FABLE_ONLINE_SYNC_CLOCK=0 leaves it alone).
+    s.syncClock = env_flag("FABLE_ONLINE_SYNC_CLOCK", true);
+    s.syncWeather = env_flag("FABLE_ONLINE_SYNC_WEATHER", true);
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
     s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
@@ -636,6 +766,7 @@ void start() {
 }
 
 void stop() {
+    restore_clock();
     net::world_stop();
     game::things::remove();
     if (g_state) {
@@ -656,6 +787,28 @@ void dev_spawn(const char* def, int count) {
     char buf[160];
     std::snprintf(buf, sizeof buf, "{\"t\":\"dev_spawn\",\"def\":%s,\"count\":%d}", json::quote(def ? def : "").c_str(), count);
     fo::log("sync: asking the server to spawn %d %s", count, def && *def ? def : "monster(s)");
+    net::world_send(buf);
+}
+
+void dev_time(float hour) {
+    if (!net::world_connected()) {
+        modsettings::notify("Not connected to a server.");
+        return;
+    }
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "{\"t\":\"dev_time\",\"hour\":%.2f}", hour);
+    fo::log("sync: asking the server to set the realm time to %.2f", hour);
+    net::world_send(buf);
+}
+
+void dev_weather(const char* weather) {
+    if (!net::world_connected()) {
+        modsettings::notify("Not connected to a server.");
+        return;
+    }
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "{\"t\":\"dev_weather\",\"weather\":%s,\"minutes\":30}", json::quote(weather ? weather : "auto").c_str());
+    fo::log("sync: asking the server for %s weather", weather ? weather : "auto");
     net::world_send(buf);
 }
 
@@ -686,6 +839,23 @@ void dev_key(int vk) {
                 static_cast<unsigned>(s.table.size()), static_cast<unsigned>(s.puppets->live_count()),
                 static_cast<unsigned long long>(received), static_cast<unsigned long long>(sent),
                 game::spawns::suppressed() ? "off" : "on", static_cast<unsigned>(game::spawns::dropped_count()));
+        game::world_time::Clock c;
+        bool haveClock = game::world_time::read(c);
+        int gh = 0, gm = 0, rh = 0, rm = 0;
+        world::day_hm(haveClock ? c.time : 0, gh, gm);
+        world::day_hm(world::sky_fraction(s.sky, now), rh, rm);
+        if (s.sky.have)
+            fo::log("sync: realm time %02d:%02d, %s %s; Fable's clock %s%02d:%02d (speed %.6f%s), %u snaps", rh, rm,
+                    s.sky.climate.c_str(), s.sky.weather.c_str(), haveClock ? "" : "not found, last ", gh, gm,
+                    haveClock ? c.speed : 0.0f, haveClock && (c.paused || c.transition) ? ", held by the game" : "", s.clockSnaps);
+        else
+            fo::log("sync: no realm sky yet; Fable's clock %s %02d:%02d", haveClock ? "at" : "not found,", gh, gm);
+        game::weather::State w;
+        if (game::weather::read(w))
+            fo::log("sync: Fable draws rain %.2f snow %.2f; overrides rain %.2f snow %.2f (-1 = the area's own)%s%s", w.rain,
+                    w.snow, w.rainOverride, w.snowOverride, s.rainSet ? ", rain set by the mod" : "", s.snowSet ? ", snow set by the mod" : "");
+        else
+            fo::log("sync: Fable's weather renderer not found");
         return;
     }
     case VK_F8: {

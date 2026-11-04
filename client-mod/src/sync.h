@@ -19,5 +19,9 @@ void dev_key(int vk);
 /** Asks the server for `count` monsters ahead of the hero (`def` empty = the server picks).
  *  Staff accounts only; the answer shows on the Mod settings screen and in the log. */
 void dev_spawn(const char* def, int count);
+/** Staff accounts only: moves the realm's clock forward to `hour` (0..24) for every player. */
+void dev_time(float hour);
+/** Staff accounts only: `weather` ("rain", "storm", ...) on every outdoor region for 30 minutes; "auto" ends it. */
+void dev_weather(const char* weather);
 
 }  // namespace fo::sync
