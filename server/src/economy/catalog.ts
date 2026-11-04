@@ -36,20 +36,32 @@ export const SELL_BACK = 0.25;
 export const UNSHOPPABLE = new Set(['OBJECT_RESURRECTION_PHIAL']);
 
 /**
- * Turn the extracted item table into catalog entries. Fable's base value is the shop
- * price; vendors buy back at SELL_BACK. Resurrection Phials and staff gear are never sold.
+ * Armour classes no vendor sells. Plate comes from drops and the Arena only; vendors still
+ * buy it back. (Platinum is staff gear and is closed separately.)
  */
-export function catalogFromGameData(items: Record<string, { value: number; weapon?: unknown; coverage?: number; armour?: string }>, staffArmour: string): ItemDef[] {
+export const NOT_SOLD_ARMOUR: ReadonlySet<string> = new Set(['ARMOUR_HERO_PLATE_ARMOUR']);
+
+/**
+ * Turn the extracted item table into catalog entries. Fable's base value is the shop
+ * price; vendors buy back at SELL_BACK. Resurrection Phials and staff gear are never sold
+ * or bought; plate armour (NOT_SOLD_ARMOUR) is never sold but can be sold back.
+ */
+export function catalogFromGameData(
+  items: Record<string, { value: number; weapon?: unknown; coverage?: number; armour?: string }>,
+  staffArmour: string,
+  notSoldArmour: ReadonlySet<string> = NOT_SOLD_ARMOUR,
+): ItemDef[] {
   const out: ItemDef[] = [];
   for (const [id, it] of Object.entries(items)) {
     const staffOnly = it.armour === staffArmour;
     const gear = !!it.weapon || it.coverage !== undefined;
     const value = Math.max(0, Math.round(it.value));
     const closed = staffOnly || UNSHOPPABLE.has(id) || value === 0;
+    const notSold = closed || (it.armour !== undefined && notSoldArmour.has(it.armour));
     out.push({
       id,
       maxStack: gear ? 1 : /POTION|FOOD|APPLE|BEER|MEAT|FISH|ARROW/.test(id) ? 20 : 1,
-      buy: closed ? null : value,
+      buy: notSold ? null : value,
       sell: closed ? null : Math.floor(value * SELL_BACK),
       tradeable: !staffOnly && !UNSHOPPABLE.has(id),
       ...(staffOnly ? { staffOnly } : {}),
