@@ -69,6 +69,44 @@ test('unknown items, non-weapons, wrong slots and staff gear are refused even wh
   assert.deepEqual(g.report(99, { melee: 'OBJECT_STAFF_TEST_SWORD', ranged: '' }).accepted, ['OBJECT_STAFF_TEST_SWORD'], 'staff may');
 });
 
+test('worn clothing: checked like weapons, replaces the ledger clothing once reported', () => {
+  const { g, owned } = gear();
+  let r = g.report(1, { melee: '', ranged: '', armour: ['OBJECT_HERO_SHIRT_CHAINMAIL', 'OBJECT_IRON_LONGSWORD', 'OBJECT_NOT_IN_DATA'] });
+  assert.deepEqual(r.refused, [
+    { def: 'OBJECT_HERO_SHIRT_CHAINMAIL', reason: 'not_owned' },
+    { def: 'OBJECT_IRON_LONGSWORD', reason: 'not_armour' },
+    { def: 'OBJECT_NOT_IN_DATA', reason: 'unknown_item' },
+  ]);
+  // Reported but nothing accepted: the ledger's clothing no longer counts, its weapons do.
+  assert.equal(r.changed, true);
+  assert.deepEqual(g.loadout(1, ['OBJECT_IRON_WARHAMMER', 'OBJECT_HERO_HELMET_PLATINUM']), ['OBJECT_IRON_WARHAMMER']);
+  owned.add('OBJECT_HERO_SHIRT_CHAINMAIL');
+  r = g.report(1, { melee: '', ranged: '', armour: ['OBJECT_HERO_SHIRT_CHAINMAIL', 'OBJECT_HERO_SHIRT_CHAINMAIL'] });
+  assert.deepEqual(r.accepted, ['OBJECT_HERO_SHIRT_CHAINMAIL']);
+  assert.deepEqual(g.loadout(1, ['OBJECT_HERO_SHIRT_CHAINMAIL']), ['OBJECT_HERO_SHIRT_CHAINMAIL'], 'no repeats');
+  // A report without a clothing list (unreadable) leaves the ledger's clothing in place.
+  g.report(2, { melee: '', ranged: '' });
+  assert.deepEqual(g.loadout(2, ['OBJECT_HERO_SHIRT_CHAINMAIL']), ['OBJECT_HERO_SHIRT_CHAINMAIL']);
+  // Platinum is staff gear, trusted realm or not.
+  const trusted = gear({ trust: true, staffOnly: (d) => d === 'OBJECT_HERO_HELMET_PLATINUM' }).g;
+  assert.deepEqual(trusted.report(1, { melee: '', ranged: '', armour: ['OBJECT_HERO_HELMET_PLATINUM'] }).refused, [
+    { def: 'OBJECT_HERO_HELMET_PLATINUM', reason: 'staff_only' },
+  ]);
+  assert.deepEqual(trusted.report(99, { melee: '', ranged: '', armour: ['OBJECT_HERO_HELMET_PLATINUM'] }).accepted, ['OBJECT_HERO_HELMET_PLATINUM']);
+});
+
+test('gear frame armour list is checked', () => {
+  assert.deepEqual(decode('{"t":"gear","melee":"","armour":["OBJECT_HERO_SHIRT_CHAINMAIL"]}'), {
+    t: 'gear',
+    melee: '',
+    ranged: '',
+    armour: ['OBJECT_HERO_SHIRT_CHAINMAIL'],
+  });
+  assert.deepEqual(decode('{"t":"gear","armour":[]}'), { t: 'gear', melee: '', ranged: '', armour: [] });
+  for (const bad of ['{"t":"gear","armour":"X"}', '{"t":"gear","armour":[""]}', `{"t":"gear","armour":[${Array(13).fill('"A"').join(',')}]}`])
+    assert.throws(() => decode(bad), ProtocolError);
+});
+
 test('refreshLoadout swaps the weapon in and keeps health', () => {
   const app = testApp();
   const { hero } = makeHero(app);
@@ -166,6 +204,58 @@ async function swingDamage(trustClientGear: boolean, mint: boolean) {
     server.close();
   }
 }
+
+async function armouredDamage() {
+  const app = testApp({ tickRate: 30, clientMovement: 'trusted', interestRadius: 80, pvpEverywhere: true, trustClientGear: true });
+  const server = await listen(app, 0);
+  const port = (server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
+  app.director.start();
+  try {
+    const one = await joinAs(app, base, 'Mobdon');
+    const two = await joinAs(app, base, 'Walker');
+    const a = connect(`ws://127.0.0.1:${port}/play`);
+    const b = connect(`ws://127.0.0.1:${port}/play`);
+    await Promise.all([a.open, b.open]);
+    a.ws.send(JSON.stringify({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: one.ticket }));
+    b.ws.send(JSON.stringify({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: two.ticket }));
+    await until(() => (a.inbox.some((m) => m.t === 'welcome') && b.inbox.some((m) => m.t === 'welcome') ? true : undefined));
+    a.ws.send(JSON.stringify({ t: 'hero_pos', x: 100, y: 100, z: 0, yaw: -Math.PI / 2, area: 0 }));
+    b.ws.send(JSON.stringify({ t: 'hero_pos', x: 101, y: 100, z: 0, yaw: Math.PI / 2, area: 0 }));
+    a.ws.send(JSON.stringify({ t: 'gear', melee: 'OBJECT_IRON_WARHAMMER', ranged: '' }));
+    await until(() => a.inbox.find((m) => m.t === 'gear_result'));
+    const health = () => {
+      for (let i = a.inbox.length - 1; i >= 0; i--) if (a.inbox[i].t === 'tick') return a.inbox[i].entities.find((e: any) => e.id === two.hero.id)?.health;
+      return undefined;
+    };
+    let seq = 1;
+    const swing = async () => {
+      const before = await until(() => health());
+      a.ws.send(JSON.stringify({ t: 'input', seq: seq++, buttons: 1, camera_yaw: -Math.PI / 2 }));
+      await wait(100);
+      a.ws.send(JSON.stringify({ t: 'input', seq: seq++, buttons: 0, camera_yaw: -Math.PI / 2 }));
+      await wait(1200);
+      return before - (await until(() => health()));
+    };
+    await wait(200);
+    const bare = await swing();
+    b.ws.send(JSON.stringify({ t: 'gear', melee: '', ranged: '', armour: ['OBJECT_HERO_SHIRT_CHAINMAIL'] }));
+    const result = await until(() => b.inbox.find((m) => m.t === 'gear_result'));
+    const armoured = await swing();
+    a.ws.close();
+    b.ws.close();
+    return { bare, armoured, result };
+  } finally {
+    app.director.stop();
+    server.close();
+  }
+}
+
+test('over the socket: clothing worn in Fable protects the hero', async () => {
+  const r = await armouredDamage();
+  assert.deepEqual(r.result.accepted, ['OBJECT_HERO_SHIRT_CHAINMAIL']);
+  assert.ok(r.bare > 0 && r.armoured > 0 && r.armoured < r.bare, `unarmoured took ${r.bare}, in chainmail ${r.armoured}`);
+});
 
 test('over the socket: a trusted realm fights with the weapon the mod reports', async () => {
   const r = await swingDamage(true, false);

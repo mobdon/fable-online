@@ -449,7 +449,7 @@ void report_combat(uint32_t nowMs) {
 }
 
 /**
- * Tells the server which weapons the hero has equipped in Fable (twice a second, sent on a
+ * Tells the server which weapons and clothing the hero has equipped in Fable (twice a second, sent on a
  * change), so its combat hits with the hero's own sword. The server decides whether to accept it.
  */
 void report_gear(uint32_t nowMs) {
@@ -459,12 +459,21 @@ void report_gear(uint32_t nowMs) {
     uintptr_t hero = game::local_hero();
     game::HeroGear g;
     if (!hero || !game::read_gear(hero, g)) return;
-    if (!s.gearLogged || g.melee != s.lastGear.melee || g.ranged != s.lastGear.ranged) {
-        fo::log("sync: Fable has the hero holding melee '%s', ranged '%s'", g.melee.c_str(), g.ranged.c_str());
+    std::string worn;
+    for (const std::string& a : g.armour) worn += (worn.empty() ? "" : ", ") + a;
+    if (!s.gearLogged || g.melee != s.lastGear.melee || g.ranged != s.lastGear.ranged || g.armour != s.lastGear.armour ||
+        g.armourKnown != s.lastGear.armourKnown) {
+        fo::log("sync: Fable has the hero holding melee '%s', ranged '%s', wearing %s", g.melee.c_str(), g.ranged.c_str(),
+                g.armourKnown ? (worn.empty() ? "nothing" : worn.c_str()) : "(clothing not readable)");
         s.gearLogged = true;
         s.lastGear = g;
     }
-    const std::string frame = s.gear.update(g.melee, g.ranged, nowMs);
+    world::GearSeen seen;
+    seen.melee = g.melee;
+    seen.ranged = g.ranged;
+    seen.armour = g.armour;
+    seen.armourKnown = g.armourKnown;
+    const std::string frame = s.gear.update(seen, nowMs);
     if (!frame.empty()) net::world_send(frame);
 }
 

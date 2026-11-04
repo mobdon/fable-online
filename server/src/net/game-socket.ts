@@ -346,12 +346,12 @@ export class GameSocket {
   }
 
   /**
-   * The mod read the hero's equipped weapons from Fable. The server takes the ones it accepts
+   * The mod read the hero's equipped weapons and clothing from Fable. The server takes the ones it accepts
    * (src/combat/client-gear.ts) and has the hero fight with them from now on.
    */
   private gear(heroId: number, msg: Extract<ClientMessage, { t: 'gear' }>): void {
     const { app } = this;
-    const r = app.clientGear.report(heroId, { melee: msg.melee, ranged: msg.ranged });
+    const r = app.clientGear.report(heroId, { melee: msg.melee, ranged: msg.ranged, armour: msg.armour });
     if (r.changed) app.director.channelOf(heroId)?.sim.refreshLoadout?.(heroId);
     if (r.changed || r.refused.length)
       app.events.emit({ type: 'client_gear', heroId, accepted: r.accepted, refused: r.refused, trusted: app.cfg.trustClientGear });
