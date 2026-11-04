@@ -13,6 +13,8 @@ const char* aim_status();
 const char* assist_status();
 // Reads the mouse's motion since the last call, from Fable's own mouse device. Render thread.
 void poll_mouse();
+// True while the mouse-look camera has updated in the last 300 ms (playing, not in a menu).
+bool in_game();
 // Camera (mouse-look) updates since the last call.
 unsigned take_updates();
 // Mouse reads (CMouseDX updates) since the last call.

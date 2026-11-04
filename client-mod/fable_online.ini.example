@@ -69,6 +69,9 @@ camera_assist=0
 ; 1 = turn the view with the mouse on every frame (experimental). Fable moves its camera only 15 times a
 ; second and blends the frames between, so without this the view trails the mouse.
 camera_latch=0
+; Over-the-shoulder camera: how far to move the view sideways (metres), so the crosshair
+; isn't on the hero. Negative = over the left shoulder, positive = the right. 0 = Fable's own.
+camera_shoulder=0
 ; 1 = melee, spells and target lock pick the enemy you're looking at (the centre of the
 ; view) instead of the one in front of the hero. Experimental.
 aim_at_crosshair=0
@@ -76,3 +79,6 @@ aim_at_crosshair=0
 ; x2.4 at 4K); off = Fable's own size; or a factor such as 1.4. Experimental: menus
 ; aren't stretched to fill the screen yet.
 hud_scale=off
+; In game, draw the HUD along the bottom edge at this scale instead (for example 1.6 with
+; hud_scale=1.8 keeps the top HUD bigger). 0 = same as the rest.
+hud_bottom_scale=0

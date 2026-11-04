@@ -24,8 +24,10 @@ struct ScreenSizeSite {
     // Renderer code that turns layout pixels into clip space, so it needs the same virtual
     // size as the layout (return addresses of its GetScreenSize calls):
     // CEnginePrimitiveManager2DSprites (two), CEnginePrimitiveManagerText,
-    // CEngineInternalPrimitive2DViewport.
-    uint32_t layout_callers[4] = {0x00BB047F, 0x00BB128B, 0x00BC6E5E, 0x00BE1C99};
+    // CEngineInternalPrimitive2DViewport, and CEnginePrimitiveRenderer2D's camera
+    // (0x00B4A700: its rectangle maps layout pixels for sprites drawn through the camera,
+    // such as the loading and save screen picture).
+    uint32_t layout_callers[5] = {0x00BB047F, 0x00BB128B, 0x00BC6E5E, 0x00BE1C99, 0x00B4A886};
 };
 
 extern const uint8_t kScreenSizeBytes[12];

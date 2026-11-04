@@ -8,6 +8,7 @@
 #include "../log.h"
 #include "../overlay/patch.h"
 #include "hud_patch.h"
+#include "mouse_look.h"
 
 namespace fo::display::hud {
 namespace {
@@ -127,6 +128,53 @@ UINT vertex_count(D3DPRIMITIVETYPE t, UINT prims) {
     }
 }
 
+// In game, the HUD along the bottom edge can be drawn smaller than the rest
+// ([display] hud_bottom_scale): draws that sit wholly in the bottom part of the screen are
+// shrunk toward the nearest bottom corner (or the bottom centre), so their layout keeps its
+// anchors. Returns the factor, or 1 for none.
+float bottom_factor() {
+    const float b = config().hud_bottom_scale;
+    if (b <= 0 || !active() || !mouse_look::in_game()) return 1.0f;
+    const float f = b / g_scale.load();
+    return f > 0.25f && f < 1.0f ? f : 1.0f;
+}
+
+// Anchor x for a draw centred at cx on a screen [lo, hi]: the side it sits in.
+float anchor_x(float cx, float lo, float hi) {
+    const float third = (hi - lo) / 3.0f;
+    return cx < lo + third ? lo : cx > hi - third ? hi : (lo + hi) / 2.0f;
+}
+
+// HUD sprites (CEnginePrimitiveManager2DSprites, DrawIndexedPrimitiveUP returning to
+// 0x00A0AF2C) come with clip-space positions (float3 at the start of each vertex).
+constexpr uintptr_t kSpriteDraw = 0x00A0AF2C;
+const void* bottom_sprites(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
+    if (!data || !count || stride < 12 || count > 4096) return nullptr;
+    const float f = bottom_factor();
+    if (f >= 1.0f) return nullptr;
+    const uint8_t* src = static_cast<const uint8_t*>(data) + static_cast<size_t>(first) * stride;
+    float x0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    for (UINT i = 0; i < count; ++i) {
+        const float* p = reinterpret_cast<const float*>(src + static_cast<size_t>(i) * stride);
+        if (!(p[0] > -1.5f && p[0] < 1.5f && p[1] > -1.6f && p[1] < 1.5f)) return nullptr;
+        if (p[0] < x0) x0 = p[0];
+        if (p[0] > x1) x1 = p[0];
+        if (p[1] > y1) y1 = p[1];
+    }
+    if (y1 > -0.3f || !drawing_to_screen(d)) return nullptr;   // not wholly in the bottom part
+    const float ax = anchor_x((x0 + x1) / 2, -1.0f, 1.0f), ay = -1.0f;
+    static thread_local std::vector<uint8_t> buf;
+    const size_t bytes = static_cast<size_t>(first + count) * stride;
+    if (buf.size() < bytes) buf.resize(bytes);
+    std::memcpy(buf.data() + static_cast<size_t>(first) * stride, src, static_cast<size_t>(count) * stride);
+    for (UINT i = 0; i < count; ++i) {
+        float* p = reinterpret_cast<float*>(buf.data() + static_cast<size_t>(first + i) * stride);
+        p[0] = ax + (p[0] - ax) * f;
+        p[1] = ay + (p[1] - ay) * f;
+    }
+    return buf.data();
+}
+
 // Returns scaled copies of `count` vertices from `first`, or nullptr to draw them as they are.
 const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
     if (!data || !count || stride < 16 || count > 65536 || !active()) return nullptr;
@@ -144,8 +192,25 @@ const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT c
     if (buf.size() < bytes) buf.resize(bytes);
     std::memcpy(buf.data() + static_cast<size_t>(first) * stride, src, static_cast<size_t>(count) * stride);
     const float s = g_scale.load();
+    // Bottom-edge HUD text drawn smaller with the bottom HUD (see bottom_factor).
+    float f = bottom_factor(), ax = 0, ay = static_cast<float>(g_vh);
+    if (f < 1.0f) {
+        float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f;
+        for (UINT i = 0; i < count; ++i) {
+            const float* p = reinterpret_cast<const float*>(buf.data() + static_cast<size_t>(first + i) * stride);
+            if (p[0] < x0) x0 = p[0];
+            if (p[0] > x1) x1 = p[0];
+            if (p[1] < y0) y0 = p[1];
+        }
+        if (y0 < 0.65f * static_cast<float>(g_vh)) f = 1.0f;
+        else ax = anchor_x((x0 + x1) / 2, 0.0f, static_cast<float>(g_vw));
+    }
     for (UINT i = 0; i < count; ++i) {
         float* p = reinterpret_cast<float*>(buf.data() + static_cast<size_t>(first + i) * stride);
+        if (f < 1.0f) {
+            p[0] = ax + (p[0] - ax) * f;
+            p[1] = ay + (p[1] - ay) * f;
+        }
         // Keep Fable's half-pixel offset: (x + 0.5) * s - 0.5.
         p[0] = (p[0] + 0.5f) * s - 0.5f;
         p[1] = (p[1] + 0.5f) * s - 0.5f;
@@ -162,9 +227,14 @@ HRESULT WINAPI hk_DrawPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT 
 
 HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT min_index, UINT verts, UINT prims,
                                          const void* idx, D3DFORMAT fmt, const void* data, UINT stride) {
-    if (from_fable(__builtin_return_address(0)))
+    void* ret = __builtin_return_address(0);
+    if (reinterpret_cast<uintptr_t>(ret) == kSpriteDraw) {
+        if (const void* v = bottom_sprites(d, data, min_index, verts, stride))
+            return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
+    } else if (from_fable(ret)) {
         if (const void* v = scaled_rhw(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
+    }
     return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, data, stride);
 }
 

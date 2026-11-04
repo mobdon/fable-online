@@ -60,6 +60,8 @@ std::atomic<bool> g_chain_logged{false};
 constexpr uint32_t kMouseDxVtable = 0x0129EA14, kMouseDxUpdate = 0x00AB58E0;
 std::atomic<unsigned> g_mouse_reads{0};
 Update_t o_mouse = nullptr;
+std::atomic<DWORD> g_last_update_ms{0};
+
 // Per-frame mouse motion, read with GetDeviceState on CMouseDX's DirectInput device
 // ([+0x341C]). Fable reads that device's buffered data, which is separate from the
 // immediate state, so this does not take anything from the game.
@@ -107,6 +109,7 @@ void __fastcall hk_update(void* self, void*) {
     const float yaw0 = *reinterpret_cast<const float*>(b + 0xCC), pitch0 = *reinterpret_cast<const float*>(b + 0xD0);
     const float in_x = *reinterpret_cast<const float*>(b + 0x90), in_y = *reinterpret_cast<const float*>(b + 0x94);
     o_update(self);
+    g_last_update_ms = GetTickCount();
     camera_latch::on_update(wrap_turn(*reinterpret_cast<const float*>(b + 0xCC) - yaw0), reinterpret_cast<const float*>(b + 0x10));
     CamStats& c = g_cam;
     ++c.updates;
@@ -232,6 +235,11 @@ void install() {
 
 const char* status() { return g_status; }
 const char* assist_status() { return g_assist_status; }
+
+bool in_game() {
+    const DWORD t = g_last_update_ms.load();
+    return t && GetTickCount() - t < 300;
+}
 
 void poll_mouse() {
     void* self = g_mouse_dx;
