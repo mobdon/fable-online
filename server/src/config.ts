@@ -110,6 +110,12 @@ export interface ServerConfig {
    * For test realms only (FO_PVP_ALL=1); off, PvP follows heroes.pvp_unlocked.
    */
   pvpEverywhere: boolean;
+  /**
+   * Fight with any known weapon the mod says the hero has equipped in Fable, owned in the
+   * ledger or not (FO_TRUST_CLIENT_GEAR=1). For test realms while Fable's inventory is not
+   * synced: off, only weapons the hero's ledger holds count (src/combat/client-gear.ts).
+   */
+  trustClientGear: boolean;
   /** Test servers: every Cullis Gate counts as found, so heroes from older saves can travel. */
   gatesOpen: boolean;
   /** Gold a known quest may pay when content/quest-rewards.json has no entry for it. */
@@ -202,6 +208,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     questsPath: str('FO_QUESTS', '../shared/defs/quests.json'),
     combat: str('FO_COMBAT', '1') !== '0',
     pvpEverywhere: flag('FO_PVP_ALL', false),
+    trustClientGear: flag('FO_TRUST_CLIENT_GEAR', false),
     gatesOpen: flag('FO_GATES_OPEN', false),
     questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),

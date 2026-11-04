@@ -2,9 +2,9 @@ set(FO_MOD_SOURCES
   src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp src/crash.cpp
   src/sync.cpp src/crash_exit.cpp
   src/game/hero.cpp
-  src/game/hook.cpp src/game/puppet.cpp src/game/spirits.cpp src/game/shop_stock.cpp src/game/shop_stock_hook.cpp src/util/inflate.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
+  src/game/hook.cpp src/game/puppet.cpp src/game/spirits.cpp src/game/shop_stock.cpp src/game/shop_stock_hook.cpp src/util/inflate.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp src/game/gear.cpp
   src/net/chat_client.cpp src/net/world_client.cpp
-  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/held.cpp src/world/spawn_filter.cpp
+  src/world/entities.cpp src/world/objects.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/held.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp
   src/overlay/overlay.cpp src/overlay/patch.cpp src/overlay/renderer.cpp
   src/ui/chat_model.cpp src/ui/json.cpp src/ui/nametags.cpp src/ui/trade_model.cpp src/ui/party_model.cpp
   src/menu/menu.cpp src/menu/menu_model.cpp
@@ -24,7 +24,7 @@ add_custom_command(TARGET fable_online POST_BUILD
 
 # The parts with no Windows or game dependencies are tested on their own; see tests/run.sh.
 if(FO_BUILD_TESTS)
-  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/spawn_filter.cpp)
+  add_executable(world_tests tests/world_test.cpp src/world/entities.cpp src/world/snapshot.cpp src/world/reporter.cpp src/world/health.cpp src/world/spawn_filter.cpp src/world/gear_report.cpp)
   target_include_directories(world_tests PRIVATE src)
   add_executable(objects_tests tests/objects_test.cpp src/world/objects.cpp)
   add_executable(shop_stock_tests tests/shop_stock_test.cpp src/game/shop_stock.cpp src/util/inflate.cpp)

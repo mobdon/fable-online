@@ -43,6 +43,11 @@ export type ClientMessage =
    */
   | { t: 'heal'; share: number; key: string }
   /**
+   * The weapons equipped in the client's Fable (def names, '' for an empty slot). A claim:
+   * the server only fights with ones it accepts (src/combat/client-gear.ts).
+   */
+  | { t: 'gear'; melee: string; ranged: string }
+  /**
    * Staff only (gm or admin account): spawn `count` hostile creatures next to the hero, in
    * the hero's own channel, run by the server like any other monster. `def` empty = random
    * from the defs the server already spawns. They don't respawn.
@@ -190,6 +195,14 @@ export function decode(raw: string): ClientMessage {
     case 'heal':
       if (!isNum(m.share) || m.share <= 0 || m.share > 2) throw new ProtocolError('bad heal');
       return { t: 'heal', share: m.share, key: clientKey(m.key) };
+    case 'gear': {
+      const slot = (v: unknown) => {
+        if (v === undefined || v === null || v === '') return '';
+        if (typeof v !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(v)) throw new ProtocolError('bad gear');
+        return v;
+      };
+      return { t: 'gear', melee: slot(m.melee), ranged: slot(m.ranged) };
+    }
     case 'shop_buy': {
       if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');
       const qty = isNum(m.qty) ? m.qty : 1;

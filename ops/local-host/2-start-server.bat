@@ -28,6 +28,8 @@ if not exist ..\shared\defs\nav-regions if exist "%FABLE%\Fable.exe" node ..\too
 if exist ..\shared\defs\nav-regions set "FO_NAV_DIR=..\shared\defs\nav-regions"
 rem Test realm: every hero can fight every other hero (no Guild mission needed).
 set FO_PVP_ALL=1
+rem Test realm: heroes fight with the weapon equipped in their own Fable, owned on the server or not.
+set FO_TRUST_CLIENT_GEAR=1
 echo Players connect to %FO_PUBLIC_HOST% port 7777 (Realm chat on 7781). Press Ctrl+C to stop (heroes are saved).
 call npm run dev
 pause

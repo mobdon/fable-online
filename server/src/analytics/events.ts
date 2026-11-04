@@ -63,7 +63,9 @@ export type GameEvent =
   | { type: 'shop_buy'; heroId: number; shopId: string; defId: string; quantity: number; price: number; replayed: boolean }
   | { type: 'shop_sell'; heroId: number; shopId: string; itemId: string; gold: number; replayed: boolean }
   /** The local game healed a hero: what the server matched it to and spent, or why it refused. */
-  | { type: 'heal'; heroId: number; ok: boolean; share: number; source?: 'spell' | 'item'; def?: string; healed?: number; reason?: string };
+  | { type: 'heal'; heroId: number; ok: boolean; share: number; source?: 'spell' | 'item'; def?: string; healed?: number; reason?: string }
+  /** The mod reported the hero's equipped weapons: what the server fights with now, and what it refused. */
+  | { type: 'client_gear'; heroId: number; accepted: string[]; refused: { def: string; reason: string }[]; trusted: boolean };
 
 export interface EventSink {
   emit(e: GameEvent): void;

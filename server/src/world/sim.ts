@@ -78,6 +78,11 @@ export interface RegionSim {
    */
   devSpawn?(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string };
   addHero(heroId: number, at: Vec3): void;
+  /**
+   * The hero's gear changed (a weapon reported by the mod, say): read the loadout again and
+   * fight with it from now on. Health stays as it is. Sims without combat leave this out.
+   */
+  refreshLoadout?(heroId: number): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;
   /**

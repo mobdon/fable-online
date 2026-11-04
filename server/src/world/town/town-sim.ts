@@ -118,6 +118,10 @@ export class TownSim implements RegionSim {
     return this.inner.healing;
   }
 
+  refreshLoadout(heroId: number): void {
+    this.inner.refreshLoadout?.(heroId);
+  }
+
   combatState(heroId: number) {
     return this.inner.combatState?.(heroId);
   }
