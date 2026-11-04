@@ -23,6 +23,32 @@ std::string format_renown(double r) {
     return o + " renown";
 }
 
+bool view_from_camera(const float pos[3], const float fwd[3], const float up[3], const float* ref, float m[16]) {
+    auto norm = [](float v[3]) {
+        float l = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+        if (!(l > 1e-6f) || !std::isfinite(l)) return false;
+        v[0] /= l; v[1] /= l; v[2] /= l;
+        return true;
+    };
+    float z[3] = {fwd[0], fwd[1], fwd[2]};
+    if (!norm(z)) return false;
+    float x[3] = {up[1] * z[2] - up[2] * z[1], up[2] * z[0] - up[0] * z[2], up[0] * z[1] - up[1] * z[0]};
+    if (!norm(x)) return false;
+    float y[3] = {z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]};
+    // Point each axis the way the game's own view matrix does (its columns): that takes its
+    // handedness and any mirroring, whatever convention the engine uses.
+    float* axes[3] = {x, y, z};
+    if (ref)
+        for (int c = 0; c < 3; ++c) {
+            const float d = ref[c] * axes[c][0] + ref[4 + c] * axes[c][1] + ref[8 + c] * axes[c][2];
+            if (d < 0) for (int k = 0; k < 3; ++k) axes[c][k] = -axes[c][k];
+        }
+    auto dot = [](const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    const float r[16] = {x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, pos), -dot(y, pos), -dot(z, pos), 1};
+    for (int i = 0; i < 16; ++i) m[i] = r[i];
+    return true;
+}
+
 namespace {
 void read_tag(const json::Value& v, Tag& t) {
     t.id = static_cast<uint32_t>(v.num("id"));

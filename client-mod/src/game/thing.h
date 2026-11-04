@@ -3,6 +3,7 @@
 // (tools/re-notes/02-hero-live-state.md) and the same fields on any other creature, which
 // is how a puppet is moved without asking the engine's AI for permission.
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace fo::game {
@@ -40,7 +41,7 @@ constexpr uint32_t kStatsRenownLevel = 0x070;  // int, "RenownLevel"
 constexpr uint32_t kStatsRenownTotal = 0x07C;  // int, "RenownTotal": what the hero's stats screen counts
 
 /** The hero's total renown in Fable (CTCHeroStats RenownTotal). False when it can't be read. */
-bool read_renown(uintptr_t thing, int32_t& total);
+bool read_renown(uintptr_t thing, int32_t& total, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();

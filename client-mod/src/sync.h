@@ -25,5 +25,11 @@ void dev_spawn(const char* def, int count);
  * report, otherwise the number read from Fable itself; -1 before either is known.
  */
 int own_renown();
+/**
+ * True while the world is on screen and being played: the game thread ticked in the last
+ * 250 ms, there is a hero, and no region or area load (or its fade) is under way. Name tags
+ * are drawn only then. Any thread.
+ */
+bool world_shown();
 
 }  // namespace fo::sync

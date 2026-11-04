@@ -19,7 +19,7 @@ export type RenownResult =
  * Renown as the server keeps it. Quests (the main source of renown) run on each player's own
  * Fable, so the mod reads the hero's total renown there (CTCHeroStats RenownTotal) and
  * reports it. The report is a number a cheat can choose, so:
- *  - the first report for a hero is the one-off import of what they earned before, capped
+ *  - the first non-zero report for a hero is the one-off import of what they earned before, capped
  *    at `importMax`;
  *  - after that, a report only ever raises the server's renown, by at most `dailyMax` per
  *    UTC day across all reports;
@@ -47,6 +47,8 @@ export class Renown {
       let kind: 'import' | 'daily';
       if (h.renown_imported_at == null) {
         kind = 'import';
+        // A hero still loading reads 0: that must not use up the one import.
+        if (total === 0) return { ok: true as const, renown: h.renown, gained: 0, kind, capped: false };
         const take = Math.min(total, Math.max(0, this.rules.importMax));
         capped = take < total;
         gained = Math.max(0, take - h.renown);

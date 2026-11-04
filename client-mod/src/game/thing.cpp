@@ -2,9 +2,11 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_set>
 
 #include "../log.h"
@@ -69,24 +71,30 @@ void each_region(Fn&& fn) {
 
 }  // namespace
 
-bool read_renown(uintptr_t thing, int32_t& total) {
+bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
+    auto fail = [&](const char* w) { if (why) *why = w; return false; };
     uint8_t flags = 0;
     uint32_t range[2] = {};  // begin, end of the {type, component} pairs
-    if (!read(thing + kFlags91, &flags, 1) || (flags & 1) || !read(thing + kComponentsBegin, range, sizeof(range))) return false;
-    if (range[1] < range[0] || range[1] - range[0] > 64 * 8 || (range[1] - range[0]) % 8) return false;
-    uint32_t pairs[64 * 2];
-    const size_t n = (range[1] - range[0]) / 8;
-    if (!n || !read(range[0], pairs, n * 8)) return false;
+    if (!read(thing + kFlags91, &flags, 1) || (flags & 1)) return fail("hero being removed");
+    if (!read(thing + kComponentsBegin, range, sizeof(range))) return fail("component list unreadable");
+    if (range[1] <= range[0] || (range[1] - range[0]) % 8) return fail("component list empty or odd");
+    // Sorted by type, and the stats component is type 4: it is among the first few pairs.
+    constexpr size_t kMaxPairs = 32;
+    uint32_t pairs[kMaxPairs * 2];
+    const size_t n = std::min<size_t>((range[1] - range[0]) / 8, kMaxPairs);
+    if (!read(range[0], pairs, n * 8)) return fail("component pairs unreadable");
     for (size_t i = 0; i < n; ++i) {
+        if (pairs[i * 2] > kHeroStatsType) break;
         if (pairs[i * 2] != kHeroStatsType) continue;
         uint32_t comp = pairs[i * 2 + 1], vt = 0;
         int32_t v = 0;
-        if (!read(comp, &vt, 4) || vt != kHeroStatsVtable || !read(comp + kStatsRenownTotal, &v, 4)) return false;
-        if (v < 0 || v > 10000000) return false;
+        if (!read(comp, &vt, 4)) return fail("stats component unreadable");
+        if (vt != kHeroStatsVtable) return fail("type 4 is not CTCHeroStats");
+        if (!read(comp + kStatsRenownTotal, &v, 4) || v < 0 || v > 10000000) return fail("renown out of range");
         total = v;
         return true;
     }
-    return false;
+    return fail("no stats component");
 }
 
 bool read_health(uintptr_t thing, float& health, float& maxHealth) {

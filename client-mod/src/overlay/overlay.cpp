@@ -10,6 +10,7 @@
 #include <string>
 #include "../assets/fable_ui.h"
 #include "../config.h"
+#include "../display/camera_latch.h"
 #include "../display/frame_probe.h"
 #include "../display/hud_scale.h"
 #include "../display/mouse_look.h"
@@ -241,13 +242,33 @@ void draw_party_list() {
     }
 }
 
+bool g_logged_frame_camera = false;
 constexpr uint32_t kTagGold = 0xFFFFD84A;      // own tag: Fable's pewter bar tinted gold
 constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
 
 void draw_tags(const Config& cfg) {
     if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
+    // Not over loading screens, teleports and their fades.
+    if (!sync::world_shown()) return;
     float vp[16];
     mul(g_view, g_proj, vp);
+    // Place tags with the camera the engine drew this frame with (after camera smoothing and
+    // the shoulder offset). The view matrix seen through SetTransform is Fable's own camera
+    // from its last 15-a-second update, without those, so tags placed with it stepped and sat
+    // off the hero.
+    float cpos[3], cfwd[3], cup[3], cview[16];
+    const float* gv = &g_view._11;
+    if (display::camera_latch::frame_camera(cpos, cfwd, cup, 0.25) &&
+        ui::view_from_camera(cpos, cfwd, cup, gv, cview)) {
+        D3DMATRIX v;
+        std::memcpy(&v, cview, sizeof cview);
+        mul(v, g_proj, vp);
+        if (!g_logged_frame_camera) {
+            g_logged_frame_camera = true;
+            fo::log("tags: placed with the engine's frame camera; SetTransform view row 4 %.1f %.1f %.1f, frame camera %.1f %.1f %.1f",
+                    gv[12], gv[13], gv[14], cview[12], cview[13], cview[14]);
+        }
+    }
     ui::TagSettings s;
     s.head_height = cfg.tag_height;
     s.up_axis = cfg.up_axis;
