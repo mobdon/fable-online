@@ -8,7 +8,6 @@ if (!audit.ok) {
   process.exit(1);
 }
 app.director.start();
-const tradeSweep = setInterval(() => app.trades.sweep(), 30_000);
 const server = await listen(app);
 console.log(
   `Fable Online server "${app.cfg.realmId}" on :${app.cfg.port}  ` +
@@ -21,7 +20,6 @@ const shutdown = () => {
   if (stopping) return;
   stopping = true;
   console.log('Shutting down: saving every hero...');
-  clearInterval(tradeSweep);
   server.close();
   app.close();
   process.exit(0);

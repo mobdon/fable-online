@@ -98,7 +98,7 @@ export class Law {
     economy.policies.push({
       item: (itemId, use) =>
         this.isMarked(itemId) ? new GameError('stolen', use === 'sell' ? 'Traders will not buy stolen goods' : 'Stolen goods cannot be traded') : null,
-      service: (heroId) => this.serviceBlock(heroId, 'shop'),
+      service: (heroId, service) => this.serviceBlock(heroId, service),
     });
   }
 
@@ -413,8 +413,8 @@ export class Law {
     return s ? { region: this.cellFor(s), private: s.prison === 'jail' } : undefined;
   }
 
-  /** Shops, Cullis Gates and property actions are refused while wanted or in prison. */
-  serviceBlock(heroId: number, service: 'shop' | 'cullis_gate' | 'property'): GameError | null {
+  /** Shops, trading, Cullis Gates and property actions are refused while wanted or in prison. */
+  serviceBlock(heroId: number, service: 'shop' | 'trade' | 'cullis_gate' | 'property'): GameError | null {
     if (this.openSentence(heroId)) return new GameError('in_prison', 'You are serving a sentence', 403);
     if (this.wantedLevel(heroId) >= this.rules.servicesBlockedAt) return new GameError('wanted', `You are wanted (${service} refused)`, 403);
     return null;

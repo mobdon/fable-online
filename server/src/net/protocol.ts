@@ -5,8 +5,8 @@ import type { PlayerInput } from '../world/sim.js';
  * shared/protocol/messages.proto). The codec is isolated here so it can move to protobuf
  * binary frames without touching game code.
  *
- * Client -> server: hello, input, chat, interact, region_ready, ping. That is all a client
- * can say: intent, never state. Positions, health, gold and items only ever flow
+ * Client -> server: hello, input, chat, interact, region_ready, ping, plus the shop, heal, law
+ * and trade requests below. That is all a client can say: intent, never state. Positions, health, gold and items only ever flow
  * server -> client. "interact" names a thing the hero wants to use; the server decides
  * whether they can reach it and what happens.
  */
@@ -41,7 +41,20 @@ export type ClientMessage =
    * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
    */
   | { t: 'heal'; share: number; key: string }
+  | TradeRequest
   | LawRequest;
+
+/**
+ * Player trading (src/economy/trade.ts). The client names heroes and its own item IDs;
+ * the server checks reach, ownership and gold, and does the swap in the ledger.
+ */
+export type TradeRequest =
+  | { t: 'trade_request'; to: number }
+  | { t: 'trade_answer'; from: number; yes: boolean }
+  | { t: 'trade_offer'; gold: number; items: { id: string; qty?: number }[] }
+  | { t: 'trade_accept'; version: number }
+  | { t: 'trade_unaccept' }
+  | { t: 'trade_cancel' };
 
 /**
  * What the mod reports to the law: what the player tried (steal, draw a weapon, answer a
@@ -149,9 +162,39 @@ export function decode(raw: string): ClientMessage {
     case 'shop_sell':
       if (typeof m.item !== 'string' || m.item.length > 64) throw new ProtocolError('bad item');
       return { t: 'shop_sell', shop: shopUid(m.shop), item: m.item, key: clientKey(m.key) };
+    case 'trade_request':
+      return { t: 'trade_request', to: heroIdOf(m.to) };
+    case 'trade_answer':
+      return { t: 'trade_answer', from: heroIdOf(m.from), yes: m.yes === true };
+    case 'trade_offer': {
+      if (!isNum(m.gold) || !Number.isSafeInteger(m.gold) || m.gold < 0) throw new ProtocolError('bad gold');
+      if (!Array.isArray(m.items) || m.items.length > TRADE_ITEMS_MAX) throw new ProtocolError('bad items');
+      const items = m.items.map((x: unknown) => {
+        const o = (typeof x === 'string' ? { id: x } : x) as Record<string, unknown> | null;
+        if (!o || typeof o.id !== 'string' || !ITEM_ID.test(o.id)) throw new ProtocolError('bad item');
+        if (o.qty === undefined || o.qty === null) return { id: o.id };
+        if (!isNum(o.qty) || !Number.isInteger(o.qty) || o.qty < 1 || o.qty > 9999) throw new ProtocolError('bad qty');
+        return { id: o.id, qty: o.qty };
+      });
+      return { t: 'trade_offer', gold: m.gold, items };
+    }
+    case 'trade_accept':
+      if (!isNum(m.version) || !Number.isInteger(m.version) || m.version < 0) throw new ProtocolError('bad version');
+      return { t: 'trade_accept', version: m.version };
+    case 'trade_unaccept':
+      return { t: 'trade_unaccept' };
+    case 'trade_cancel':
+      return { t: 'trade_cancel' };
     default:
       throw new ProtocolError('unknown message');
   }
+}
+
+const TRADE_ITEMS_MAX = 16;
+const ITEM_ID = /^[0-9A-Za-z-]{8,64}$/;
+function heroIdOf(v: unknown): number {
+  if (!isNum(v) || !Number.isSafeInteger(v) || v < 1) throw new ProtocolError('bad hero');
+  return v;
 }
 
 const ID = /^[A-Za-z0-9_:.\-]{1,96}$/;

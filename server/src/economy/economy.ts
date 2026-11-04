@@ -58,6 +58,8 @@ export interface TradeSide {
   heroId: number;
   gold: number;
   itemIds: string[];
+  /** Part of a stack: item ID -> how many to hand over. Left out, the whole stack goes. */
+  qty?: Record<string, number>;
 }
 
 /**
@@ -68,8 +70,8 @@ export interface TradeSide {
 export interface EconomyPolicy {
   /** May this item be sold to a normal vendor ('sell') or handed to another hero ('trade')? */
   item?(itemId: string, use: 'sell' | 'trade'): GameError | null;
-  /** May this hero use a shop right now? */
-  service?(heroId: number, service: 'shop'): GameError | null;
+  /** May this hero use a shop, or trade with another hero, right now? */
+  service?(heroId: number, service: 'shop' | 'trade'): GameError | null;
 }
 
 const MINT = 'system:mint';
@@ -305,7 +307,7 @@ export class Economy {
     }
   }
 
-  private checkService(heroId: number, service: 'shop'): void {
+  private checkService(heroId: number, service: 'shop' | 'trade'): void {
     for (const p of this.policies) {
       const e = p.service?.(heroId, service);
       if (e) throw e;
@@ -315,23 +317,59 @@ export class Economy {
   // ---------------------------------------------------------------- trade
 
   /**
+   * Why this hero can't trade right now (in prison, wanted), or null. TradeSessions asks
+   * before opening a window; executeTrade asks again inside the swap.
+   */
+  tradeBlock(heroId: number): GameError | null {
+    try {
+      this.checkService(heroId, 'trade');
+      return null;
+    } catch (e) {
+      if (e instanceof GameError) return e;
+      throw e;
+    }
+  }
+
+  /**
+   * Can `heroId` hand over `qty` of this item (whole stack when left out)? Returns the
+   * item row, or throws the reason. Same checks executeTrade makes inside the swap.
+   */
+  tradeableItem(heroId: number, itemId: string, qty?: number): ItemRow {
+    const it = this.ownedItem(heroId, itemId, 'inventory');
+    const def = this.catalog.get(it.def_id);
+    if (def.staffOnly) this.events.emit({ type: 'staff_item_blocked', heroId, defId: it.def_id, action: 'trade', actor: `hero:${heroId}` });
+    if (!def.tradeable || def.staffOnly) throw new GameError('untradeable', `${it.def_id} cannot be traded`);
+    if (qty !== undefined && (!Number.isInteger(qty) || qty < 1 || qty > it.quantity)) throw new GameError('bad_quantity', 'Bad quantity');
+    this.checkItem(it.id, 'trade');
+    return it;
+  }
+
+  /**
    * Swap gold and items between two heroes in one transaction. TradeSessions decides *when*
-   * (both sides accepted the same offer); this only checks *whether* it is still valid.
+   * (both sides accepted the same offer); this checks again *whether* it is still valid:
+   * ownership, location, tradeable, stolen marks, prison or wanted, and gold. If any of it
+   * fails nothing moves. Part of a stack is split off into a new item ID for the receiver.
    */
   executeTrade(a: TradeSide, b: TradeSide, key: string): TxResult {
     if (a.heroId === b.heroId) throw new GameError('bad_trade', 'Cannot trade with yourself');
     const all = [...a.itemIds, ...b.itemIds];
     if (new Set(all).size !== all.length) throw new GameError('bad_trade', 'Duplicate item in offer');
+    for (const s of [a, b]) if (!Number.isSafeInteger(s.gold) || s.gold < 0 || s.gold > MAX_AMOUNT) throw new GameError('bad_amount', 'Bad gold amount');
     const r = this.action('trade', 'system', key, { a, b }, (tx) => {
+      for (const s of [a, b]) this.checkService(s.heroId, 'trade');
       for (const [from, to] of [[a, b], [b, a]] as const) {
         for (const id of from.itemIds) {
-          const it = this.ownedItem(from.heroId, id, 'inventory');
-          const def = this.catalog.get(it.def_id);
-          if (def.staffOnly) this.events.emit({ type: 'staff_item_blocked', heroId: from.heroId, defId: it.def_id, action: 'trade', actor: `hero:${from.heroId}` });
-          if (!def.tradeable) throw new GameError('untradeable', `${it.def_id} cannot be traded`);
-          this.checkItem(it.id, 'trade');
-          this.db.run('UPDATE items SET owner_hero = ? WHERE id = ?', to.heroId, it.id);
-          this.history(tx, it, 'transfer', from.heroId, to.heroId, it.quantity);
+          const want = from.qty?.[id];
+          const it = this.tradeableItem(from.heroId, id, want);
+          if (want !== undefined && want < it.quantity) {
+            this.db.run('UPDATE items SET quantity = quantity - ? WHERE id = ?', want, it.id);
+            this.history(tx, it, 'split', from.heroId, from.heroId, -want);
+            const newId = this.insertItem(tx, to.heroId, it.def_id, want, 'inventory', 'split');
+            this.history(tx, { ...it, id: newId, quantity: want }, 'transfer', from.heroId, to.heroId, want);
+          } else {
+            this.db.run('UPDATE items SET owner_hero = ? WHERE id = ?', to.heroId, it.id);
+            this.history(tx, it, 'transfer', from.heroId, to.heroId, it.quantity);
+          }
         }
         if (from.gold > 0) this.moveGold(tx, wallet(from.heroId), wallet(to.heroId), from.gold, 'trade');
       }

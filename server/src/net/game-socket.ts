@@ -3,7 +3,7 @@ import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 import type { PlayerLink } from '../world/channel.js';
 import { ResumeTokens } from './resume.js';
-import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage } from './protocol.js';
+import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage, type TradeRequest } from './protocol.js';
 import { SHOP_REACH } from '../economy/shops.js';
 import { claimHeal } from '../combat/healing.js';
 import { townOf } from '../world/town/town-sim.js';
@@ -28,6 +28,8 @@ export class GameSocket {
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
   private heals = new Bucket(2, 4);
+  private tradeReqs = new Bucket(4, 10);
+  private tradeInvites = new Bucket(0.2, 3);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -103,6 +105,16 @@ export class GameSocket {
       case 'heal':
         if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
         return this.heal(this.heroId, msg.share, msg.key);
+      case 'trade_request':
+        if (!this.tradeInvites.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Wait a moment before asking again' });
+        return this.trade(this.heroId, msg);
+      case 'trade_answer':
+      case 'trade_offer':
+      case 'trade_accept':
+      case 'trade_unaccept':
+      case 'trade_cancel':
+        if (!this.tradeReqs.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Slow down' });
+        return this.trade(this.heroId, msg);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
@@ -203,6 +215,35 @@ export class GameSocket {
     } catch (e) {
       if (!(e instanceof GameError)) throw e;
       this.send({ t: 'error', error: e.code, message: e.message });
+    }
+  }
+
+  /**
+   * Trade window requests. TradeSessions pushes trade_state, trade_done and the rest to both
+   * heroes itself; here only a refusal goes back to the one who asked.
+   */
+  private trade(heroId: number, m: TradeRequest): void {
+    const { trades } = this.app;
+    try {
+      switch (m.t) {
+        case 'trade_request':
+          return trades.request(heroId, m.to);
+        case 'trade_answer':
+          return trades.answer(heroId, m.from, m.yes);
+        case 'trade_offer':
+          trades.setOffer(heroId, m.gold, m.items);
+          return;
+        case 'trade_accept':
+          trades.accept(heroId, m.version);
+          return;
+        case 'trade_unaccept':
+          return trades.unaccept(heroId);
+        case 'trade_cancel':
+          return trades.cancel(heroId);
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.send({ t: 'trade_error', error: e.code, message: e.message });
     }
   }
 

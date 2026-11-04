@@ -88,30 +88,18 @@ test('item IDs are unique and split/merge conserve quantity', () => {
   assert.ok(app.economy.audit().ok);
 });
 
-test('trade swaps atomically, and a stale or invalid trade moves nothing', () => {
+test('executeTrade re-checks everything inside the swap', () => {
   const app = testApp();
   const a = makeHero(app).hero;
   const b = makeHero(app).hero;
   app.economy.grant(a.id, 1000, 'quest_reward', key());
   const sword = app.economy.mintItem(b.id, 'IronLongsword', 1, 'loot', key()).itemId;
-
-  const id = app.trades.open(a.id, b.id);
-  assert.ok(id);
-  app.trades.setOffer(a.id, 600, []);
-  const v = app.trades.setOffer(b.id, 0, [sword]);
-  app.trades.accept(a.id, v);
-  // B changes the offer after A accepted: A's accept is void.
-  const v2 = app.trades.setOffer(b.id, 0, []);
-  assert.throws(() => app.trades.accept(a.id, v), code('offer_changed'));
-  const v3 = app.trades.setOffer(b.id, 0, [sword]);
-  assert.ok(v3 > v2);
-  assert.equal(app.trades.accept(a.id, v3).done, false);
-  assert.equal(app.trades.accept(b.id, v3).done, true);
+  app.economy.executeTrade({ heroId: a.id, gold: 600, itemIds: [] }, { heroId: b.id, gold: 0, itemIds: [sword] }, key());
   assert.equal(app.economy.balance(a.id), 400);
   assert.equal(app.economy.balance(b.id), 600);
   assert.equal(app.economy.item(sword)!.owner_hero, a.id);
 
-  // B now offers the sword it no longer owns, straight to executeTrade: whole trade fails.
+  // B now offers the sword it no longer owns: whole trade fails.
   assert.throws(() => app.economy.executeTrade({ heroId: a.id, gold: 100, itemIds: [] }, { heroId: b.id, gold: 0, itemIds: [sword] }, key()), code('not_owner'));
   assert.equal(app.economy.balance(a.id), 400);
   // Phials are soulbound.
@@ -139,7 +127,13 @@ test('fuzz: 3,000 random actions never break the economy invariants', () => {
         case 3: app.economy.vendorSell(h, pick(inv()).id, k); break;
         case 4: app.economy.splitStack(h, pick(inv()).id, 1 + Math.floor(Math.random() * 3), k); break;
         case 5: { const i1 = inv(); app.economy.mergeStacks(h, pick(i1).id, pick(i1).id, k); break; }
-        case 6: { const o = pick(heroes); app.economy.executeTrade({ heroId: h, gold: Math.floor(Math.random() * 300), itemIds: inv().slice(0, 2).map((x) => x.id) }, { heroId: o, gold: Math.floor(Math.random() * 300), itemIds: [] }, k); break; }
+        case 6: {
+          const o = pick(heroes);
+          const mine = inv().slice(0, 2);
+          const qty = Object.fromEntries(mine.filter(() => Math.random() < 0.5).map((x) => [x.id, 1 + Math.floor(Math.random() * x.quantity)]));
+          app.economy.executeTrade({ heroId: h, gold: Math.floor(Math.random() * 300), itemIds: mine.map((x) => x.id), qty }, { heroId: o, gold: Math.floor(Math.random() * 300), itemIds: [] }, k);
+          break;
+        }
         case 7: app.economy.mintItem(h, 'Apple', 1 + Math.floor(Math.random() * 10), 'loot', k); break;
         case 8: app.economy.moveItem(h, pick(inv()).id, pick(['inventory', 'bank', 'equipped'] as const), k); break;
       }

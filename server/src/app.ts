@@ -142,6 +142,19 @@ export function createApp(
   );
   const objects = new WorldObjects(opts.things ?? WorldThings.load(cfg.thingsPath), director, economy, db, events);
   law.attach(lawHost(director, regions));
+  trades.attach({
+    send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
+    where: (heroId) => {
+      const ch = director.channelOf(heroId);
+      const p = ch?.sim.position(heroId);
+      return ch && p ? { channel: ch.id, x: p.x, y: p.y, z: p.z } : undefined;
+    },
+    name: (heroId) => heroes.get(heroId)?.name ?? `Hero ${heroId}`,
+  });
+  director.policies.push({
+    tick: (dt) => trades.tick(dt),
+    left: (heroId) => trades.left(heroId),
+  });
   director.policies.push({
     placement: (hero) => law.placement(hero.id),
     canEnter: (heroId, _from, to, via) => law.checkEnter(heroId, to, via),
