@@ -6,6 +6,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "../config.h"
 #include "../log.h"
 #include "../overlay/patch.h"
 
@@ -55,6 +56,8 @@ IDirect3DVertexShader9* g_vs = nullptr;
 std::vector<IDirect3DVertexShader9*> g_shaders;   // seen this capture, in order
 std::vector<IDirect3DVertexDeclaration9*> g_decls;
 bool g_key_was_down = false;
+int g_request_frames = 0;
+bool g_ready = false;
 
 int shader_id(IDirect3DVertexShader9* s) {
     if (!s) return -1;
@@ -253,7 +256,8 @@ void hook(IDirect3DDevice9* dev) {
     slot(dev, kSetTexture, hk_SetTexture, o_SetTexture);
     slot(dev, kSetPixelShader, hk_SetPixelShader, o_SetPixelShader);
     slot(dev, kSetPixelShaderConstantF, hk_SetPixelShaderConstantF, o_SetPixelShaderConstantF);
-    fo::log("probe: frame probe ready, press F10 in game to capture one frame");
+    g_ready = true;
+    fo::log("probe: frame probe ready (Mod settings > Developer > Capture one frame%s)", config().dev_hotkeys ? ", or F10" : "");
 }
 
 void on_present(IDirect3DDevice9* dev) {
@@ -264,8 +268,10 @@ void on_present(IDirect3DDevice9* dev) {
         fo::log("probe: capture done");
         return;
     }
-    bool down = (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
-    if (down && !g_key_was_down) {
+    bool down = config().dev_hotkeys && (GetAsyncKeyState(VK_F10) & 0x8000) != 0;
+    bool asked = false;
+    if (g_request_frames > 0 && --g_request_frames == 0) asked = true;
+    if ((down && !g_key_was_down) || asked) {
         g_on = true;
         g_lines = 0;
         D3DVIEWPORT9 vp = {};
@@ -275,6 +281,9 @@ void on_present(IDirect3DDevice9* dev) {
     }
     g_key_was_down = down;
 }
+
+void request_capture() { g_request_frames = 3; }   // a few frames on, once the menu is gone
+bool ready() { return g_ready; }
 
 void note(const char* what) { line("-- %s", what); }
 

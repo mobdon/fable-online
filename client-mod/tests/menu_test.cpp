@@ -18,7 +18,7 @@ static void test_layout_scales() {
     Model m;
     m.resize(1920, 1080);
     CHECK(m.scale() == 1.5f);
-    CHECK(m.buttons().size() == 5);
+    CHECK(m.buttons().size() == 6);
     const Button& first = m.buttons()[0];
     CHECK(first.label == "ENTER ALBION");
     CHECK(first.x + first.w / 2 == 960.0f);  // centred
@@ -32,7 +32,7 @@ static void test_keyboard_and_screens() {
     m.resize(1280, 720);
     CHECK(m.focus() == 0 && m.buttons()[0].lit);
     m.key(Key::Up);
-    CHECK(m.focus() == 4);                    // wraps to Leave Albion
+    CHECK(m.focus() == 5);                    // wraps to Leave Albion
     m.key(Key::Down);
     m.key(Key::Down);
     CHECK(m.focus() == 1);
@@ -45,6 +45,10 @@ static void test_keyboard_and_screens() {
     CHECK(m.key(Key::Enter) == Action::Realm);
     CHECK(!m.status().empty() && m.visible());
     m.key(Key::Down);
+    m.key(Key::Down);
+    CHECK(m.key(Key::Enter) == Action::ModSettings);
+    CHECK(m.visible());                        // the settings screen opens over the menu
+    m.key(Key::Up);
     CHECK(m.key(Key::Enter) == Action::Options);
     CHECK(!m.visible());
     CHECK(m.key(Key::Enter) == Action::None);  // hidden: ignores input

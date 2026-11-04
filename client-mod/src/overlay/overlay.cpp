@@ -16,6 +16,7 @@
 #include "../display/widescreen.h"
 #include "../log.h"
 #include "../menu/menu.h"
+#include "../modsettings/modsettings.h"
 #include "../net/chat_client.h"
 #include "../ui/chat_model.h"
 #include "../ui/json.h"
@@ -102,7 +103,7 @@ double now_s() {
 std::atomic<bool> g_trade_keys{false};   // the trade window or an invitation has the keyboard
 
 bool input_blocked() {
-    return menu::active() || g_chat_open.load() || g_trade_keys.load() || GetTickCount() < g_block_until.load();
+    return menu::active() || modsettings::input_blocked() || g_chat_open.load() || g_trade_keys.load() || GetTickCount() < g_block_until.load();
 }
 
 void flush_outbox() {  // caller holds g_mu
@@ -459,6 +460,20 @@ void draw(IDirect3DDevice9* dev) {
     g_trade.step(now);
     flush_outbox();
     draw_trade(now);
+    modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
+    modsettings::draw_pause_button(g_r);
+    modsettings::draw(g_r);
+    g_r.end();
+}
+
+// Over the start-up menu only the Mod settings screen is drawn (chat and tags wait).
+void draw_settings_only(IDirect3DDevice9* dev) {
+    if (!modsettings::is_open()) return;
+    const assets::UiArt* art = g_art.load();
+    if (!art) return;
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (!g_r.begin(dev, art, config().font_px)) return;
+    modsettings::draw(g_r);
     g_r.end();
 }
 
@@ -478,6 +493,7 @@ HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
         // The start-up menu covers the whole screen; chat and tags wait until it closes.
         if (g_no_backbuffer > 300 || targets_backbuffer(dev)) {
             menu::draw(dev);
+            draw_settings_only(dev);
             g_drawn = g_present_seen;
             g_no_backbuffer = 0;
         } else {
@@ -574,6 +590,7 @@ bool map_key(WPARAM vk, ui::Key& k) {
 LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     const Config& cfg = config();
     if (display::restyling()) return DefWindowProcW(h, msg, w, l);
+    if (modsettings::on_message(h, msg, w, l)) return 0;
     if (menu::active() && menu::on_message(h, msg, w, l)) return 0;
     if (cfg.chat_enabled && cfg.overlay_enabled) {
         static wchar_t high_surrogate = 0;
@@ -643,7 +660,10 @@ bool is_mouse(void* dev) {
 
 HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
     HRESULT hr = o_GetDeviceState(dev, size, data);
-    if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
+    if (SUCCEEDED(hr) && data && is_mouse(dev) && modsettings::is_open()) {
+        modsettings::on_mouse_state(data, size);   // the settings screen has the mouse, nothing under it
+        std::memset(data, 0, size);
+    } else if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
         menu::on_mouse_state(data, size);   // the menu reads the mouse, Fable's menu underneath doesn't
         std::memset(data, 0, size);
     }
@@ -653,7 +673,10 @@ HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
 
 HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DWORD flags) {
     HRESULT hr = o_GetDeviceData(dev, cb, rg, inout, flags);
-    if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
+    if (SUCCEEDED(hr) && inout && is_mouse(dev) && modsettings::is_open()) {
+        if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) modsettings::on_mouse_data(rg, cb, *inout);
+        *inout = 0;
+    } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
         if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) menu::on_mouse_data(rg, cb, *inout);
         *inout = 0;
     }

@@ -11,7 +11,7 @@ import type { Progress } from '../heroes/progress.js';
 import type { AiHooks, Creature, Hero } from './entities.js';
 import type { RegionDef } from './regions.js';
 import type { EntityState, PlayerInput, RegionSim, SimFactory, SimHealing, Vec3 } from './sim.js';
-import { SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
+import { HOSTILE_FACTIONS, SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
 import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
 import type { AiWorld, Creature as AiCreature } from './ai/types.js';
@@ -171,6 +171,20 @@ export class CombatSim implements RegionSim {
       );
     });
     return law;
+  }
+
+  devSpawn(heroId: number, defName: string, distance: number, side = 0): { id: number } | { error: string } {
+    const h = this.heroes.get(heroId)?.hero;
+    if (!h) return { error: 'Your hero is not in this region on the server yet.' };
+    const d = this.s.data.creatures[defName];
+    if (!d) return { error: `The server has no creature ${defName}.` };
+    if (!HOSTILE_FACTIONS.has(d.faction ?? '')) return { error: `${defName} is not a monster or bandit.` };
+    // Forward is (-sin yaw, cos yaw) and right is (cos yaw, sin yaw), as in the movement step.
+    const s = Math.sin(h.yaw), c0 = Math.cos(h.yaw);
+    const at = { x: h.pos.x - s * distance + c0 * side, y: h.pos.y + c0 * distance + s * side, z: h.pos.z };
+    // Turned round to face the hero.
+    const c = this.spawns.spawnExtra(defName, at, h.yaw + Math.PI);
+    return c ? { id: c.id } : { error: 'No walkable ground in front of you.' };
   }
 
   /** Post a guard (the town layer places them at its villages). Returns its id. */

@@ -6,6 +6,7 @@
 namespace fo {
 namespace {
 Config g_cfg;
+std::wstring g_ini;
 
 std::string narrow(const std::wstring& w) {
     if (w.empty()) return "";
@@ -54,6 +55,7 @@ std::wstring module_dir(HMODULE m) {
 void config_load(HMODULE self) {
     Config& c = g_cfg;
     std::wstring f = module_dir(self) + L"\\fable_online.ini";
+    g_ini = f;
     c.chat_enabled = ini_bool(f, L"chat", L"enabled", c.chat_enabled);
     set_server(c, narrow(ini_str(f, L"chat", L"server", L"")));
     c.name = narrow(ini_str(f, L"chat", L"name", L""));
@@ -111,6 +113,11 @@ void config_load(HMODULE self) {
     std::wstring ch = ini_str(f, L"overlay", L"crosshair", L"off");
     c.crosshair = ch == L"ring" ? Crosshair::Ring : ch == L"dot" ? Crosshair::Dot : ch == L"cross" ? Crosshair::Cross : Crosshair::Off;
 
+    c.dev_hotkeys = ini_bool(f, L"dev", L"hotkeys", c.dev_hotkeys);
+    c.show_position = ini_bool(f, L"dev", L"show_position", c.show_position);
+    c.god_mode = ini_bool(f, L"dev", L"god_mode", c.god_mode);
+    c.dev = env("FABLE_ONLINE_DEV") == "1";
+
     set_server(c, env("FABLE_ONLINE_CHAT_SERVER"));
     if (auto n = env("FABLE_ONLINE_NAME"); !n.empty()) c.name = n;
     c.token = env("FABLE_ONLINE_TOKEN");
@@ -124,4 +131,10 @@ void config_load(HMODULE self) {
 }
 
 const Config& config() { return g_cfg; }
+Config& config_edit() { return g_cfg; }
+
+void config_write(const wchar_t* section, const wchar_t* key, const std::wstring& value) {
+    if (g_ini.empty()) return;
+    WritePrivateProfileStringW(section, key, value.c_str(), g_ini.c_str());
+}
 }  // namespace fo

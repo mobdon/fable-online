@@ -41,6 +41,12 @@ export type ClientMessage =
    * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
    */
   | { t: 'heal'; share: number; key: string }
+  /**
+   * Staff only (gm or admin account): spawn `count` hostile creatures next to the hero, in
+   * the hero's own channel, run by the server like any other monster. `def` empty = random
+   * from the defs the server already spawns. They don't respawn.
+   */
+  | { t: 'dev_spawn'; def: string; count: number }
   | TradeRequest
   | LawRequest;
 
@@ -158,6 +164,13 @@ export function decode(raw: string): ClientMessage {
       const qty = isNum(m.qty) ? m.qty : 1;
       if (!Number.isInteger(qty) || qty < 1 || qty > 99) throw new ProtocolError('bad qty');
       return { t: 'shop_buy', shop: shopUid(m.shop), def: m.def, qty, key: clientKey(m.key) };
+    }
+    case 'dev_spawn': {
+      const def = typeof m.def === 'string' ? m.def : '';
+      if (def && !/^[A-Z0-9_]{1,64}$/.test(def)) throw new ProtocolError('bad def');
+      const count = isNum(m.count) ? m.count : 1;
+      if (!Number.isInteger(count) || count < 1 || count > 10) throw new ProtocolError('bad count');
+      return { t: 'dev_spawn', def, count };
     }
     case 'shop_sell':
       if (typeof m.item !== 'string' || m.item.length > 64) throw new ProtocolError('bad item');

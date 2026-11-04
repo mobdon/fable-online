@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "config.h"
 #include "crash_exit.h"
 #include "game/hook.h"
 #include "game/puppet.h"
@@ -15,6 +16,8 @@
 #include "game/thing.h"
 #include "game/things.h"
 #include "log.h"
+#include "modsettings/modsettings.h"
+#include "ui/json.h"
 #include "net/world_client.h"
 #include "overlay/overlay.h"
 #include "world/entities.h"
@@ -220,6 +223,12 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
     case world::FrameType::Unknown:
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
+        if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
+            json::Value v;
+            std::string msg = json::parse(json, v) ? v.str("message") : json;
+            fo::log("sync: dev: %s", msg.c_str());
+            modsettings::notify(msg);
+        }
         return;
     }
 }
@@ -525,7 +534,7 @@ void start() {
     if (s.suppressSpawns) game::spawns::install_level_hook();
     game::hook::install();
     game::hook::on_tick(tick, kTickMs);
-    if (s.dev) game::hook::on_key(dev_key);
+    if (s.dev) game::hook::on_key([](int vk) { if (config().dev_hotkeys) dev_key(vk); });
 
     net::WorldConfig cfg;
     cfg.host = env("FABLE_ONLINE_HOST");
@@ -550,6 +559,18 @@ void stop() {
         delete g_state;
         g_state = nullptr;
     }
+}
+
+void dev_spawn(const char* def, int count) {
+    if (!net::world_connected()) {
+        fo::log("sync: dev spawn needs the server (offline)");
+        modsettings::notify("Not connected to a server.");
+        return;
+    }
+    char buf[160];
+    std::snprintf(buf, sizeof buf, "{\"t\":\"dev_spawn\",\"def\":%s,\"count\":%d}", json::quote(def ? def : "").c_str(), count);
+    fo::log("sync: asking the server to spawn %d %s", count, def && *def ? def : "monster(s)");
+    net::world_send(buf);
 }
 
 void dev_key(int vk) {

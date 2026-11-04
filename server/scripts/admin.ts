@@ -6,6 +6,7 @@
  *   npm run admin -- graduate <Name>              move a hero straight to the shared world
  *   npm run admin -- place <Name> <Region> [x y z]  put a hero in a region (0 0 0 = the next report anchors)
  *   npm run admin -- password <Account> <New>     set an account's password and log it out everywhere
+ *   npm run admin -- role <Account> <player|gm|admin>  set an account's role (gm and admin get the dev tools)
  *
  * Uses FO_DB like the server (default data/fable-online.sqlite).
  */
@@ -86,7 +87,18 @@ switch (cmd) {
     console.log(`${acct.username} has a new password. Log in with it in the launcher.`);
     break;
   }
+  case 'role': {
+    const acct = name ? db.get<{ id: number; username: string }>('SELECT id, username FROM accounts WHERE username = ?', name) : undefined;
+    const role = rest[0] ?? '';
+    if (!acct || !['player', 'gm', 'admin'].includes(role)) {
+      console.error('Usage: npm run admin -- role <Account> <player|gm|admin>');
+      process.exit(1);
+    }
+    db.run('UPDATE accounts SET role = ? WHERE id = ?', role, acct.id);
+    console.log(`${acct.username} is now ${role}. Dev tools work for it straight away.`);
+    break;
+  }
   default:
-    console.log('Usage: npm run admin -- list | graduate <Name> | place <Name> <Region> [x y z] | password <Account> <New>');
+    console.log('Usage: npm run admin -- list | graduate <Name> | place <Name> <Region> [x y z] | password <Account> <New> | role <Account> <player|gm|admin>');
 }
 db.close();

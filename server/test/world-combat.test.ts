@@ -209,3 +209,37 @@ test('quest rewards: repeatable quests and the daily cap', () => {
   assert.equal(q.claim(hero.id, { quest: 'V_TestMinigame', gold: 100 }, t0 + 61_000).ok, true);
   app.close();
 });
+
+test('combat sim: a staff dev spawn puts a hostile creature in front of the hero, once, and refuses villagers', () => {
+  const app = testApp();
+  const { hero } = makeHero(app);
+  const sim = new CombatSim(REGION, 'TestRegion#1', {
+    data: D,
+    spawns: { regions: {} },
+    events: app.sink,
+    economy: app.economy,
+    loot: new LootService(app.economy, D, { goldPerReward: 1, byGroup: {}, byCreature: {} }, () => 0.99),
+    progress: app.progress,
+    loadout: () => ({ equipped: [] }),
+    spawnOptions: { rng: () => 0.5, corpseMs: 100 },
+  });
+  assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_WOLF', 4), 'no hero in the region yet');
+  sim.addHero(hero.id, { x: 10, y: 20, z: 0 });
+  const r = sim.devSpawn(hero.id, 'CREATURE_WOLF', 15);
+  assert.ok('id' in r);
+  const wolf = [...sim.spawns.creatures()].find((c) => c.id === r.id)!;
+  assert.equal(wolf.defName, 'CREATURE_WOLF');
+  assert.ok(Math.abs(Math.hypot(wolf.pos.x - 10, wolf.pos.y - 20) - 15) < 1e-6, '15 m from the hero');
+  // Facing the hero: its forward (-sin yaw, cos yaw) points back at the hero.
+  const fx = -Math.sin(wolf.yaw), fy = Math.cos(wolf.yaw);
+  assert.ok(fx * (10 - wolf.pos.x) + fy * (20 - wolf.pos.y) > 14.9, 'looking at the hero');
+  assert.ok(sim.snapshot().some((e) => e.id === r.id), 'sent to clients like any monster');
+  assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_TRADER_TEST', 4), 'traders are not spawned');
+  assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_NOT_REAL', 4));
+  // Killed, it is cleared like the rest and never comes back.
+  wolf.alive = false;
+  sim.spawns.died(wolf.id);
+  sim.spawns.step(200);
+  sim.spawns.step(600_000);
+  assert.equal([...sim.spawns.creatures()].length, 0);
+});

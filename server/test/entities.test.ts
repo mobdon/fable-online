@@ -94,3 +94,10 @@ test('a position from the client is only used when the server is told to trust i
   assert.throws(() => decode(JSON.stringify({ t: 'hero_pos', x: 1e9, y: 0, z: 0 })), ProtocolError);
   assert.ok(ch.placeHero(hero.id, { x: 5, y: 5, z: 0 })); // the channel can place; the socket decides whether to
 });
+
+test('protocol: dev_spawn takes an optional def and 1-10 creatures', () => {
+  assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn' })), { t: 'dev_spawn', def: '', count: 1 });
+  assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 })), { t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 });
+  assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', count: 50 })), ProtocolError);
+  assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', def: 'wolf; drop table' })), ProtocolError);
+});

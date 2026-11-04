@@ -41,9 +41,9 @@ void Model::relayout() {
         buttons_.push_back(b);
     };
     if (screen_ == Screen::Title) {
-        const char* labels[] = {"ENTER ALBION", "HEROES", "REALM", "OPTIONS", "LEAVE ALBION"};
-        Action acts[] = {Action::EnterAlbion, Action::Heroes, Action::Realm, Action::Options, Action::Quit};
-        for (int i = 0; i < 5; ++i) add(labels[i], acts[i], 640 - 160, 268 + i * 82.0f, 320, 80);
+        const char* labels[] = {"ENTER ALBION", "HEROES", "REALM", "OPTIONS", "MOD SETTINGS", "LEAVE ALBION"};
+        Action acts[] = {Action::EnterAlbion, Action::Heroes, Action::Realm, Action::Options, Action::ModSettings, Action::Quit};
+        for (int i = 0; i < 6; ++i) add(labels[i], acts[i], 640 - 150, 236 + i * 74.0f, 300, 72);
     } else {
         add(upper(hero_name_), Action::SelectHero, 56, 112, 320, 80);
         add("NEW HERO", Action::NewHero, 56, 194, 320, 80);

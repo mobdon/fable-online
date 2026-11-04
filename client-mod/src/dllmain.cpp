@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "devkit.h"
+#include "modsettings/modsettings.h"
 #include "herolook.h"
 #include <string>
 #include <thread>
@@ -110,6 +111,7 @@ DWORD WINAPI main_thread(LPVOID) {
 
     char dev[4] = {};
     if (GetEnvironmentVariableA("FABLE_ONLINE_DEV", dev, sizeof(dev)) > 0 && dev[0] == '1') fo::devkit::install();
+    fo::modsettings::install();   // the Mod settings screen's game-thread work
 
     std::thread online;
     if (g_online) online = std::thread(online_thread);

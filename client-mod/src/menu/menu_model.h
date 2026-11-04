@@ -7,7 +7,7 @@
 namespace fo::menu {
 
 enum class Screen { Title, Heroes };
-enum class Action { None, EnterAlbion, Heroes, Realm, Options, Quit, Back, SelectHero, NewHero };
+enum class Action { None, EnterAlbion, Heroes, Realm, Options, ModSettings, Quit, Back, SelectHero, NewHero };
 enum class Key { Up, Down, Left, Right, Enter, Escape };
 
 struct Button {
@@ -40,7 +40,7 @@ public:
     int focus() const { return focus_; }
 
     // Input. Each returns the action that fired (None if nothing did). The model handles
-    // screen changes itself; the caller handles EnterAlbion, Options and Quit.
+    // screen changes itself; the caller handles EnterAlbion, Options, ModSettings and Quit.
     void pointer(float x, float y);
     Action click(float x, float y);
     Action key(Key k);

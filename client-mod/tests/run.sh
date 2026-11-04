@@ -46,3 +46,5 @@ if command -v npx >/dev/null 2>&1 && [ -d "$here/../../server/node_modules" ]; t
 else
   echo "shop_stock: skipped (needs Node and npm ci in server/)"
 fi
+$cxx $flags -o "$out/fable_online_modsettings_test" "$here/modsettings_test.cpp" "$src/modsettings/settings_model.cpp"
+"$out/fable_online_modsettings_test"

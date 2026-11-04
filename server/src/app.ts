@@ -59,6 +59,8 @@ export interface App {
   resume: ResumeTokens;
   /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
   spawnDefs: string[];
+  /** True when the hero belongs to a gm or admin account (dev tools such as dev_spawn). */
+  staffHero(heroId: number): boolean;
   close(): void;
 }
 
@@ -184,6 +186,7 @@ export function createApp(
     scoreboard,
     resume: new ResumeTokens(cfg.resumeMs),
     spawnDefs,
+    staffHero,
     close() {
       director.stop();
       law.flush();

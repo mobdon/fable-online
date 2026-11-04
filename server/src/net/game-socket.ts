@@ -30,6 +30,7 @@ export class GameSocket {
   private heals = new Bucket(2, 4);
   private tradeReqs = new Bucket(4, 10);
   private tradeInvites = new Bucket(0.2, 3);
+  private devSpawns = new Bucket(1, 5);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -115,6 +116,9 @@ export class GameSocket {
       case 'trade_cancel':
         if (!this.tradeReqs.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Slow down' });
         return this.trade(this.heroId, msg);
+      case 'dev_spawn':
+        if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
+        return this.devSpawn(this.heroId, msg.def, msg.count);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
@@ -308,6 +312,30 @@ export class GameSocket {
       if (!(e instanceof GameError)) throw e;
       return this.send({ t: 'shop_result', ok: false, key: 'key' in msg ? msg.key : undefined, shop: msg.shop, error: e.code, message: e.message });
     }
+  }
+
+  /** Staff dev tool: monsters next to the hero, run by the server. Refused for player accounts. */
+  private devSpawn(heroId: number, def: string, count: number): void {
+    const { app } = this;
+    if (!app.staffHero(heroId)) {
+      app.events.emit({ type: 'input_rejected', heroId, reason: 'dev_spawn by a player account' });
+      return this.send({ t: 'dev_result', ok: false, message: 'Dev spawning needs a gm or admin account.' });
+    }
+    const sim = app.director.channelOf(heroId)?.sim;
+    if (!sim?.devSpawn) return this.send({ t: 'dev_result', ok: false, message: 'This server runs no monsters (combat is off).' });
+    const pool = app.spawnDefs.length ? app.spawnDefs : [];
+    const made: string[] = [];
+    let error = '';
+    for (let i = 0; i < count; i++) {
+      const name = def || pool[Math.floor(Math.random() * pool.length)];
+      if (!name) { error = 'No creature named and none to pick from.'; break; }
+      // 10-20 m ahead, a few metres apart sideways, so a group doesn't stack on one spot.
+      const r = sim.devSpawn(heroId, name, 10 + Math.random() * 10, (i - (count - 1) / 2) * 2.5);
+      if ('error' in r) { error = r.error; break; }
+      made.push(name);
+    }
+    console.log(`dev_spawn: hero ${heroId} spawned ${made.length ? made.join(', ') : 'nothing'}${error ? ` (${error})` : ''}`);
+    this.send({ t: 'dev_result', ok: made.length > 0, message: made.length ? `Spawned ${made.join(', ')}` : error });
   }
 
   private hello(protocol: number, token: string): void {

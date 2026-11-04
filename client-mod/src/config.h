@@ -54,9 +54,18 @@ struct Config {
     bool red_target = true;           // in combat mode, any targeted creature gets the enemy highlight
     // [overlay]
     Crosshair crosshair = Crosshair::Off;  // a mark at the centre of the view
+    // [dev] (the Developer page of Mod settings; only in dev builds, FABLE_ONLINE_DEV=1)
+    bool dev = false;            // from the environment, never the ini
+    bool dev_hotkeys = false;    // F6-F10 do their dev jobs as well as the menu
+    bool show_position = false;  // a line at the top of the screen with the hero's position
+    bool god_mode = false;       // keep the hero's health topped up (local game only)
 };
 
 void config_load(HMODULE self);
 const Config& config();
+// The Mod settings screen changes settings while the game runs: it edits the live copy
+// (plain stores that the readers pick up on their next frame) and writes the line to the ini.
+Config& config_edit();
+void config_write(const wchar_t* section, const wchar_t* key, const std::wstring& value);
 std::wstring module_dir(HMODULE m);
 }  // namespace fo

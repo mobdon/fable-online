@@ -1,4 +1,5 @@
-// Test-only tools. F9 gives the hero test gear, gold and full health; F10 logs the hero's health.
+// Test-only tools, run from the Developer page of Mod settings (and F9 / F10 when [dev] hotkeys=1):
+// test gear, gold, a full heal, god mode and a health line in the log.
 //
 // Everything goes through Fable's own script interface, the object its cutscene scripts use for
 // GiveHero, GiveGold and HeroWear. The calls run inside the game window's message handler, so
@@ -7,6 +8,7 @@
 
 #include <windows.h>
 
+#include "config.h"
 #include "game/hook.h"
 #include "log.h"
 
@@ -51,7 +53,7 @@ const char* const kWear[] = {
     "OBJECT_HERO_TROUSERS_PLATINUM", "OBJECT_HERO_BOOTS_PLATINUM",
 };
 
-void log_health(void* s) {
+void log_health_of(void* s) {
     float hp = slot<float(__thiscall*)(void*)>(s, kHeroHealth)(s);
     float max = slot<float(__thiscall*)(void*)>(s, kHeroMaxHealth)(s);
     fo::log("devkit: hero health %.1f / %.1f", hp, max);
@@ -61,7 +63,7 @@ void give_test_kit() {
     void* s = iface();
     if (!s) { fo::log("devkit: script interface not ready (still on the menu?)"); return; }
     fo::log("devkit: giving the test kit");
-    log_health(s);
+    log_health_of(s);
 
     fo::log("devkit:   gold +100000");
     slot<void(__thiscall*)(void*, int)>(s, kGiveGold)(s, 100000);
@@ -82,8 +84,19 @@ void give_test_kit() {
     float max = slot<float(__thiscall*)(void*)>(s, kHeroMaxHealth)(s);
     fo::log("devkit:   heal +%.1f", max - hp);
     slot<void(__thiscall*)(void*, float, bool, bool)>(s, kChangeHeroHealth)(s, max - hp, true, false);
-    log_health(s);
+    log_health_of(s);
     fo::log("devkit: test kit done");
+}
+
+void heal_full_of(void* s) {
+    float hp = slot<float(__thiscall*)(void*)>(s, kHeroHealth)(s);
+    float max = slot<float(__thiscall*)(void*)>(s, kHeroMaxHealth)(s);
+    if (max > 0 && hp < max) slot<void(__thiscall*)(void*, float, bool, bool)>(s, kChangeHeroHealth)(s, max - hp, true, false);
+}
+
+void god_tick() {
+    if (!fo::config().god_mode) return;
+    if (void* s = iface()) heal_full_of(s);
 }
 
 }  // namespace
@@ -91,13 +104,38 @@ void give_test_kit() {
 namespace fo::devkit {
 
 void install() {
-    // The hotkeys run on the game thread, which is where engine calls are safe.
+    // Everything runs on the game thread, which is where engine calls are safe.
     if (!fo::game::hook::install()) return;
     fo::game::hook::on_key([](int vk) {
+        if (!fo::config().dev_hotkeys) return;
         if (vk == VK_F9) give_test_kit();
-        else if (vk == VK_F10 && iface()) log_health(iface());
+        else if (vk == VK_F10 && iface()) log_health_of(iface());
     });
-    fo::log("devkit: on. F9 = test gear, gold and full health. F10 = log health.");
+    fo::game::hook::on_tick(god_tick, 100);
+    fo::log("devkit: on (Mod settings > Developer)%s", fo::config().dev_hotkeys ? "; F9 = test gear, F10 = log health" : "");
+}
+
+// Game thread only (Mod settings queues these through game::hook::on_tick).
+void test_kit() { give_test_kit(); }
+
+void give_gold(int amount) {
+    void* s = iface();
+    if (!s) { fo::log("devkit: script interface not ready (still on the menu?)"); return; }
+    fo::log("devkit: gold +%d", amount);
+    slot<void(__thiscall*)(void*, int)>(s, kGiveGold)(s, amount);
+}
+
+void heal_full() {
+    void* s = iface();
+    if (!s) { fo::log("devkit: script interface not ready (still on the menu?)"); return; }
+    heal_full_of(s);
+    log_health_of(s);
+}
+
+void log_health() {
+    void* s = iface();
+    if (!s) { fo::log("devkit: script interface not ready (still on the menu?)"); return; }
+    log_health_of(s);
 }
 
 }  // namespace fo::devkit

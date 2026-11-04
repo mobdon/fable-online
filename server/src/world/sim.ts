@@ -65,6 +65,12 @@ export interface RegionSim {
   readonly law?: import('../law/guards.js').ChannelLaw;
   /** Post a town guard at a spot. Sims without a town watch leave this out. */
   addGuard?(defName: string, at: Vec3): number;
+  /**
+   * Staff dev tool: spawn a hostile creature `distance` metres in front of the hero (and `side`
+   * metres to its right), facing the hero. Returns
+   * the creature id, or a reason it couldn't. Sims without server monsters leave this out.
+   */
+  devSpawn?(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string };
   addHero(heroId: number, at: Vec3): void;
   removeHero(heroId: number): Vec3 | undefined;
   applyInput(heroId: number, input: PlayerInput): void;

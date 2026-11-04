@@ -327,6 +327,14 @@ float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool e
     return e;
 }
 
+void Renderer::pointer(float x, float y, float size) {
+    const float s = size;
+    // Outline first (a slightly bigger arrow), then the fill.
+    const uint32_t edge = 0xE0000000, fill = 0xFFE9E4D6;
+    tri(x - 1.5f, y - 2.5f, edge, x - 1.5f, y + s * 0.95f, edge, x + s * 0.72f, y + s * 0.68f, edge);
+    tri(x, y, fill, x, y + s * 0.8f, fill, x + s * 0.58f, y + s * 0.6f, fill);
+}
+
 void Renderer::rule(float x, float y, float w, float a) {
     if (fable_frame_) sprite(top_, x, y, w, 6, scale_alpha(0xFFFFFFFF, a));
     else rect(x, y + 2, w, 2, scale_alpha(0xFF938D7E, a));
