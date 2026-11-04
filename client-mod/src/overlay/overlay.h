@@ -1,6 +1,8 @@
 #pragma once
 // The in-game chat box and name tags. Hooks Direct3D 9 (draw), the game window (typing)
 // and DirectInput (so typing doesn't also move the hero).
+#include <array>
+#include <map>
 #include <string>
 #include <vector>
 #include "../game/hero.h"
@@ -35,6 +37,8 @@ void post_world_frame(const std::string& json);
 std::vector<std::string> take_world_requests();
 /** Where party members' stand-ins are now, for the orbs over their heads. Any thread. */
 void set_party_marks(std::vector<ui::PartyMark> marks);
+/** Where other heroes' stand-ins are drawn now, so their name tags sit on them. Any thread. */
+void set_tag_positions(std::map<uint32_t, std::array<float, 3>> live);
 /** The world connection went down: the party list is no longer current. */
 void clear_party();
 /** Mouse buttons as Fable last read them through DirectInput (bit 0 = left). */

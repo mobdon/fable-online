@@ -11,7 +11,7 @@
 namespace fo::world {
 
 struct ReportPolicy {
-    uint32_t minIntervalMs = 100;   // at most 10 reports a second (the server allows 60)
+    uint32_t minIntervalMs = 50;    // at most 20 reports a second (the server allows 60)
     uint32_t heartbeatMs = 1000;    // one report a second while standing still
     float minMove = 0.05f;          // metres that count as moving
     float minTurn = 0.05f;          // radians that count as turning

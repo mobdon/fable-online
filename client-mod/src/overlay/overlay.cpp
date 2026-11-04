@@ -242,6 +242,9 @@ void draw_party_list() {
 
 void draw_tags(const Config& cfg) {
     if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
+    // Only over the world: loading screens, menus and area changes stop Fable's camera
+    // updates (and lose the hero), and the last view would leave tags floating over them.
+    if (!display::mouse_look::in_game() || !g_hero.valid) return;
     float vp[16];
     mul(g_view, g_proj, vp);
     ui::TagSettings s;
@@ -586,8 +589,13 @@ void draw(IDirect3DDevice9* dev) {
     pump_network(now);
     flush_outbox();
     g_tags.step(dt > 0.25f ? 0.25f : dt);
-    if (g_hero.valid)
-        g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, g_hero.x, g_hero.y, g_hero.z);
+    if (g_hero.valid) {
+        // Read the hero now, not the sync thread's copy from up to 200 ms ago, so the
+        // tag stays on the head while running.
+        game::HeroPos live = game::hero_peek();
+        const game::HeroPos& h = live.valid ? live : g_hero;
+        g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, h.x, h.y, h.z);
+    }
     if (!g_r.begin(dev, art, cfg.font_px)) return;
     draw_crosshair(cfg);
     draw_tags(cfg);
@@ -1063,6 +1071,11 @@ std::vector<std::string> take_world_outbox() {
     std::vector<std::string> out;
     out.swap(g_world_out);
     return out;
+}
+
+void set_tag_positions(std::map<uint32_t, std::array<float, 3>> live) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_tags.set_live(std::move(live));
 }
 
 void set_party_marks(std::vector<ui::PartyMark> marks) {

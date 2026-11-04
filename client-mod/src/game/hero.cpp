@@ -65,6 +65,18 @@ uint32_t hash_area(const float a[3]) {
 }
 }  // namespace
 
+HeroPos hero_peek() {
+    HeroPos out;
+    const uintptr_t h = g_hero;
+    uint32_t phys = 0;
+    float pos[3];
+    if (!h || !read(h + kPhysicsPtr, &phys, 4) || !read(phys + kPos, pos, sizeof(pos))) return out;
+    for (float v : pos) if (!std::isfinite(v) || std::fabs(v) > 1e6f) return out;
+    out.valid = true;
+    out.x = pos[0]; out.y = pos[1]; out.z = pos[2];
+    return out;
+}
+
 HeroPos hero_read() {
     HeroPos out;
     if (g_hero && !looks_like_hero(g_hero)) { g_hero = 0; fo::log("hero: lost (area change or menu)"); }
