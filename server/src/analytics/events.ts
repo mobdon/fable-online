@@ -36,6 +36,13 @@ export type GameEvent =
   | { type: 'theft'; heroId: number; thing: string; def: string; region: string }
   | { type: 'region_exit'; heroId: number; from: string; to: string; via: string; thing: string }
   | { type: 'tick_stats'; channels: number; players: number; tickMs: number }
+  | { type: 'party_invite'; heroId: number; targetId: number }
+  | { type: 'party_formed'; partyId: number; leader: number }
+  | { type: 'party_join'; partyId: number; heroId: number; size: number }
+  | { type: 'party_leave'; partyId: number; heroId: number; reason: string; size: number }
+  | { type: 'party_disband'; partyId: number; lifetimeMs: number }
+  | { type: 'party_chat'; partyId: number; heroId: number; length: number }
+  | { type: 'party_regroup'; heroId: number; from: string; to: string }
 
   | { type: 'crime'; heroId: number; kind: string; town: string | null; fine: number; level: number }
   | { type: 'crime_witnessed'; heroId: number; kind: string; witness: 'guard' | 'villager'; channelId: string }

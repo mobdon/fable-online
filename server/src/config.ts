@@ -92,6 +92,8 @@ export interface ServerConfig {
 
   /** Max heroes per account. */
   maxHeroesPerAccount: number;
+  /** Heroes per party, 2 to 4 (one of Fable's four co-op colours each). */
+  partyMaxSize: number;
   /** Login session lifetime. */
   sessionTtlMs: number;
 
@@ -155,6 +157,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     newHeroPhase: heroPhase(str('FO_NEW_HERO_PHASE', 'childhood')),
     autoHero: flag('FO_AUTO_HERO', false),
     maxHeroesPerAccount: num('FO_MAX_HEROES', 3),
+    partyMaxSize: Math.min(4, Math.max(2, num('FO_PARTY_MAX', 4))),
     sessionTtlMs: num('FO_SESSION_TTL_MS', 7 * 24 * 3600_000),
     gameDataPath: str('FO_GAME_DATA', 'data/game-data.json'),
     spawnsPath: str('FO_SPAWNS', '../shared/defs/spawns.json'),

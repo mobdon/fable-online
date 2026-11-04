@@ -33,6 +33,7 @@ import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
 import { Scoreboard } from './scoreboard/scoreboard.js';
 import { ResumeTokens } from './net/resume.js';
+import { Parties } from './party/parties.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -57,6 +58,7 @@ export interface App {
   scoreboard: Scoreboard;
   /** Lets a dropped game connection come back without a new launcher ticket. */
   resume: ResumeTokens;
+  parties: Parties;
   /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
   spawnDefs: string[];
   close(): void;
@@ -142,6 +144,28 @@ export function createApp(
   );
   const objects = new WorldObjects(opts.things ?? WorldThings.load(cfg.thingsPath), director, economy, db, events);
   law.attach(lawHost(director, regions));
+  const parties = new Parties(
+    events,
+    {
+      whereIs: (id) => {
+        const ch = director.channelOf(id);
+        return ch && { channel: ch.id, region: ch.region.name, shared: ch.kind === 'shared' };
+      },
+      canParty: (id) => heroes.get(id)?.phase === 'world',
+      moveToChannel: (id, channelId) => void director.moveToChannel(id, channelId),
+    },
+    { maxSize: cfg.partyMaxSize },
+  );
+  // Party members land in the same channel, and see where the others went.
+  director.companions = (id) => parties.companions(id);
+  const objectHooks = director.hooks;
+  director.hooks = {
+    ...objectHooks,
+    onEnter: (ch, link) => {
+      objectHooks.onEnter?.(ch, link);
+      parties.moved(link.heroId);
+    },
+  };
   director.policies.push({
     placement: (hero) => law.placement(hero.id),
     canEnter: (heroId, _from, to, via) => law.checkEnter(heroId, to, via),
@@ -170,6 +194,7 @@ export function createApp(
     town,
     scoreboard,
     resume: new ResumeTokens(cfg.resumeMs),
+    parties,
     spawnDefs,
     close() {
       director.stop();

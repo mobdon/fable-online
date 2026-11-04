@@ -3,7 +3,7 @@ import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 import type { PlayerLink } from '../world/channel.js';
 import { ResumeTokens } from './resume.js';
-import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage } from './protocol.js';
+import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage, type PartyRequest } from './protocol.js';
 import { SHOP_REACH } from '../economy/shops.js';
 import { claimHeal } from '../combat/healing.js';
 import { townOf } from '../world/town/town-sim.js';
@@ -28,6 +28,8 @@ export class GameSocket {
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
   private heals = new Bucket(2, 4);
+  private partyReqs = new Bucket(2, 6);
+  private partyChats = new Bucket(1, 5);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -100,6 +102,8 @@ export class GameSocket {
       case 'shop_sell':
         if (!this.shopActions.take()) return this.send({ t: 'shop_result', ok: false, error: 'rate', message: 'Slow down' });
         return this.shop(this.heroId, msg);
+      case 'party':
+        return this.party(this.heroId, msg);
       case 'heal':
         if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
         return this.heal(this.heroId, msg.share, msg.key);
@@ -203,6 +207,35 @@ export class GameSocket {
     } catch (e) {
       if (!(e instanceof GameError)) throw e;
       this.send({ t: 'error', error: e.code, message: e.message });
+    }
+  }
+
+  private party(heroId: number, m: PartyRequest): void {
+    const { parties } = this.app;
+    const bucket = m.op === 'say' ? this.partyChats : this.partyReqs;
+    if (!bucket.take()) return this.send({ t: 'party_error', op: m.op, error: 'rate', message: 'Slow down' });
+    try {
+      switch (m.op) {
+        case 'invite':
+          return parties.invite(heroId, m.name);
+        case 'accept':
+          return parties.accept(heroId, m.name || undefined);
+        case 'decline':
+          return parties.decline(heroId, m.name || undefined);
+        case 'leave':
+          return parties.leave(heroId);
+        case 'kick':
+          return parties.kick(heroId, m.name);
+        case 'lead':
+          return parties.lead(heroId, m.name);
+        case 'regroup':
+          return parties.regroup(heroId);
+        case 'say':
+          return parties.say(heroId, m.text);
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.send({ t: 'party_error', op: m.op, error: e.code, message: e.message });
     }
   }
 
@@ -320,6 +353,7 @@ export class GameSocket {
       if (resumed) app.events.emit({ type: 'player_resumed', heroId: hero.id });
       app.director.join(hero, link, resumed);
       app.law.pushStatus(hero.id);
+      app.parties.connect(hero.id, hero.name, (m) => link.send(encode(m)));
     } catch (e) {
       if (this.heroId !== null && GameSocket.online.get(this.heroId) === this) GameSocket.online.delete(this.heroId);
       this.heroId = null;
@@ -359,6 +393,7 @@ export class GameSocket {
     if (GameSocket.online.get(id) === this) {
       GameSocket.online.delete(id);
       this.app.resume.disconnected(id);
+      this.app.parties.disconnect(id);
     }
     this.app.director.leave(id);
   }

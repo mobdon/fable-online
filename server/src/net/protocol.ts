@@ -41,7 +41,16 @@ export type ClientMessage =
    * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
    */
   | { t: 'heal'; share: number; key: string }
+  | PartyRequest
   | LawRequest;
+
+/**
+ * Party requests (src/party/parties.ts). `name` is a hero name the player typed, so a
+ * malformed one is passed on as text and refused with a message, never a disconnect.
+ */
+export type PartyOp = 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'lead' | 'regroup' | 'say';
+export type PartyRequest = { t: 'party'; op: PartyOp; name: string; text: string };
+const PARTY_OPS = new Set<PartyOp>(['invite', 'accept', 'decline', 'leave', 'kick', 'lead', 'regroup', 'say']);
 
 /**
  * What the mod reports to the law: what the player tried (steal, draw a weapon, answer a
@@ -135,6 +144,12 @@ export function decode(raw: string): ClientMessage {
     }
     case 'law':
       return decodeLaw(m);
+    case 'party': {
+      if (typeof m.op !== 'string' || !PARTY_OPS.has(m.op as PartyOp)) throw new ProtocolError('bad party op');
+      // eslint-disable-next-line no-control-regex
+      const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '');
+      return { t: 'party', op: m.op as PartyOp, name: clean(m.name, 32), text: clean(m.text, CHAT_MAX) };
+    }
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
     case 'heal':
