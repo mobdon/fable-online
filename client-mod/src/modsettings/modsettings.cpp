@@ -14,6 +14,8 @@
 #include "../game/hook.h"
 #include "../game/pause_menu.h"
 #include "../game/player_modes.h"
+#include "../game/shop_stock_hook.h"
+#include "../game/menu_row.h"
 #include "../display/mouse_look.h"
 #include "../game/spawns.h"
 #include "../log.h"
@@ -362,12 +364,65 @@ void mouse_moved_by(LONG dx, LONG dy, bool button) {   // caller holds g_mu
 
 }  // namespace
 
+// ---- Fable's own menu row ---------------------------------------------------------------------
+// The served game.bin adds a Mod Settings row to Fable's in-game menu that sends message
+// menu_row::kMessage when picked (game/menu_row.h). Fable's UI message switch (0x423491..,
+// 0xBB9..0xBD0 through the jump table at 0x4271B6) sends that number to its default case at
+// 0x426DFC, which does nothing. That table slot is pointed at a thunk that notes the pick and
+// carries on to the default case.
+namespace {
+constexpr uint32_t kMsgTable = 0x004271B6, kMsgFirst = 0xBB9, kMsgDefault = 0x00426DFC;
+std::atomic<bool> g_row_picked{false};
+std::atomic<bool> g_row_hooked{false};
+
+void __stdcall note_row_pick() { g_row_picked = true; }
+
+void hook_row_message() {
+    const uint32_t slot = kMsgTable + (game::menu_row::kMessage - kMsgFirst) * 4;
+    auto* p = reinterpret_cast<uint32_t*>(slot);
+    MEMORY_BASIC_INFORMATION mbi = {};
+    if (!VirtualQuery(p, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || *p != kMsgDefault) {
+        fo::log("modsettings: Fable's menu message table differs; the Mod Settings row in Fable's menu won't open the screen");
+        return;
+    }
+    auto* cave = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (!cave) return;
+    uint8_t* c = cave;
+    *c++ = 0x60;                                                  // pushad
+    *c++ = 0x9C;                                                  // pushfd
+    *c++ = 0xE8;                                                  // call note_row_pick
+    const uint32_t note = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&note_row_pick));
+    uint32_t rel = note - (static_cast<uint32_t>(reinterpret_cast<uintptr_t>(c)) + 4);
+    std::memcpy(c, &rel, 4); c += 4;
+    *c++ = 0x9D;                                                  // popfd
+    *c++ = 0x61;                                                  // popad
+    *c++ = 0xE9;                                                  // jmp default
+    rel = kMsgDefault - (static_cast<uint32_t>(reinterpret_cast<uintptr_t>(c)) + 4);
+    std::memcpy(c, &rel, 4);
+    FlushInstructionCache(GetCurrentProcess(), cave, 32);
+    DWORD old = 0;
+    if (!VirtualProtect(p, 4, PAGE_EXECUTE_READWRITE, &old)) return;
+    *p = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(cave));
+    VirtualProtect(p, 4, old, &old);
+    g_row_hooked = true;
+    fo::log("modsettings: listening for the Mod Settings row in Fable's menu (message %u)", game::menu_row::kMessage);
+}
+
+bool take_row_pick() {
+    if (!g_row_picked.exchange(false)) return false;
+    fo::log("modsettings: opened from the Mod Settings row in Fable's menu");
+    return true;
+}
+}  // namespace
+
 void install() {
+    hook_row_message();
     if (!game::hook::install()) return;
     game::hook::on_tick(run_pending, 50);
 }
 
 void open(int page) {
+    if (g_row_picked) g_row_picked = false;
     std::lock_guard<std::mutex> lock(g_mu);
     open_locked(page);
 }
@@ -413,7 +468,10 @@ void draw_pause_button(Renderer& r, bool) {
                 static_cast<unsigned>(game::player_modes::running_mask()), paused && show ? "; MOD SETTINGS button drawn" : "");
     }
     was_paused = paused;
+    if (take_row_pick()) { open(kExtras); return; }
     if (!show) { g_pause_mouse_was_down = false; return; }
+    // When the served game.bin lists the row, Fable draws it and handles the mouse and keys.
+    if (g_row_hooked && game::shop_stock::menu_row_served()) return;
     // An extra entry at the foot of Fable's in-game menu list, in the same place, size and
     // look as Fable's own rows. Fable lays that list out on a 480-line grid scaled to the
     // screen height and anchored left: the first row's top edge at 75.3, 15 per row, the
