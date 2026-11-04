@@ -76,6 +76,11 @@ export interface RegionSim {
    * metres to its right), facing the hero. Returns
    * the creature id, or a reason it couldn't. Sims without server monsters leave this out.
    */
+  /**
+   * Staff dev tool: remove server monsters around the hero (`nearest`: the closest within
+   * 50 m; `near`: every one within 30 m). Returns the defs removed, or why nothing was.
+   */
+  devDespawn?(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string };
   devSpawn?(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string };
   addHero(heroId: number, at: Vec3): void;
   removeHero(heroId: number): Vec3 | undefined;

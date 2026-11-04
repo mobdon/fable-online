@@ -663,6 +663,16 @@ void dev_spawn(const char* def, int count) {
     net::world_send(buf);
 }
 
+void dev_despawn(bool all_near) {
+    if (!net::world_connected()) {
+        fo::log("sync: dev despawn needs the server (offline)");
+        modsettings::notify("Not connected to a server.");
+        return;
+    }
+    fo::log("sync: asking the server to remove %s", all_near ? "the monsters near the hero" : "the nearest monster");
+    net::world_send(all_near ? "{\"t\":\"dev_despawn\",\"what\":\"near\"}" : "{\"t\":\"dev_despawn\",\"what\":\"nearest\"}");
+}
+
 void dev_key(int vk) {
     if (!g_state) return;
     State& s = *g_state;

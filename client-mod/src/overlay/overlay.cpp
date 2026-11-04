@@ -606,21 +606,35 @@ void draw(IDirect3DDevice9* dev) {
     flush_outbox();
     draw_trade(now);
     modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
-    modsettings::draw_pause_button(g_r, g_hero.valid);
-    modsettings::draw(g_r);
-    if (cfg.chat_enabled && !modsettings::is_open()) draw_chat_pointer();   // on top of everything
+    if (cfg.chat_enabled && !modsettings::is_open()) draw_chat_pointer();
     g_r.end();
 }
 
-// Over the start-up menu only the Mod settings screen is drawn (chat and tags wait).
-void draw_settings_only(IDirect3DDevice9* dev) {
-    if (!modsettings::is_open()) return;
+// The Mod settings button and screen go on last, just before Present, in a scene of their
+// own on the back buffer. Fable's in-game menu draws its frozen, tinted copy of the world
+// after the overlay's usual EndScene, which covered anything drawn there.
+void draw_settings_on_top(IDirect3DDevice9* dev) {
+    if (!config().overlay_enabled) return;
+    const bool open = modsettings::is_open();
+    if (!open && !modsettings::button_wanted()) return;
     const assets::UiArt* art = g_art.load();
     if (!art) return;
-    std::lock_guard<std::mutex> lock(g_mu);
-    if (!g_r.begin(dev, art, config().font_px)) return;
-    modsettings::draw(g_r);
-    g_r.end();
+    IDirect3DSurface9* back = nullptr;
+    if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back)) || !back) return;
+    IDirect3DSurface9* old = nullptr;
+    dev->GetRenderTarget(0, &old);
+    dev->SetRenderTarget(0, back);
+    if (SUCCEEDED(dev->BeginScene())) {
+        std::lock_guard<std::mutex> lock(g_mu);
+        if (g_r.begin(dev, art, config().font_px)) {
+            modsettings::draw_pause_button(g_r, g_hero.valid);
+            modsettings::draw(g_r);
+            g_r.end();
+        }
+        dev->EndScene();
+    }
+    if (old) { dev->SetRenderTarget(0, old); old->Release(); }
+    back->Release();
 }
 
 bool targets_backbuffer(IDirect3DDevice9* dev) {
@@ -639,7 +653,6 @@ HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
         // The start-up menu covers the whole screen; chat and tags wait until it closes.
         if (g_no_backbuffer > 300 || targets_backbuffer(dev)) {
             menu::draw(dev);
-            draw_settings_only(dev);
             g_drawn = g_present_seen;
             g_no_backbuffer = 0;
         } else {
@@ -666,6 +679,7 @@ HRESULT WINAPI hk_Present(IDirect3DDevice9* dev, const RECT* a, const RECT* b, H
     if (config().frame_probe) display::probe::on_present(dev);
     g_present_seen = true;
     g_drawn = false;
+    draw_settings_on_top(dev);
     display::before_present(dev);
     HRESULT hr = o_Present(dev, a, b, w, r);
     display::after_present(dev);

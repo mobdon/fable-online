@@ -130,6 +130,9 @@ export class GameSocket {
       case 'trade_cancel':
         if (!this.tradeReqs.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Slow down' });
         return this.trade(this.heroId, msg);
+      case 'dev_despawn':
+        if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
+        return this.devDespawn(this.heroId, msg.what);
       case 'dev_spawn':
         if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
         return this.devSpawn(this.heroId, msg.def, msg.count);
@@ -377,6 +380,21 @@ export class GameSocket {
       if (!(e instanceof GameError)) throw e;
       return this.send({ t: 'shop_result', ok: false, key: 'key' in msg ? msg.key : undefined, shop: msg.shop, error: e.code, message: e.message });
     }
+  }
+
+  /** Staff dev tool: remove server monsters near the hero. Refused for player accounts. */
+  private devDespawn(heroId: number, what: 'nearest' | 'near'): void {
+    const { app } = this;
+    if (!app.staffHero(heroId)) {
+      app.events.emit({ type: 'input_rejected', heroId, reason: 'dev_despawn by a player account' });
+      return this.send({ t: 'dev_result', ok: false, message: 'Removing monsters needs a gm or admin account.' });
+    }
+    const sim = app.director.channelOf(heroId)?.sim;
+    if (!sim?.devDespawn) return this.send({ t: 'dev_result', ok: false, message: 'This server runs no monsters (combat is off).' });
+    const r = sim.devDespawn(heroId, what);
+    if ('error' in r) return this.send({ t: 'dev_result', ok: false, message: r.error });
+    console.log(`dev_despawn: hero ${heroId} removed ${r.removed.join(', ')}`);
+    this.send({ t: 'dev_result', ok: true, message: `Removed ${r.removed.length}: ${r.removed.join(', ')}` });
   }
 
   /** Staff dev tool: monsters next to the hero, run by the server. Refused for player accounts. */

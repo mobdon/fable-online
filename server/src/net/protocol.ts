@@ -48,6 +48,8 @@ export type ClientMessage =
    * from the defs the server already spawns. They don't respawn.
    */
   | { t: 'dev_spawn'; def: string; count: number }
+  /** Staff only: remove the nearest server monster, or every one near the hero. */
+  | { t: 'dev_despawn'; what: 'nearest' | 'near' }
   | TradeRequest
   | PartyRequest
   /**
@@ -196,6 +198,9 @@ export function decode(raw: string): ClientMessage {
       if (!Number.isInteger(qty) || qty < 1 || qty > 99) throw new ProtocolError('bad qty');
       return { t: 'shop_buy', shop: shopUid(m.shop), def: m.def, qty, key: clientKey(m.key) };
     }
+    case 'dev_despawn':
+      if (m.what !== 'nearest' && m.what !== 'near') throw new ProtocolError('bad what');
+      return { t: 'dev_despawn', what: m.what };
     case 'dev_spawn': {
       const def = typeof m.def === 'string' ? m.def : '';
       if (def && !/^[A-Z0-9_]{1,64}$/.test(def)) throw new ProtocolError('bad def');

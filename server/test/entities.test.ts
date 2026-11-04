@@ -99,5 +99,7 @@ test('protocol: dev_spawn takes an optional def and 1-10 creatures', () => {
   assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn' })), { t: 'dev_spawn', def: '', count: 1 });
   assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 })), { t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 });
   assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', count: 50 })), ProtocolError);
+  assert.deepEqual(decode(JSON.stringify({ t: 'dev_despawn', what: 'near' })), { t: 'dev_despawn', what: 'near' });
+  assert.throws(() => decode(JSON.stringify({ t: 'dev_despawn', what: 'everything' })), ProtocolError);
   assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', def: 'wolf; drop table' })), ProtocolError);
 });

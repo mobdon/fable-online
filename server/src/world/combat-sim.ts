@@ -191,6 +191,21 @@ export class CombatSim implements RegionSim {
     return law;
   }
 
+  devDespawn(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string } {
+    const h = this.heroes.get(heroId)?.hero;
+    if (!h) return { error: 'Your hero is not in this region on the server yet.' };
+    const reach = what === 'nearest' ? 50 : 30;
+    const near = [...this.spawns.creatures()]
+      .map((c) => ({ c, d: Math.hypot(c.pos.x - h.pos.x, c.pos.y - h.pos.y, c.pos.z - h.pos.z) }))
+      .filter((e) => e.d <= reach)
+      .sort((a, b) => a.d - b.d);
+    const pick = what === 'nearest' ? near.slice(0, 1) : near;
+    if (!pick.length) return { error: `No server monsters within ${reach} m.` };
+    const removed: string[] = [];
+    for (const { c } of pick) if (this.spawns.remove(c.id)) removed.push(c.defName);
+    return { removed };
+  }
+
   devSpawn(heroId: number, defName: string, distance: number, side = 0): { id: number } | { error: string } {
     const h = this.heroes.get(heroId)?.hero;
     if (!h) return { error: 'Your hero is not in this region on the server yet.' };
