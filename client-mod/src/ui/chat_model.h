@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <utility>
 #include <vector>
 #include "json.h"
 
@@ -49,6 +50,8 @@ public:
     void system(const std::string& text, double now, uint32_t color = kColorSystem);
 
     std::vector<std::string> take_outbox();    // JSON lines, without the trailing newline
+    // Commands for other parts of the mod, not the chat server: ("barter", "Name").
+    std::vector<std::pair<std::string, std::string>> take_local();
     std::vector<VisibleLine> visible(size_t rows, double now) const;
 
     std::string input_utf8() const;
@@ -100,6 +103,7 @@ private:
     std::vector<std::u32string> history_;
     size_t history_pos_ = 0;
     std::vector<std::string> outbox_;
+    std::vector<std::pair<std::string, std::string>> local_;
     bool tags_enabled_ = true;
     ChatTab tab_ = ChatTab::All;
     uint8_t unread_ = 0;

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -19,6 +20,7 @@
 #include "../ui/chat_model.h"
 #include "../ui/json.h"
 #include "../ui/nametags.h"
+#include "../ui/trade_model.h"
 #include "patch.h"
 #include "renderer.h"
 
@@ -70,6 +72,9 @@ HWND g_hwnd = nullptr;
 std::mutex g_mu;
 ui::ChatModel g_chat;
 ui::TagStore g_tags;
+ui::TradeModel g_trade;
+std::vector<ui::TradeTarget> g_trade_targets;
+std::vector<std::string> g_world_out;   // trade requests for the game connection
 game::HeroPos g_hero;
 std::atomic<bool> g_chat_open{false};
 std::atomic<DWORD> g_block_until{0};   // swallow keys briefly after the box closes
@@ -94,11 +99,21 @@ double now_s() {
     return static_cast<double>(t.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
 }
 
-bool input_blocked() { return menu::active() || g_chat_open.load() || GetTickCount() < g_block_until.load(); }
+std::atomic<bool> g_trade_keys{false};   // the trade window or an invitation has the keyboard
+
+bool input_blocked() {
+    return menu::active() || g_chat_open.load() || g_trade_keys.load() || GetTickCount() < g_block_until.load();
+}
 
 void flush_outbox() {  // caller holds g_mu
     for (auto& line : g_chat.take_outbox()) net::chat_send(line);
+    for (auto& cmd : g_chat.take_local())
+        if (cmd.first == "barter") g_trade.command(cmd.second, g_trade_targets, now_s());
+    for (auto& line : g_trade.take_outbox()) g_world_out.push_back(std::move(line));
+    double now = now_s();
+    for (auto& n : g_trade.take_notes()) g_chat.system(n.first, now, n.second);
     g_chat_open = g_chat.is_open();
+    g_trade_keys = g_trade.wants_keys();
 }
 
 // ---- drawing ---------------------------------------------------------------
@@ -278,6 +293,116 @@ void draw_chat(const Config& cfg, double now) {
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(conv_x, y, phys[i].first, phys[i].second);
 }
 
+// The trade window, in the same frame as Realm chat (Lionhead's unused PC chat screen):
+// your pack on the left, your offer in the middle, the other hero's offer on the right,
+// each side's accept shown on Fable's pewter bar (warm once accepted). Keys are listed
+// along the bottom; the model has the rules (ui/trade_model.h).
+void draw_trade(double now) {
+    const uint32_t kHead = 0xFFC9C0A8, kText = 0xFFE9E4D6, kBright = 0xFFFFF6DC, kDim = 0xFF7E786C, kGold = 0xFFF4E3A8;
+    const float lh = g_r.line_height(Face::Chat), sh = g_r.line_height(Face::Small), th = g_r.line_height(Face::Title);
+    if (g_trade.phase() == ui::TradeModel::Phase::Invited) {
+        const std::string line = g_trade.partner() + " wants to trade with you";
+        char tail[64];
+        std::snprintf(tail, sizeof(tail), "Y: accept    N: decline    (%.0f s)", std::ceil(g_trade.invite_left(now)));
+        const float w = std::max(g_r.measure(line, Face::Title), g_r.measure(tail, Face::Small)) + 64;
+        const float h = th + sh + 40, x = (g_r.screen_w() - w) / 2, y = g_r.screen_h() * 0.18f;
+        g_r.window(x, y, w, h, 1.0f);
+        g_r.text(x + (w - g_r.measure(line, Face::Title)) / 2, y + 14, line, kBright, Face::Title);
+        g_r.text(x + (w - g_r.measure(tail, Face::Small)) / 2, y + 20 + th, tail, kHead, Face::Small);
+        return;
+    }
+    if (!g_trade.window_open()) return;
+
+    const float pad = 18, row_h = lh + 4;
+    const size_t rows = 10;
+    const float col_w = std::min(260.0f, std::max(190.0f, (g_r.screen_w() - 120) / 3.0f - 24));
+    const float gap = 20;
+    const float win_w = pad * 2 + col_w * 3 + gap * 2;
+    const float title_h = th + 10;
+    const float list_h = row_h * rows;
+    const float gold_h = lh + 12;
+    const float win_h = pad + title_h + sh + 6 + list_h + 10 + gold_h + 10 + row_h + 8 + sh + 6 + sh + pad;
+    const float wx = std::floor((g_r.screen_w() - win_w) / 2), wy = std::floor((g_r.screen_h() - win_h) / 2);
+    g_r.window(wx, wy, win_w, win_h, 1.0f);
+
+    // Title, and the purse on the right.
+    g_r.text(wx + pad + 2, wy + pad - 2, "Trade with " + g_trade.partner(), kBright, Face::Title);
+    const std::string purse = "Purse: " + std::to_string(g_trade.purse()) + " gold";
+    g_r.text(wx + win_w - pad - g_r.measure(purse, Face::Small), wy + pad - 2 + th - sh - 2, purse, kHead, Face::Small);
+    g_r.rule(wx + 10, wy + pad + title_h - 6, win_w - 20, 0.9f);
+
+    const float top = wy + pad + title_h + 2;
+    const float cx[3] = {wx + pad, wx + pad + col_w + gap, wx + pad + (col_w + gap) * 2};
+    const auto focus = g_trade.focus();
+    const char* heads[3] = {"Your pack", "Your offer", nullptr};
+    const std::string theirs_head = g_trade.partner() + " offers";
+    for (int c = 0; c < 3; ++c) {
+        const bool focused = (c == 0 && focus == ui::TradeModel::Focus::Pack) || (c == 1 && focus == ui::TradeModel::Focus::Offer);
+        g_r.text(cx[c] + 2, top, heads[c] ? heads[c] : theirs_head, focused ? kBright : kHead, Face::Small);
+    }
+    const float ly = top + sh + 6;
+    for (int c = 0; c < 3; ++c) g_r.panel(cx[c] - 6, ly - 4, col_w + 12, list_h + 8, 0.9f);
+
+    auto draw_list = [&](int c, const std::vector<ui::TradeItem>& items, bool focused) {
+        // Scroll so the selection stays in view.
+        size_t first = 0;
+        if (focused && g_trade.selected() >= rows) first = g_trade.selected() - rows + 1;
+        for (size_t i = first; i < items.size() && i < first + rows; ++i) {
+            const float y = ly + row_h * static_cast<float>(i - first);
+            const bool sel = focused && i == g_trade.selected();
+            if (sel) g_r.bar(cx[c], y, col_w, row_h, 1.0f, true, false);
+            std::string qty = items[i].qty > 1 ? std::to_string(items[i].qty) : "";
+            float qw = qty.empty() ? 0 : g_r.measure(qty) + 8;
+            draw_text_line(cx[c] + 8, y + (row_h - lh) / 2, col_w - 16 - qw, ui::item_label(items[i].def), sel ? kBright : kText, Face::Chat);
+            if (!qty.empty()) g_r.text(cx[c] + col_w - 6 - g_r.measure(qty), y + (row_h - lh) / 2, qty, sel ? kBright : kHead);
+        }
+        if (items.empty()) g_r.text(cx[c] + 8, ly + (row_h - lh) / 2, c == 0 ? "Nothing you can trade" : "Nothing yet", kDim, Face::Small);
+    };
+    draw_list(0, g_trade.pack(), focus == ui::TradeModel::Focus::Pack);
+    draw_list(1, g_trade.mine().items, focus == ui::TradeModel::Focus::Offer);
+    draw_list(2, g_trade.theirs().items, false);
+
+    // Gold under each offer: yours is an edit box like the chat's, theirs is plain.
+    const float gy = ly + list_h + 10;
+    {
+        const bool editing = focus == ui::TradeModel::Focus::Gold;
+        g_r.panel(cx[1] - 6, gy, col_w + 12, gold_h, editing ? 1.0f : 0.8f);
+        const float iy = gy + (gold_h - lh) / 2;
+        float x = cx[1] + 4 + g_r.text(cx[1] + 4, iy, "Gold: ", editing ? kBright : kHead);
+        x += g_r.text(x, iy, g_trade.gold_text(), kGold);
+        if (editing && static_cast<int>(now * 2) % 2 == 0) g_r.rect(x + 1, iy + 1, 1, lh - 2, 0xE0FFF6DC);
+        g_r.text(cx[2] + 4, iy, "Gold: ", kHead);
+        g_r.text(cx[2] + 4 + g_r.measure("Gold: "), iy, std::to_string(g_trade.theirs().gold), kGold);
+    }
+
+    // Accept state for each side, on the pewter bar: warm once accepted.
+    const float ay = gy + gold_h + 10;
+    auto accept_bar = [&](float x, bool on, const std::string& label) {
+        g_r.bar(x, ay, col_w, row_h, 1.0f, on, true);
+        g_r.text(x + (col_w - g_r.measure(label)) / 2, ay + (row_h - lh) / 2, label, on ? kBright : kText);
+    };
+    std::string mine_label;
+    if (g_trade.accepted_me()) mine_label = "You accepted";
+    else if (g_trade.can_accept(now)) mine_label = "A: accept";
+    else {
+        char b[48];
+        std::snprintf(b, sizeof(b), "Look it over... %.0f", std::ceil(std::max(0.1, g_trade.settle_left(now))));
+        mine_label = b;
+    }
+    accept_bar(cx[1], g_trade.accepted_me(), mine_label);
+    accept_bar(cx[2], g_trade.accepted_them(), g_trade.accepted_them() ? g_trade.partner() + " accepted" : "Not accepted yet");
+
+    // A refusal from the server, then the keys.
+    const float ny = ay + row_h + 8;
+    if (!g_trade.problem().empty()) draw_text_line(wx + pad, ny, win_w - pad * 2, g_trade.problem(), ui::TradeModel::kColorError, Face::Small);
+    else if (g_trade.accepted_me() && !g_trade.accepted_them())
+        g_r.text(wx + pad, ny, "Waiting for " + g_trade.partner() + " to accept.", kHead, Face::Small);
+    else if (g_trade.accepted_them() && !g_trade.accepted_me())
+        g_r.text(wx + pad, ny, g_trade.partner() + " has accepted this offer.", kHead, Face::Small);
+    const std::string keys = "Tab: switch    Up/Down: pick    Enter: offer / take back    Left/Right: how many    A: accept    Esc: cancel";
+    draw_text_line(wx + pad, ny + sh + 6, win_w - pad * 2, keys, kDim, Face::Small);
+}
+
 // A small mark at the centre of the view, in the warm parchment-gold of Fable's menu text
 // over a soft dark halo so it reads on snow and on night scenes alike. Sized with the screen
 // height, so it looks the same at 1080p and at 4K.
@@ -331,6 +456,9 @@ void draw(IDirect3DDevice9* dev) {
     draw_crosshair(cfg);
     draw_tags(cfg);
     if (cfg.chat_enabled) draw_chat(cfg, now);
+    g_trade.step(now);
+    flush_outbox();
+    draw_trade(now);
     g_r.end();
 }
 
@@ -453,6 +581,13 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_KEYDOWN: {
             std::lock_guard<std::mutex> lock(g_mu);
             double now = now_s();
+            if (!g_chat.is_open() && g_trade.wants_keys()) {
+                ui::Key k;
+                if (map_key(w, k)) g_trade.key(k, now);
+                if (!g_trade.wants_keys()) g_block_until = GetTickCount() + 200;
+                flush_outbox();
+                return 0;
+            }
             if (!g_chat.is_open()) {
                 if (static_cast<int>(w) == cfg.open_key && !(GetKeyState(VK_MENU) & 0x8000)) {
                     g_chat.open();
@@ -470,6 +605,13 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_KEYUP:
         case WM_CHAR:
             if (!input_blocked()) break;
+            if (msg == WM_CHAR && !g_chat_open && g_trade_keys) {
+                std::lock_guard<std::mutex> lock(g_mu);
+                const wchar_t c = static_cast<wchar_t>(w);
+                if (c >= 0x20) g_trade.character(static_cast<char32_t>(c), now_s());
+                flush_outbox();
+                return 0;
+            }
             if (msg == WM_CHAR && g_chat_open) {
                 std::lock_guard<std::mutex> lock(g_mu);
                 wchar_t c = static_cast<wchar_t>(w);
@@ -669,5 +811,32 @@ void log_stats() {
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
 bool input_blocked_now() { return input_blocked(); }
+
+void on_trade_frame(const std::string& text) {
+    json::Value m;
+    if (!json::parse(text, m) || !m.is_object()) return;
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade.on_frame(m, now_s());
+    flush_outbox();
+}
+
+void on_world_disconnected() {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade.on_disconnected(now_s());
+    g_world_out.clear();
+    flush_outbox();
+}
+
+void set_trade_targets(std::vector<ui::TradeTarget> targets) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade_targets = std::move(targets);
+}
+
+std::vector<std::string> take_world_outbox() {
+    std::lock_guard<std::mutex> lock(g_mu);
+    std::vector<std::string> out;
+    out.swap(g_world_out);
+    return out;
+}
 
 }  // namespace fo::overlay

@@ -63,8 +63,14 @@ from the database on join and are written back by the server.
   Items are moved, never copied. Split and merge conserve quantity.
 - Prices live in the server's item catalog. It refuses to load if any item sells back for
   more than half its buy price, so buy-then-sell can never make gold.
-- Player trades execute both sides in one transaction, against the exact offer both players
-  accepted. Changing an offer clears both accepts.
+- Player trades execute both sides in one transaction, against the exact offer version both
+  players accepted. Changing an offer clears both accepts, and an accept is refused for 2 s
+  after a change. Inside the swap the server re-checks ownership, gold, stolen marks, staff
+  gear, prison and wanted level; if anything fails nothing moves and the window stays open.
+  Both heroes must be in the same channel within 10 m, and walking away, logging out or 5
+  quiet minutes closes the window. Part of a stack is split off into a new item ID. Nothing
+  sits in escrow, so there is nothing to roll back. Socket messages: `trade_*` in
+  shared/protocol/messages.proto.
 - Resurrection Phials (and anything marked untradeable) can't be bought, sold or traded.
 - `economy.audit()` re-derives every balance from the ledger and every stack from its
   history. The server refuses to start if it fails. `GET /admin/v1/economy/audit` runs it live.

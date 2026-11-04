@@ -111,10 +111,16 @@ void on_disconnected(const std::string& why) {
     g_state->puppets->clear_all();
     // With no server driving them, the local generators should run the region again.
     game::spawns::restore();
+    overlay::on_world_disconnected();
 }
 
 void handle_frame(const std::string& json, uint32_t nowMs) {
     State& s = *g_state;
+    // Player trading belongs to the overlay's trade window.
+    if (json.find("\"t\":\"trade_") != std::string::npos && json.find("\"t\":\"trade_") < 16) {
+        overlay::on_trade_frame(json);
+        return;
+    }
     if (s.objects.on_frame(json, nowMs) != world::ObjectFrame::None) return;
     switch (world::frame_type(json)) {
     case world::FrameType::Welcome: {
@@ -400,6 +406,32 @@ void sync_objects(uint32_t nowMs) {
     run_decisions(nowMs);
 }
 
+/**
+ * Player trading: tell the trade window which heroes are around (for "/barter" with no name)
+ * a few times a second, and send what it wants to say to the server.
+ */
+void sync_trade(uint32_t nowMs) {
+    State& s = *g_state;
+    static uint32_t lastTargetsMs = 0;
+    if (nowMs - lastTargetsMs >= 250) {
+        lastTargetsMs = nowMs;
+        std::vector<ui::TradeTarget> targets;
+        game::Pos me;
+        uintptr_t hero = game::local_hero();
+        bool haveMe = hero && game::read_pos(hero, me);
+        for (const world::Pose& p : s.table.poses(nowMs)) {
+            if (p.kind != world::Kind::Hero || p.id == s.ownId) continue;
+            const world::Remote* r = s.table.find(p.id);
+            if (!r || r->dead) continue;
+            float d = haveMe ? std::sqrt((p.x - me.x) * (p.x - me.x) + (p.y - me.y) * (p.y - me.y) + (p.z - me.z) * (p.z - me.z)) : 1e9f;
+            targets.push_back({p.id, r->name, d});
+        }
+        overlay::set_trade_targets(std::move(targets));
+    }
+    for (const std::string& f : overlay::take_world_outbox())
+        if (net::world_connected()) net::world_send(f);
+}
+
 /** Keeps the F8 test puppet walking a circle around the hero so movement is visible. */
 void drive_test_puppet(uint32_t nowMs) {
     State& s = *g_state;
@@ -449,6 +481,7 @@ void tick() {
     report_combat(now);
     sync_objects(now);
     apply_health(now);
+    sync_trade(now);
 
     auto spawned = s.table.drain_spawned();
     auto removed = s.table.drain_removed();
