@@ -15,6 +15,13 @@ void remove();
 
 /** Runs `fn` on the game thread about every `everyMs`. Registration order is kept. */
 void on_tick(std::function<void()> fn, unsigned everyMs);
+/**
+ * Runs `fn` once a frame, just before the frame is shown, when that is the game thread.
+ * For memory writes only (no engine calls): it runs in the middle of the renderer's work.
+ */
+void on_frame(std::function<void()> fn);
+/** Called by the Present hook. */
+void run_frame();
 /** Runs `fn` on the game thread when a key goes down for the first time. */
 void on_key(std::function<void(int)> fn);
 

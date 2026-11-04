@@ -165,6 +165,16 @@ void PuppetPool::park(uint32_t id) {
     ++stats_.parked;
 }
 
+void PuppetPool::place(const std::vector<world::Pose>& poses) {
+    for (const world::Pose& pose : poses) {
+        if (pose.anim == world::Anim::Death) continue;  // left where it fell
+        auto it = live_.find(pose.id);
+        if (it == live_.end()) continue;
+        uintptr_t thing = it->second.ref.thing();  // 0 once the engine has freed it
+        if (thing) write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
+    }
+}
+
 void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     auto it = live_.find(pose.id);
     if (it == live_.end()) return;

@@ -9,6 +9,7 @@
 #include <deque>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "snapshot.h"
@@ -21,6 +22,8 @@ constexpr uint32_t kInterpDelayMs = 150;  // players report 10 times a second
 constexpr uint32_t kRemoveAfterMs = 2000;
 /** Poses older than this are of no use for interpolation. */
 constexpr uint32_t kHistoryMs = 1000;
+/** Frames whose arrival times are compared to find the server clock offset. */
+constexpr uint32_t kOffsetWindowMs = 2000;
 
 struct Pose {
     uint32_t id = 0;
@@ -70,6 +73,12 @@ class EntityTable {
     void clear();
 
     void on_tick(const Tick& t, uint32_t nowMs);
+    /**
+     * The server's tick rate (from `welcome`). With it, each frame is stamped from its tick
+     * number instead of its arrival time, so network and polling jitter does not show up
+     * as stutter in the interpolated poses.
+     */
+    void set_tick_rate(uint32_t hz) { tickRate_ = hz; offsets_.clear(); }
 
     /** Entities that appeared since the last drain, oldest first. */
     std::vector<Spawn> drain_spawned();
@@ -111,7 +120,11 @@ class EntityTable {
     uint32_t localId_ = 0;
     EntityState own_;
     bool haveOwn_ = false;
+    uint32_t stamp(uint32_t tick, uint32_t nowMs);
     uint32_t lastTick_ = 0;
+    uint32_t tickRate_ = 0;
+    /** (arrival, local clock minus server time) for the last kOffsetWindowMs of frames. */
+    std::deque<std::pair<uint32_t, double>> offsets_;
     uint32_t staleFrames_ = 0;
 };
 

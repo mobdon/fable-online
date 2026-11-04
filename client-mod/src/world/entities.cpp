@@ -25,6 +25,26 @@ void EntityTable::clear() {
     spawned_.clear();
     lastTick_ = 0;
     haveOwn_ = false;
+    offsets_.clear();
+}
+
+uint32_t EntityTable::stamp(uint32_t tick, uint32_t nowMs) {
+    if (!tickRate_ || !tick) return nowMs;
+    double serverMs = static_cast<double>(tick) * 1000.0 / tickRate_;
+    double sample = static_cast<double>(nowMs) - serverMs;
+    // The fastest arrival is the truest offset: a late frame only adds delay. Taking the
+    // fastest of the last two seconds follows the server's tick drift (its timer runs a
+    // little slow) without letting one late frame stutter every entity. A jump means a new
+    // channel restarted its tick count.
+    if (!offsets_.empty() && std::abs(sample - offsets_.back().second) > 1000.0) offsets_.clear();
+    offsets_.emplace_back(nowMs, sample);
+    while (offsets_.size() > 1 && nowMs - offsets_.front().first > kOffsetWindowMs) offsets_.pop_front();
+    double offset = sample;
+    for (const auto& o : offsets_) offset = std::min(offset, o.second);
+    double at = serverMs + offset;
+    if (at < 0) at = 0;
+    if (at > nowMs) at = nowMs;
+    return static_cast<uint32_t>(at);
 }
 
 void EntityTable::on_tick(const Tick& t, uint32_t nowMs) {
@@ -35,6 +55,7 @@ void EntityTable::on_tick(const Tick& t, uint32_t nowMs) {
         return;
     }
     lastTick_ = t.tick;
+    const uint32_t atMs = stamp(t.tick, nowMs);
 
     for (const EntityState& s : t.entities) {
         if (s.id == localId_) {
@@ -61,9 +82,9 @@ void EntityTable::on_tick(const Tick& t, uint32_t nowMs) {
         e.meta.anim = s.anim;
         e.meta.dead = s.anim == Anim::Death || s.health <= 0;
         e.meta.lastSeenMs = nowMs;
-        if (!e.history.empty() && nowMs < e.history.back().atMs) e.history.clear();  // clock went backwards
-        e.history.push_back(Sample{nowMs, s.x, s.y, s.z, s.yaw});
-        while (e.history.size() > 2 && nowMs - e.history.front().atMs > kHistoryMs) e.history.pop_front();
+        if (!e.history.empty() && atMs < e.history.back().atMs) e.history.clear();  // clock went backwards
+        e.history.push_back(Sample{atMs, s.x, s.y, s.z, s.yaw});
+        while (e.history.size() > 2 && atMs - e.history.front().atMs > kHistoryMs) e.history.pop_front();
     }
 
     for (auto it = live_.begin(); it != live_.end();) {

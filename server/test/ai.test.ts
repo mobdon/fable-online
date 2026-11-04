@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { NavSim, StubCombat } from '../src/world/nav-sim.js';
 import { profileFor } from '../src/world/ai/profiles.js';
 import { Anim } from '../src/world/ai/types.js';
+import { SWING_WINDUP_MS } from '../src/world/ai/brain.js';
 import { asciiNav, field } from './nav-fixture.js';
 
 const TICK = 50;
@@ -208,4 +209,19 @@ test('in a combat channel the AI drives spawned monsters: a bandit walks up and 
   assert.equal(bandit.targetId, 1);
   assert.ok(Math.hypot(bandit.pos.x, bandit.pos.y) < 3, `bandit at ${bandit.pos.x},${bandit.pos.y} never closed in`);
   assert.ok(sim.combat.get(1)!.health < startHp, 'the hero took hits');
+});
+
+test('a monster swing shows first and lands after the wind-up, so the blow and the hit line up', () => {
+  const sim = new NavSim(field());
+  const bandit = sim.spawn('CREATURE_BANDIT_GRUNT', { x: 20, y: 10, z: 0 }, { yaw: 0 });
+  sim.addHero(1, { x: 20, y: 11, z: 0 });
+  let swingShownAt = -1;
+  let landedAt = -1;
+  for (let t = 0; t < 6000 && landedAt < 0; t += TICK) {
+    sim.step(TICK);
+    if (swingShownAt < 0 && bandit.anim === Anim.Attack) swingShownAt = t;
+    if (combat(sim).log.some((s) => s.attacker === bandit.id)) landedAt = t;
+  }
+  assert.ok(swingShownAt >= 0 && landedAt >= 0, 'swung and hit');
+  assert.ok(landedAt - swingShownAt >= SWING_WINDUP_MS - TICK, `hit ${landedAt - swingShownAt} ms after the swing showed`);
 });
