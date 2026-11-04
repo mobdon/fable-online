@@ -19,5 +19,8 @@ void dev_key(int vk);
 /** Asks the server for `count` monsters ahead of the hero (`def` empty = the server picks).
  *  Staff accounts only; the answer shows on the Mod settings screen and in the log. */
 void dev_spawn(const char* def, int count);
+/** Asks the server to remove the nearest monster (within 50 m) or every monster within 30 m.
+ *  Staff accounts only; removed for every player. */
+void dev_despawn(bool all_near);
 
 }  // namespace fo::sync

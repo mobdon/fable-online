@@ -34,7 +34,7 @@ enum Id {
     // Extras
     kShoulder = 1, kSmooth, kAim, kRedTarget, kCrosshair, kNameTags, kHudScale, kHudBottom,
     // Developer: tools
-    kEnemyType = 90, kSpawn1, kSpawn3,
+    kEnemyType = 90, kSpawn1, kSpawn3, kDespawnNearest, kDespawnNear,
     kTestKit = 100, kGold10k, kHeal, kGod, kSpawning, kStandIn, kShowPos, kTagSelf,
     // Developer: logs and capture
     kStatusLog, kHealthLog, kCapture, kFrameTools,
@@ -50,6 +50,7 @@ const int kSmoothFrames[] = {0, -1, 2, 4};
 const char* const kEnemyDefs[] = {"", "CREATURE_BANDIT_GRUNT_LEVEL1", "CREATURE_BANDIT_ARCHER_LEVEL1", "CREATURE_HOBBE_BASIC",
                                   "CREATURE_BALVERINE_EASY", "CREATURE_MINION_WARDOG"};
 HWND g_window = nullptr;
+constexpr int kInGameMenuMode = 43;
 bool g_pause_lit = false, g_pause_mouse_was_down = false;
 
 std::mutex g_mu;  // guards everything below
@@ -126,6 +127,8 @@ void build() {   // caller holds g_mu
                    {"Random", "Bandit", "Bandit archer", "Hobbe", "Balverine", "Minion war dog"}),
             action(kSpawn1, "Spawn enemy (server)", "10-20 m ahead of you, facing you, run by the server. Needs a gm or admin account."),
             action(kSpawn3, "Spawn 3 enemies (server)", "Three side by side, 10-20 m ahead of you. Needs a gm or admin account."),
+            action(kDespawnNearest, "Remove nearest enemy (server)", "Removes the closest monster within 50 m for everyone. Needs a gm or admin account."),
+            action(kDespawnNear, "Remove enemies near me (server)", "Removes every monster within 30 m for everyone. Needs a gm or admin account."),
             action(kTestKit, "Give test gear", "Sword of Aeons and the platinum set (worn), 100,000 gold and a full heal."),
             action(kGold10k, "Give 10,000 gold", "Local game only: the server ledger is not changed."),
             action(kHeal, "Heal to full", "Tops up the hero's health in the local game."),
@@ -257,6 +260,8 @@ void act(int id) {   // caller holds g_mu
         return;
     case kSpawn1:
     case kSpawn3:
+    case kDespawnNearest:
+    case kDespawnNear:
         g_pending.push_back(id);
         flash("Asking the server...");
         return;
@@ -293,6 +298,8 @@ void run_pending() {
             sync::dev_spawn(kEnemyDefs[type >= 0 && type < 6 ? type : 0], id == kSpawn3 ? 3 : 1);
             break;
         }
+        case kDespawnNearest: sync::dev_despawn(false); break;
+        case kDespawnNear: sync::dev_despawn(true); break;
         case kSpawning: {
             int want = 0;
             {
@@ -382,23 +389,27 @@ void notify(const std::string& text) {
 
 // On Fable's pause screen: one of its pewter buttons at the bottom left, clear of Fable's own
 // list. Fable draws its own pointer there, so the button follows the Windows cursor and button.
-void draw_pause_button(Renderer& r, bool hero_valid) {
+bool fable_menu_up() {
     game::player_modes::poll();
-    // Fable's menus: the pause screen (mode 23), or any time the hero is loaded but the
-    // mouse-look camera has stopped (the in-game menu with Inventory ... Options stops it).
-    static bool played = false;
-    const bool camera = display::mouse_look::in_game();
-    if (camera) played = true;
+    // Player mode 43 is the in-game menu (Inventory ... Options, Return To Game): seen in the
+    // log as "player mode 1 ended; player mode 43 started" each time Esc opened it. Mode 23
+    // is the separate pause screen.
+    return game::pause_menu::open() || game::player_modes::running(kInGameMenuMode);
+}
+
+bool button_wanted() { return !g_open && g_window && fable_menu_up(); }
+
+void draw_pause_button(Renderer& r, bool) {
     const bool pause = game::pause_menu::open();
-    const bool stopped = played && hero_valid && !camera;
-    const bool paused = pause || stopped;
+    const bool menu = game::player_modes::running(kInGameMenuMode);
+    const bool paused = fable_menu_up();
     const bool show = !g_open && paused && g_window;
     static bool was_paused = false;
     static int logged = 0;
     if (paused != was_paused && logged < 40) {
         ++logged;
-        fo::log("modsettings: Fable menu %s (pause screen %d, camera stopped %d, player modes %08X%08X)%s", paused ? "up" : "gone",
-                pause, stopped, static_cast<unsigned>(game::player_modes::running_mask() >> 32),
+        fo::log("modsettings: Fable menu %s (pause screen %d, in-game menu %d, player modes %08X%08X)%s", paused ? "up" : "gone",
+                pause, menu, static_cast<unsigned>(game::player_modes::running_mask() >> 32),
                 static_cast<unsigned>(game::player_modes::running_mask()), paused && show ? "; MOD SETTINGS button drawn" : "");
     }
     was_paused = paused;

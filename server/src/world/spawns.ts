@@ -294,6 +294,21 @@ export class SpawnManager {
     return c;
   }
 
+  /**
+   * Staff dev tool: take a creature out of the world now, with no body, loot or experience.
+   * A creature from a spawn point comes back on that point's usual timer, as after a death.
+   */
+  remove(creatureId: number): boolean {
+    const c = this.live.get(creatureId);
+    if (!c) return false;
+    this.live.delete(c.id);
+    this.corpses.delete(c.id);
+    this.combat.remove(c.id);
+    const p = c.spawnId ? this.points.get(c.spawnId) : undefined;
+    if (p && p.live.delete(c.id)) p.timers.push(p.respawnMs);
+    return true;
+  }
+
   dispose(): void {
     for (const id of this.live.keys()) this.combat.remove(id);
     this.live.clear();

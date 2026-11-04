@@ -237,9 +237,25 @@ test('combat sim: a staff dev spawn puts a hostile creature in front of the hero
   assert.ok(sim.snapshot().some((e) => e.id === r.id), 'sent to clients like any monster');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_TRADER_TEST', 4), 'traders are not spawned');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_NOT_REAL', 4));
+  // Removing: nearest only, then everything near; nothing far away is touched.
+  const far = sim.devSpawn(hero.id, 'CREATURE_WOLF', 45);
+  const second = sim.devSpawn(hero.id, 'CREATURE_WOLF', 12);
+  assert.ok('id' in far && 'id' in second);
+  const nearest = sim.devDespawn(hero.id, 'nearest');
+  assert.ok('removed' in nearest && nearest.removed.length === 1);
+  assert.ok(![...sim.spawns.creatures()].some((c) => c.id === second.id), 'the 12 m wolf went first');
+  const near = sim.devDespawn(hero.id, 'near');
+  assert.ok('removed' in near && near.removed.length === 1, 'the 15 m wolf; the 45 m one is out of reach');
+  assert.ok([...sim.spawns.creatures()].some((c) => c.id === far.id));
+  assert.ok('error' in sim.devDespawn(hero.id, 'near'));
+  sim.spawns.remove(far.id);
+  const again = sim.devSpawn(hero.id, 'CREATURE_WOLF', 15);
+  assert.ok('id' in again);
+  const wolf2 = [...sim.spawns.creatures()].find((c) => c.id === again.id)!;
+
   // Killed, it is cleared like the rest and never comes back.
-  wolf.alive = false;
-  sim.spawns.died(wolf.id);
+  wolf2.alive = false;
+  sim.spawns.died(wolf2.id);
   sim.spawns.step(200);
   sim.spawns.step(600_000);
   assert.equal([...sim.spawns.creatures()].length, 0);

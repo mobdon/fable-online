@@ -35,7 +35,9 @@ void draw_hud(overlay::Renderer& r, bool hero_valid, float x, float y, float z, 
 
 /** A line from elsewhere (such as the server's answer to a dev spawn) shown on the screen. Any thread. */
 void notify(const std::string& text);
-/** Overlay, every frame: draws the MOD SETTINGS button while one of Fable's menus is up. */
+/** True while the MOD SETTINGS button should be on screen (one of Fable's menus is up). */
+bool button_wanted();
+/** Overlay, at Present, on top of everything Fable drew: the MOD SETTINGS button. */
 void draw_pause_button(overlay::Renderer& r, bool hero_valid);
 
 /** Window messages while open: true when the screen used the message. */
