@@ -9,6 +9,7 @@
 //                                                position is in
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const game = process.argv[2];
 if (!game) { console.error('usage: regions.mjs <Fable install folder>'); process.exit(1); }
@@ -90,7 +91,7 @@ for (const line of graphText.split(/\r?\n/)) {
   graph[m[1]] = [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
 }
 
-const out = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..', 'shared', 'defs', 'regions.json');
+const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'shared', 'defs', 'regions.json');
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, JSON.stringify({ source: 'FinalAlbion.wld', maps, graph }, null, 2));
 console.log(`${maps.length} maps (${maps.filter((m) => m.w).length} with sizes), ${Object.keys(graph).length} regions in the graph -> ${out}`);
