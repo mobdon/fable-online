@@ -94,10 +94,20 @@ bool Renderer::build_atlas(const assets::UiArt* art, int fallback_px) {
 
     std::vector<uint32_t> px(static_cast<size_t>(tex_w_) * tex_h_, 0);
     Packer pk{tex_w_, tex_h_};
+    // Each image gets a one-texel border repeating its own edge, so a sample that lands on the
+    // rim of a scaled piece (the bar's ends and middle) never picks up the next image in the
+    // atlas: that showed as a thin line where a name plate's end meets its middle.
     auto blit = [&](const uint32_t* src, int w, int h, Rect& at) {
-        if (!pk.place(w, h, at.x, at.y)) return false;
-        at.w = w; at.h = h;
-        for (int y = 0; y < h; ++y) std::memcpy(&px[static_cast<size_t>(at.y + y) * tex_w_ + at.x], src + static_cast<size_t>(y) * w, w * 4);
+        int ox = 0, oy = 0;
+        if (!pk.place(w + 2, h + 2, ox, oy)) return false;
+        at.x = ox + 1; at.y = oy + 1; at.w = w; at.h = h;
+        for (int y = -1; y <= h; ++y) {
+            const uint32_t* row = src + static_cast<size_t>(std::clamp(y, 0, h - 1)) * w;
+            uint32_t* dst = &px[static_cast<size_t>(at.y + y) * tex_w_ + at.x];
+            std::memcpy(dst, row, w * 4);
+            dst[-1] = row[0];
+            dst[w] = row[w - 1];
+        }
         return true;
     };
     for (int i = 0; i < 3; ++i) {
@@ -311,15 +321,20 @@ void Renderer::window(float x, float y, float w, float h, float a) {
     sprite(msn_[8], x + w - r, y + h - b, r, b, c);
 }
 
-float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends) {
+float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends, uint32_t tint) {
     if (!fable_bar_) {
-        rect(x, y, w, h, scale_alpha(on ? 0xC0A28F74 : 0xA0938D7E, a));
+        const uint32_t plain = tint != 0xFFFFFFFF ? (0xC0000000 | (tint & 0x00FFFFFF)) : on ? 0xC0A28F74 : 0xA0938D7E;
+        rect(x, y, w, h, scale_alpha(plain, a));
         return 0;
     }
-    uint32_t c = scale_alpha(0xFFFFFFFF, a);
+    uint32_t c = scale_alpha(tint, a);
     const Rect* b = bar_[on ? 1 : 0];
     if (!ends) { sprite(b[1], x, y, w, h, c); return 0; }
-    float e = b[0].w * h / b[0].h;          // keep the ornate ends' proportions
+    // Whole pixels for every edge, so the ends and the middle meet exactly, with no column
+    // drawn twice or left out between them.
+    x = std::round(x); y = std::round(y); h = std::round(h);
+    float e = std::round(b[0].w * h / b[0].h);  // keep the ornate ends' proportions
+    w = std::round(w);
     if (w < 2 * e) w = 2 * e;
     sprite(b[0], x, y, e, h, c);
     sprite(b[1], x + e, y, w - 2 * e, h, c);

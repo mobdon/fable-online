@@ -22,6 +22,11 @@ export type ClientMessage =
   /** The client's Fable finished a quest. The server checks the reward before paying anything. */
   | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] }
   /**
+   * The hero's total renown in the client's own Fable. The server takes it once as an import,
+   * then only raises its own number within a daily cap (src/heroes/renown.ts).
+   */
+  | { t: 'renown_report'; total: number }
+  /**
    * The mod reporting where the local game put its hero, used until Fable's own input is
    * mapped. A position from a client is a position a cheat can choose, so with
    * clientMovement 'checked' (the default) the server only takes moves the hero could have
@@ -176,6 +181,9 @@ export function decode(raw: string): ClientMessage {
       const items = Array.isArray(m.items) ? m.items.filter((i): i is string => typeof i === 'string' && i.length <= 64).slice(0, 8) : [];
       return { t: 'quest_complete', quest: m.quest, gold: isNum(m.gold) ? m.gold : -1, renown: isNum(m.renown) ? m.renown : 0, items };
     }
+    case 'renown_report':
+      if (!isNum(m.total) || !Number.isSafeInteger(m.total) || m.total < 0) throw new ProtocolError('bad renown_report');
+      return { t: 'renown_report', total: m.total };
     case 'law':
       return decodeLaw(m);
     case 'travel': {

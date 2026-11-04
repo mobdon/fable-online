@@ -2,7 +2,7 @@
 // server.ts puts it on TCP. In the game server, realm-chat.ts calls updateHero() with
 // authoritative positions, renown and PvP flags.
 import {
-  PROTOCOL_VERSION, TALK_CHANNELS,
+  PROTOCOL_VERSION, TALK_CHANNELS, staffBadge,
   type ClientMsg, type ServerMsg, type TalkChannel, type ErrCode, type TagInfo, type TagMove,
 } from "./protocol.js";
 import { verifyToken, type Role } from "./auth.js";
@@ -165,7 +165,7 @@ export class ChatHub {
     if (!this.cfg.tokenSecret && m.dev?.pvp) s.pvp = true;
     this.byConn.set(conn, s);
     this.byKey.set(key, s);
-    conn.send({ t: "welcome", v: PROTOCOL_VERSION, id: s.id, name, renown, motd: this.cfg.motd, channels: [...TALK_CHANNELS] });
+    conn.send({ t: "welcome", v: PROTOCOL_VERSION, id: s.id, name, renown, staff: staffBadge(role), motd: this.cfg.motd, channels: [...TALK_CHANNELS] });
     this.emit("chat.login", { account, name, role });
   }
 
@@ -334,7 +334,7 @@ const dist2 = (a: { x: number; y: number; z: number }, b: { x: number; y: number
 
 const round = (v: number) => Math.round(v * 100) / 100;
 const tagOf = (s: Session): TagInfo => ({
-  id: s.id, name: s.name, renown: s.renown, title: s.title, guild: s.guild, pvp: s.pvp,
+  id: s.id, name: s.name, renown: s.renown, title: s.title, guild: s.guild, pvp: s.pvp, staff: staffBadge(s.role),
   x: round(s.x), y: round(s.y), z: round(s.z),
 });
 

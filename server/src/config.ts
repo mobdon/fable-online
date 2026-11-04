@@ -128,6 +128,14 @@ export interface ServerConfig {
    * as that kill's own orbs (the stand-in dying in Fable) and not paid twice.
    */
   xpEchoMs: number;
+  /**
+   * Renown the server takes from a hero's own Fable the first time the mod reports it
+   * (src/heroes/renown.ts). Quests run on each player's Fable, so the save already holds
+   * renown the server never saw. Taken once per hero, up to this much.
+   */
+  renownImportMax: number;
+  /** After that one import, the most renown reports may add per hero per UTC day. */
+  renownDailyMax: number;
   /** 'reward': each kill pays the creature's reward value. 'tables': Fable's drop tables, gold only. */
   lootMode: 'reward' | 'tables';
   /** Most gold one hero can earn from monster kills per hour (0 = no cap). */
@@ -220,6 +228,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     xpLocalDailyMax: num('FO_XP_LOCAL_DAILY_MAX', 50_000),
     xpImportMax: num('FO_XP_IMPORT_MAX', 250_000),
     xpEchoMs: num('FO_XP_ECHO_MS', 15_000),
+    renownImportMax: num('FO_RENOWN_IMPORT_MAX', 5_000),
+    renownDailyMax: num('FO_RENOWN_DAILY_MAX', 5_000),
     lootMode: str('FO_LOOT_MODE', 'reward') === 'tables' ? 'tables' : 'reward',
     lootGoldPerHour: num('FO_LOOT_GOLD_PER_HOUR', 3_000),
     monsterRespawnSec: num('FO_RESPAWN_SEC', 300),

@@ -15,6 +15,7 @@ struct Tag {
     std::string name, title, guild;
     double renown = 0;
     bool pvp = false;
+    std::string staff;                // "DEV" / "GM" from the server's account role, "" for players
     float x = 0, y = 0, z = 0;        // last position from the server
     float px = 0, py = 0, pz = 0;     // where we draw it: eased toward x/y/z
 };
@@ -26,6 +27,8 @@ struct Label {
     uint32_t name_color, info_color;   // 0xAARRGGBB, alpha already applied
     float depth;                       // view distance, for sorting
     bool pvp;                          // flagged for open-world PvP
+    bool self = false;                 // the player's own hero: drawn on a gold plate
+    std::string badge;                 // staff badge above the name ("DEV", "GM"), "" for none
 };
 
 struct TagSettings {
@@ -41,13 +44,20 @@ struct TagSettings {
 uint32_t renown_color(double renown);
 std::string format_renown(double renown);   // 12500 -> "12,500 renown"
 
+// A view matrix (row vectors, D3D layout) from a camera's position, forward and up, like
+// D3DXMatrixLookAtLH. With `ref` (the game's own view matrix, 16 floats) each axis is turned
+// to point the way ref's does, so the result follows the engine's convention. False for a
+// degenerate camera.
+bool view_from_camera(const float pos[3], const float fwd[3], const float up[3], const float* ref, float out[16]);
+
 class TagStore {
 public:
     // Applies a "tags" message. A new region means all old tags are gone.
     void apply(const json::Value& m);
     void clear() { tags_.clear(); }
     // Dev check: put a tag on your own hero so placement can be checked solo.
-    void set_self(bool on, const std::string& name, double renown, float x, float y, float z);
+    void set_self(bool on, const std::string& name, double renown, float x, float y, float z,
+                  const std::string& staff = "");
 
     // Eases drawn positions toward the latest server positions (call once a frame).
     void step(float dt);

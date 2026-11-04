@@ -241,7 +241,19 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX scoreboard_scores_activity ON scoreboard_scores(activity, score);
   `,
-  /* 6: hero experience pools, bought stat and ability levels */ `
+  /* 6: renown taken from the hero's own Fable */ `
+  -- Set the first time the mod reports the hero's renown: that report is the one-off import.
+  ALTER TABLE heroes ADD COLUMN renown_imported_at INTEGER;
+
+  -- Renown added from reports after the import, per UTC day, for the daily cap.
+  CREATE TABLE renown_days (
+    hero_id INTEGER NOT NULL REFERENCES heroes(id),
+    day     TEXT NOT NULL,
+    gained  INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (hero_id, day)
+  );
+  `,
+  /* 7: hero experience pools, bought stat and ability levels */ `
   -- The server's copy of Fable's CTCHeroExperience and ability levels. The mod writes this
   -- into the local game; nothing a client reports raises it without a server check.
   CREATE TABLE hero_xp (

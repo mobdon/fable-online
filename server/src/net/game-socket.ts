@@ -25,6 +25,7 @@ export class GameSocket {
   private inputs = new Bucket(60, 90);
   private chats = new Bucket(1, 5);
   private questClaims = new Bucket(0.2, 3);
+  private renownReports = new Bucket(0.5, 3);
   private interacts = new Bucket(4, 8);
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
@@ -111,6 +112,15 @@ export class GameSocket {
         if (!this.questClaims.take()) return this.send({ t: 'quest_reward', ok: false, quest: msg.quest, reason: 'rate' });
         const r = this.app.quests.claim(this.heroId, { quest: msg.quest, gold: msg.gold, renown: msg.renown, items: msg.items });
         return this.send({ t: 'quest_reward', quest: msg.quest, ...r });
+      }
+      case 'renown_report': {
+        if (!this.renownReports.take()) return;
+        const r = this.app.renown.report(this.heroId, msg.total);
+        if (!r.ok) return this.send({ t: 'renown', ok: false, reason: r.reason });
+        // Stand-in labels in world frames follow at once; chat name tags re-read the database.
+        const p = this.app.director.channelOf(this.heroId)?.players.get(this.heroId);
+        if (p) p.renown = r.renown;
+        return this.send({ t: 'renown', ok: true, renown: r.renown, gained: r.gained, capped: r.capped });
       }
       case 'law':
         if (!this.lawReqs.take()) return this.dropped('law flood');

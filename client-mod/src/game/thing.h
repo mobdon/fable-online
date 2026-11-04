@@ -3,6 +3,7 @@
 // (tools/re-notes/02-hero-live-state.md) and the same fields on any other creature, which
 // is how a puppet is moved without asking the engine's AI for permission.
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace fo::game {
@@ -26,6 +27,21 @@ constexpr uint32_t kAreaAnchor = 0x0E8;   // thing -> area anchor, changes on an
 constexpr uint32_t kFlags91 = 0x091;      // bit 0 set: the thing is being removed; no health
 constexpr uint32_t kMaxHealth = 0x0B0;    // float
 constexpr uint32_t kHealth = 0x0B4;       // float
+
+/**
+ * The hero's stats component (CTCHeroStats, vtable 0x0124F70C). Things keep their components
+ * in a vector of {int type, component*} pairs sorted by type, at thing+0x44 (begin) and +0x48
+ * (end); the stats component is type 4 (the script interface's GiveGold looks it up the same
+ * way). Field offsets are from CTCHeroStats' save code: tools/re-notes/12-renown.md.
+ */
+constexpr uint32_t kComponentsBegin = 0x044;
+constexpr uint32_t kHeroStatsType = 4;
+constexpr uint32_t kHeroStatsVtable = 0x0124F70C;
+constexpr uint32_t kStatsRenownLevel = 0x070;  // int, "RenownLevel"
+constexpr uint32_t kStatsRenownTotal = 0x07C;  // int, "RenownTotal": what the hero's stats screen counts
+
+/** The hero's total renown in Fable (CTCHeroStats RenownTotal). False when it can't be read. */
+bool read_renown(uintptr_t thing, int32_t& total, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();

@@ -30,7 +30,8 @@ public:
     bool using_chat_frame() const { return fable_msn_; }
     // Fable's pewter scroll bar (its menu buttons): ornate ends when `ends`, warm when `on`.
     // Returns the width of one end piece at this height, so callers can inset text.
-    float bar(float x, float y, float w, float h, float alpha, bool on, bool ends);
+    // `tint` multiplies the art: 0xFFFFFFFF leaves it pewter, gold or red recolour it.
+    float bar(float x, float y, float w, float h, float alpha, bool on, bool ends, uint32_t tint = 0xFFFFFFFF);
     // A ring centred on (cx, cy) between radii r0 and r1, with soft edges `feather` pixels wide.
     void ring(float cx, float cy, float r0, float r1, float feather, uint32_t argb);
     // A rectangle with soft edges, for marks that must not look like hard pixels.

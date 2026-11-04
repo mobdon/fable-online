@@ -10,6 +10,7 @@
 #include <string>
 #include "../assets/fable_ui.h"
 #include "../config.h"
+#include "../display/camera_latch.h"
 #include "../display/frame_probe.h"
 #include "../display/hud_scale.h"
 #include "../display/mouse_look.h"
@@ -24,6 +25,7 @@
 #include "../ui/nametags.h"
 #include "../ui/trade_model.h"
 #include "../ui/party_model.h"
+#include "../sync.h"
 #include "patch.h"
 #include "renderer.h"
 
@@ -240,10 +242,33 @@ void draw_party_list() {
     }
 }
 
+bool g_logged_frame_camera = false;
+constexpr uint32_t kTagGold = 0xFFFFD84A;      // own tag: Fable's pewter bar tinted gold
+constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
+
 void draw_tags(const Config& cfg) {
     if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
+    // Not over loading screens, teleports and their fades.
+    if (!sync::world_shown()) return;
     float vp[16];
     mul(g_view, g_proj, vp);
+    // Place tags with the camera the engine drew this frame with (after camera smoothing and
+    // the shoulder offset). The view matrix seen through SetTransform is Fable's own camera
+    // from its last 15-a-second update, without those, so tags placed with it stepped and sat
+    // off the hero.
+    float cpos[3], cfwd[3], cup[3], cview[16];
+    const float* gv = &g_view._11;
+    if (display::camera_latch::frame_camera(cpos, cfwd, cup, 0.25) &&
+        ui::view_from_camera(cpos, cfwd, cup, gv, cview)) {
+        D3DMATRIX v;
+        std::memcpy(&v, cview, sizeof cview);
+        mul(v, g_proj, vp);
+        if (!g_logged_frame_camera) {
+            g_logged_frame_camera = true;
+            fo::log("tags: placed with the engine's frame camera; SetTransform view row 4 %.1f %.1f %.1f, frame camera %.1f %.1f %.1f",
+                    gv[12], gv[13], gv[14], cview[12], cview[13], cview[14]);
+        }
+    }
     ui::TagSettings s;
     s.head_height = cfg.tag_height;
     s.up_axis = cfg.up_axis;
@@ -259,9 +284,18 @@ void draw_tags(const Config& cfg) {
         const float name_w = g_r.measure(l.name_line, Face::Title);
         const float plate_w = name_w + end_w * 2 + 10;                 // the name sits on the plain middle of the bar
         const float top = l.y - plate_h - info_h - 2;
-        g_r.bar(l.x - plate_w / 2, top, plate_w, plate_h, alpha * 0.95f, l.pvp, true);
+        // Your own hero sits on a gold plate (the pewter bar, tinted), everyone else on pewter.
+        g_r.bar(l.x - plate_w / 2, top, plate_w, plate_h, alpha * 0.95f, l.pvp && !l.self, true, l.self ? kTagGold : 0xFFFFFFFF);
         g_r.text(l.x - name_w / 2, top + (plate_h - name_h) / 2, l.name_line, l.name_color, Face::Title, true);
         g_r.text(l.x - g_r.measure(l.info_line, Face::Small) / 2, top + plate_h + 1, l.info_line, l.info_color, Face::Small, true);
+        // Staff (from the account role the server signed, never from the client): the same
+        // bar in red above the name, with DEV or GM on it.
+        if (!l.badge.empty()) {
+            const float bh = name_h + 6, bw_text = g_r.measure(l.badge, Face::Title), bend = 64 * bh / 33;
+            const float bw = bw_text + bend * 2 + 6, by = top - bh + 1;
+            g_r.bar(l.x - bw / 2, by, bw, bh, alpha * 0.95f, true, true, kTagStaffRed);
+            g_r.text(l.x - bw_text / 2, by + (bh - name_h) / 2, l.badge, (l.name_color & 0xFF000000) | 0x00FFE9A8, Face::Title, true);
+        }
     }
 }
 
@@ -587,7 +621,8 @@ void draw(IDirect3DDevice9* dev) {
     flush_outbox();
     g_tags.step(dt > 0.25f ? 0.25f : dt);
     if (g_hero.valid)
-        g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, g_hero.x, g_hero.y, g_hero.z);
+        g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), std::max(0, sync::own_renown()),
+                        g_hero.x, g_hero.y, g_hero.z, g_chat.my_staff());
     if (!g_r.begin(dev, art, cfg.font_px)) return;
     draw_crosshair(cfg);
     draw_tags(cfg);
