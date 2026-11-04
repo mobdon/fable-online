@@ -31,3 +31,5 @@ $cxx $flags -o "$out/fable_online_hud_test" "$here/hud_test.cpp" "$src/display/h
 $cxx -std=c++17 -O1 -Wall -Wextra -Wno-unused-parameter -I"$src" -o "$out/fable_online_held_tests" \
   "$here/held_test.cpp" "$src/world/held.cpp" "$src/world/objects.cpp"
 "$out/fable_online_held_tests"
+$cxx $flags -o "$out/fable_online_modsettings_test" "$here/modsettings_test.cpp" "$src/modsettings/settings_model.cpp"
+"$out/fable_online_modsettings_test"

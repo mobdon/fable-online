@@ -189,6 +189,25 @@ export class SpawnManager {
     p.timers.push(p.respawnMs * j);
   }
 
+  /**
+   * One creature that belongs to no spawn point (a staff dev spawn): it fights and dies like
+   * the rest, its body is cleared the same way, and it never comes back.
+   */
+  spawnExtra(def: string, at: Vec3, yaw: number): Creature | undefined {
+    let pos: Vec3 = { ...at };
+    if (this.opts.place) {
+      const snapped = this.opts.place(pos);
+      if (!snapped) return undefined;
+      pos = snapped;
+    }
+    const c = creatureFromDef(allocCreatureId(), def, pos, this.data, null);
+    c.yaw = yaw;
+    this.live.set(c.id, c);
+    this.combat.add(c);
+    this.hooks.onSpawn?.(c);
+    return c;
+  }
+
   dispose(): void {
     for (const id of this.live.keys()) this.combat.remove(id);
     this.live.clear();

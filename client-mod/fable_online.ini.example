@@ -91,3 +91,15 @@ hud_scale=off
 ; In game, draw the HUD along the bottom edge at this scale instead (for example 1.6 with
 ; hud_scale=1.8 keeps the top HUD bigger). 0 = same as the rest.
 hud_bottom_scale=0
+
+; Everything above can also be changed in game: Mod settings (start-up menu, or the button on
+; Fable's pause screen). Changes made there are written back to this file.
+
+[dev]
+; Only used in dev builds (FABLE_ONLINE_DEV=1), where Mod settings has a Developer page.
+; 1 = F6-F10 also do their dev jobs (spawning, status, stand-in, test gear, capture).
+hotkeys=0
+; 1 = show the hero's position and area at the top of the screen.
+show_position=0
+; 1 = keep the hero's health topped up in the local game.
+god_mode=0

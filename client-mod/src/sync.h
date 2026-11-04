@@ -10,7 +10,14 @@ namespace fo::sync {
 void start();
 void stop();
 
-/** F6 and friends while FABLE_ONLINE_DEV=1; does nothing otherwise. */
+/**
+ * Dev tools, from the Developer page of Mod settings (and F6-F8 when [dev] hotkeys=1):
+ * VK_F6 toggles the local game's own spawning, VK_F7 writes the online status to the log,
+ * VK_F8 spawns or removes a test stand-in. Game thread only; does nothing before start().
+ */
 void dev_key(int vk);
+/** Asks the server for `count` monsters ahead of the hero (`def` empty = the server picks).
+ *  Staff accounts only; the answer shows on the Mod settings screen and in the log. */
+void dev_spawn(const char* def, int count);
 
 }  // namespace fo::sync

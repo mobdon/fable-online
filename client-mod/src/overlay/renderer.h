@@ -35,6 +35,8 @@ public:
     void ring(float cx, float cy, float r0, float r1, float feather, uint32_t argb);
     // A rectangle with soft edges, for marks that must not look like hard pixels.
     void soft_rect(float x, float y, float w, float h, float feather, uint32_t argb);
+    // A mouse pointer with its tip at (x, y): parchment arrow with a dark edge.
+    void pointer(float x, float y, float size);
     // A thin pewter rule, like the dividers in Fable's menus.
     void rule(float x, float y, float w, float alpha);
     // UTF-8 text with Fable's soft black shadow (or a full outline for name tags).
