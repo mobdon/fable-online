@@ -89,6 +89,9 @@ void config_load(HMODULE self) {
     if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = 0;
     std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
     c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
+    std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
+    c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
+    if (c.mouse_smoothing < -1 || c.mouse_smoothing > 60) c.mouse_smoothing = 0;
     std::wstring hs = ini_str(f, L"display", L"hud_scale", L"off");
     c.hud_scale = hs == L"auto" ? 0.0f : hs == L"off" ? -1.0f : static_cast<float>(_wtof(hs.c_str()));
     if (c.hud_scale > 4.0f) c.hud_scale = 4.0f;
