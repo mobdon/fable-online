@@ -43,7 +43,10 @@ std::atomic<unsigned> g_hidden{0};
 bool g_pixel_2d = false;
 float g_pixel_sx = 1, g_pixel_sy = 1;   // layout pixels -> back-buffer pixels
 
-bool hiding() { return g_hide_w.load() > 0; }
+std::atomic<DWORD> g_hide_at{0};
+// Set and kept fresh by the overlay each frame it draws chat; stale after a quarter second
+// (loading screens, where the overlay doesn't draw).
+bool hiding() { return g_hide_w.load() > 0 && GetTickCount() - g_hide_at.load() < 250; }
 
 // True when a draw spanning [x0,x1]x[y0,y1] (back-buffer pixels) overlaps the hidden rectangle.
 bool overlaps_hidden(float x0, float y0, float x1, float y1) {
@@ -264,7 +267,7 @@ const void* scaled_rhw(IDirect3DDevice9* d, const void* data, UINT first, UINT c
 
 // Fable's own 2D, in screen or layout pixels, that falls under the hidden rectangle.
 bool hidden_pixels(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
-    if (!hiding() || !mouse_look::in_game()) return false;
+    if (!hiding()) return false;
     DWORD fvf = 0;
     const bool rhw = SUCCEEDED(d->GetFVF(&fvf)) && (fvf & D3DFVF_POSITION_MASK) == D3DFVF_XYZRHW;
     if (!rhw && !g_pixel_2d) return false;
@@ -275,7 +278,7 @@ bool hidden_pixels(IDirect3DDevice9* d, const void* data, UINT first, UINT count
 
 // HUD sprites in clip space under the hidden rectangle.
 bool hidden_sprites(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT stride) {
-    if (!hiding() || !mouse_look::in_game() || stride < 12 || !drawing_to_screen(d)) return false;
+    if (!hiding() || stride < 12 || !drawing_to_screen(d)) return false;
     const float w = static_cast<float>(g_w), h = static_cast<float>(g_h);
     return hide_draw(data, first, count, stride, [w, h](const float* p, float& x, float& y) {
         x = (p[0] + 1.0f) * 0.5f * w;
@@ -440,7 +443,10 @@ LPARAM map_mouse(UINT msg, LPARAM l) {
 
 float scale() { return active() ? g_scale.load() : 1.0f; }
 
+unsigned hidden_count() { return g_hidden.load(); }
+
 void hide_under(float x, float y, float w, float h) {
+    g_hide_at = GetTickCount();
     g_hide_x = x;
     g_hide_y = y;
     g_hide_h = h;

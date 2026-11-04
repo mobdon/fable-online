@@ -162,8 +162,18 @@ int main(int argc, char** argv) {
                 GetCursorPos(&c);
                 ScreenToClient(w, &c);
                 std::printf("cursor at %ld,%ld; clicking\n", c.x, c.y);
-                PostMessageW(w, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(c.x, c.y));
-                PostMessageW(w, WM_LBUTTONUP, 0, MAKELPARAM(c.x, c.y));
+                // A real button press (the mod reads the button state, not window messages).
+                INPUT in = {};
+                in.type = INPUT_MOUSE;
+                in.mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+                SendInput(1, &in, sizeof in);
+                ++chat_step;
+            }
+            if (chat_step == 3 && t > 3.8f) {
+                INPUT in = {};
+                in.type = INPUT_MOUSE;
+                in.mi.dwFlags = MOUSEEVENTF_LEFTUP;
+                SendInput(1, &in, sizeof in);
                 ++chat_step;
             }
         }

@@ -17,4 +17,6 @@ void log_status();
 // Fable's HUD pieces that overlap this back-buffer rectangle are not drawn (Realm chat sits
 // there while it is open). w <= 0 clears it. Any thread.
 void hide_under(float x, float y, float w, float h);
+// Draws left out by hide_under so far.
+unsigned hidden_count();
 }  // namespace fo::display::hud
