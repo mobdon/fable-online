@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+#include <map>
 // Name tags above other heroes: the server sends who is near and where ("tags" messages);
 // each frame this projects them onto the screen with the camera's view-projection matrix.
 // No Windows or Direct3D in here (tested on Linux).
@@ -48,6 +50,9 @@ public:
     void clear() { tags_.clear(); }
     // Dev check: put a tag on your own hero so placement can be checked solo.
     void set_self(bool on, const std::string& name, double renown, float x, float y, float z);
+    // Where the stand-ins are drawn right now (hero id -> position). Tags on those heroes
+    // sit on the stand-in instead of easing toward the chat service's slower updates.
+    void set_live(std::map<uint32_t, std::array<float, 3>> live) { live_ = std::move(live); }
 
     // Eases drawn positions toward the latest server positions (call once a frame).
     void step(float dt);
@@ -61,6 +66,7 @@ public:
 
 private:
     std::map<uint32_t, Tag> tags_;
+    std::map<uint32_t, std::array<float, 3>> live_;
     uint32_t region_ = 0xFFFFFFFF;
     bool self_on_ = false;
     Tag self_;

@@ -114,9 +114,9 @@ void test_table_interpolation() {
     table.on_tick(a, 1000);
     table.on_tick(b, 1100);
 
-    // Rendering runs 100 ms behind, so at 1150 the pose is halfway between the frames.
+    // Rendering runs kInterpDelayMs behind: halfway between the frames is 1050 + the delay.
     Pose p;
-    CHECK(table.pose_of(2, 1150, p));
+    CHECK(table.pose_of(2, 1050 + kInterpDelayMs, p));
     CLOSE(p.x, 5.0f);
     CLOSE(p.yaw, 0.5f);
     CLOSE(p.speed, 100.0f);  // 10 m in 100 ms
@@ -233,8 +233,8 @@ void test_reporter() {
     PositionReporter r;
     CHECK(r.due(1000, 0, 0, 0, 0));  // first report goes straight out
     r.sent(1000, 0, 0, 0, 0);
-    CHECK(!r.due(1050, 5, 0, 0, 0));  // too soon, however far
-    CHECK(r.due(1100, 0.5f, 0, 0, 0));  // moving: every 100 ms
+    CHECK(!r.due(1030, 5, 0, 0, 0));  // too soon, however far
+    CHECK(r.due(1100, 0.5f, 0, 0, 0));  // moving: at least every 50 ms
     CHECK(!r.due(1100, 0.01f, 0, 0, 0));  // standing still...
     CHECK(!r.due(1900, 0.01f, 0, 0, 0));
     CHECK(r.due(2000, 0.01f, 0, 0, 0));  // ...only a heartbeat a second
