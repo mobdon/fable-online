@@ -12,6 +12,7 @@
  */
 import { WebSocket } from 'ws';
 import { Database } from '../src/db/database.js';
+import { RegionTable } from '../src/world/regions.js';
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i++) {
@@ -27,6 +28,8 @@ const STEP_HZ = 10;
 const MAX_STEP = 0.7;
 
 const db = new Database(process.env.FO_DB || 'data/fable-online.sqlite');
+// The database keeps positions in the region's own frame; the wire uses world coordinates.
+const regions = RegionTable.load(process.env.FO_REGIONS || '../shared/defs/regions.json');
 if (!target) {
   // No name given: walk around whoever played last (not a walker).
   const last = db.get<{ name: string }>(
@@ -120,7 +123,10 @@ function walk(name: string, index: number, ticket: string, host: string, port: n
     if (now - seenAt > 2000 && now - readAt > 2000) {
       readAt = now;
       const p = db.get<{ region: string; x: number; y: number; z: number }>('SELECT region, x, y, z FROM heroes WHERE id = ?', home!.id);
-      if (p && p.region === home!.region && (p.x || p.y || p.z)) centre = { x: p.x, y: p.y, z: p.z };
+      if (p && p.region === home!.region && (p.x || p.y || p.z)) {
+        const o = regions.origin(p.region);
+        centre = { x: p.x + o.x, y: p.y + o.y, z: p.z };
+      }
     }
     // Hold the first report (it anchors us) until we know where the target is.
     if (!anchored && !centre.x && !centre.y && !centre.z) return;

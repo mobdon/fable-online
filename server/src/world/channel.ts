@@ -32,6 +32,21 @@ export class Channel {
   readonly loading = new Map<number, number>();
   /** Position report checks per hero, for heroes moved by the mod's own reports. */
   readonly moves = new Map<number, MoveGuard>();
+  /**
+   * Where this region's frame starts on Albion's map (RegionTable.origin). The sim works in
+   * the level data's own frame; the wire, like Fable, uses world coordinates.
+   */
+  origin: { x: number; y: number } = { x: 0, y: 0 };
+
+  /** A position from the client (world) in the sim's frame. */
+  toLocal<T extends { x: number; y: number }>(v: T): T {
+    return { ...v, x: v.x - this.origin.x, y: v.y - this.origin.y };
+  }
+
+  /** A sim position as the client sees it (world). */
+  toWorld<T extends { x: number; y: number }>(v: T): T {
+    return { ...v, x: v.x + this.origin.x, y: v.y + this.origin.y };
+  }
   /** Last sky state sent to this channel (Director.syncSky). */
   skyKey = '';
   skyAt = 0;
@@ -94,7 +109,8 @@ export class Channel {
   }
 
   /**
-   * The mod reported where its Fable has the hero. Accepted only if the hero could have got
+   * The mod reported where its Fable has the hero (`at` in world coordinates, as Fable has
+   * them). Accepted only if the hero could have got
    * there from where the server has them (MoveGuard). On refusal the hero stays put and the
    * caller gets the server's position to send back, at most every correctEveryMs.
    */
@@ -109,10 +125,11 @@ export class Channel {
     if (!g || !server || !this.players.has(heroId) || !this.sim.placeHero) return { verdict: { ok: false, reason: 'not_here' } };
     // While loading the next region the client's coordinates are still the last region's.
     if (this.loading.has(heroId)) return { verdict: { ok: false, reason: 'loading' } };
-    const verdict = g.check(server, at, now);
-    if (verdict.ok && this.sim.placeHero(heroId, at, yaw) !== false) return { verdict };
+    const local = this.toLocal(at);
+    const verdict = g.check(server, local, now);
+    if (verdict.ok && this.sim.placeHero(heroId, local, yaw) !== false) return { verdict };
     const why = verdict.ok ? { ok: false as const, reason: 'refused' as const } : verdict;
-    return { verdict: why, correct: g.mayCorrect(now) ? server : undefined };
+    return { verdict: why, correct: g.mayCorrect(now) ? this.toWorld(server) : undefined };
   }
 
   /**
@@ -134,6 +151,11 @@ export class Channel {
     });
   }
 
+  private wire(es: WireEntity[]): WireEntity[] {
+    const { x, y } = this.origin;
+    return x === 0 && y === 0 ? es : es.map((e) => ({ ...e, x: e.x + x, y: e.y + y }));
+  }
+
   /** Advance the sim and send every player the world state. */
   step(dtMs: number): void {
     if (this.loading.size) {
@@ -149,7 +171,7 @@ export class Channel {
     // Without an interest radius, and with everyone in the same area, every player sees the
     // same thing, so encode it once.
     if (this.interestRadius <= 0 && this.oneArea()) {
-      const encoded = JSON.stringify(all);
+      const encoded = JSON.stringify(this.wire(all));
       for (const p of this.players.values()) p.send(`${head}${p.lastSeq},"entities":${encoded}}`);
       return;
     }
@@ -164,7 +186,7 @@ export class Channel {
           e.id === p.heroId ||
           (this.sameArea(myArea, e) && (!me || r2 <= 0 || (e.x - me.x) ** 2 + (e.y - me.y) ** 2 <= r2)),
       );
-      p.send(`${head}${p.lastSeq},"entities":${JSON.stringify(near)}}`);
+      p.send(`${head}${p.lastSeq},"entities":${JSON.stringify(this.wire(near))}}`);
     }
   }
 

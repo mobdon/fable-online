@@ -25,14 +25,24 @@ export interface LevelRect {
   h: number;
 }
 
+const ZERO = Object.freeze({ x: 0, y: 0 });
+
 export class RegionTable {
   private byName = new Map<string, RegionDef>();
   private rects: LevelRect[] = [];
   /** Level script name -> the region (graph name) it belongs to, where they differ. */
   private regionOfScript = new Map<string, string>();
+  /** Where each region's own frame starts on the world map (see origin()). */
+  private origins = new Map<string, { x: number; y: number }>();
 
-  constructor(defs: RegionDef[], rects: LevelRect[] = [], scripts: [string, string][] = []) {
+  constructor(
+    defs: RegionDef[],
+    rects: LevelRect[] = [],
+    scripts: [string, string][] = [],
+    origins: [string, { x: number; y: number }][] = [],
+  ) {
     for (const d of defs) this.byName.set(d.name, d);
+    for (const [name, o] of origins) this.origins.set(name, o);
     for (const [script, region] of scripts) if (script !== region) this.regionOfScript.set(script, region);
     // Only levels of regions the server runs; filler and sea levels are scenery.
     this.rects = rects.filter((r) => this.byName.has(r.region) && r.w > 0 && r.h > 0);
@@ -54,6 +64,17 @@ export class RegionTable {
    */
   canonical(name: string): string {
     return this.regionOfScript.get(name) ?? name;
+  }
+
+  /**
+   * Where a region's frame starts on Albion's map. The server's level data (things, spawns,
+   * walkable ground) is in each level's own frame, metres from its corner; Fable's own
+   * coordinates, which the mod reports, are the world map's. world = origin + local.
+   * A level script gives its own corner; a graph region its anchor level's (the level of
+   * the same name, else its first), the frame tools/extractor/things.mjs writes.
+   */
+  origin(name: string): { x: number; y: number } {
+    return this.origins.get(name) ?? ZERO;
   }
 
   /** True when locate() can answer (regions.json was extracted with level sizes). */
@@ -86,7 +107,17 @@ export class RegionTable {
       if (m.region && raw.graph[m.region] && !m.sea && m.w && m.h && Number.isFinite(m.x) && Number.isFinite(m.y))
         rects.push({ region: m.region, x: m.x!, y: m.y!, w: m.w, h: m.h });
     const scripts: [string, string][] = raw.maps.filter((m) => m.script && m.region).map((m) => [m.script, m.region!]);
-    return new RegionTable([...defs.values()], rects, scripts);
+    const origins = new Map<string, { x: number; y: number }>();
+    const at = (m: { x?: number; y?: number }) => (Number.isFinite(m.x) && Number.isFinite(m.y) ? { x: m.x!, y: m.y! } : null);
+    for (const m of raw.maps) {
+      const o = at(m);
+      if (o && m.script && !origins.has(m.script)) origins.set(m.script, o);
+    }
+    for (const m of raw.maps) {
+      const o = at(m);
+      if (o && m.region && !origins.has(m.region)) origins.set(m.region, origins.get(m.region) ?? o);
+    }
+    return new RegionTable([...defs.values()], rects, scripts, [...origins]);
   }
 
   static fallback(): RegionTable {

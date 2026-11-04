@@ -203,6 +203,7 @@ export class Director {
    * Returns the new channel, or undefined when nothing changed. Until the client's exits are
    * hooked this is how the server keeps up; the move guard has already accepted the position.
    */
+  /** `at` is the client's world position (Fable's own coordinates). */
   follow(heroId: number, at: Vec3): Channel | undefined {
     const ch = this.where.get(heroId);
     if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
@@ -210,7 +211,8 @@ export class Director {
     if (!region || region === this.regions.canonical(ch.region.name)) return undefined;
     const from = ch.region.name;
     try {
-      const to = this.transfer(heroId, region, at, 'client');
+      const o = this.regions.origin(region);
+      const to = this.transfer(heroId, region, { ...at, x: at.x - o.x, y: at.y - o.y }, 'client');
       this.events.emit({ type: 'region_follow', heroId, from, to: region, channelId: to.id });
       return to;
     } catch (e) {
@@ -333,7 +335,7 @@ export class Director {
     if (!change) this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
     this.events.emit({ type: 'region_enter', heroId: link.heroId, region: ch.region.name, channelId: ch.id, private: ch.kind === 'private' });
     // The sim may have snapped the hero onto its ground; tell the client where they really are.
-    const p = ch.sim.position(link.heroId) ?? at;
+    const p = ch.toWorld(ch.sim.position(link.heroId) ?? at);
     const msg: Record<string, unknown> = { t: 'enter_region', region: ch.region.name, region_uid: ch.region.uid, channel: ch.id, x: p.x, y: p.y, z: p.z };
     if (change) {
       msg.from = change.from;
@@ -388,6 +390,7 @@ export class Director {
     this.nextIndex.set(region, n);
     const id = `${region}#${n}`;
     const ch = new Channel(id, def, 'shared', this.simFactory(def, id), undefined, this.cfg.interestRadius);
+    ch.origin = this.regions.origin(region);
     this.channels.set(id, ch);
     this.shared.set(region, [...(this.shared.get(region) ?? []), ch]);
     this.events.emit({ type: 'channel_open', channelId: id, region, private: false });
@@ -400,6 +403,7 @@ export class Director {
     const def = this.regions.get(region)!;
     const id = `${region}~${heroId}`;
     const ch = new Channel(id, def, 'private', this.simFactory(def, id), heroId, this.cfg.interestRadius);
+    ch.origin = this.regions.origin(region);
     this.channels.set(id, ch);
     this.privateCount++;
     this.events.emit({ type: 'channel_open', channelId: id, region, private: true });

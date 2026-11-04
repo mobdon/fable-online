@@ -74,6 +74,8 @@ export class MoveGuard {
   private refusedArea = 0;
   /** Where refused reports have been coming from, and since when (see MOVE_RULES.settleMs). */
   private pending: { since: number; at: Vec3 } | null = null;
+  /** Until then, a jump is let through: the client is taking an exit the server did not run. */
+  private jumpUntil = -Infinity;
 
   constructor(
     now: number,
@@ -131,6 +133,14 @@ export class MoveGuard {
     return 'changed';
   }
 
+  /**
+   * The client is taking a region exit by itself (the server could not place it at that exit):
+   * its next jump, within `ms`, is the new area's coordinates, so let one through.
+   */
+  allowJump(now: number, ms = 10_000): void {
+    this.jumpUntil = now + ms;
+  }
+
   private settled(next: Vec3, now: number, dt: number): boolean {
     const r = this.rules;
     if (r.settleMs <= 0) return false;
@@ -167,6 +177,14 @@ export class MoveGuard {
       return { ok: true, anchored: true, speed: 0 };
     }
     if (ground > this.budget) {
+      if (now < this.jumpUntil) {
+        this.jumpUntil = -Infinity;
+        this.pending = null;
+        this.speed = 0;
+        this.rejected = 0;
+        this.lastAreaChangeAt = now;
+        return { ok: true, anchored: true, speed: 0 };
+      }
       if (this.settled(next, now, dt)) return { ok: true, anchored: true, speed: 0 };
       return this.refuse('too_fast');
     }
