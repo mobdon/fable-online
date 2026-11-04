@@ -103,6 +103,43 @@ test('extract pulls weapons, armour, creatures, families and quest cards', () =>
   assert.deepEqual(d.questCards.OBJECT_QUEST_CARD_TEST, { gold: 750, renown: 300, items: ['OBJECT_TEST_SWORD'] });
 });
 
+test('extract reads the experience price tables: stat tracks in slot order, ability costs and slots', () => {
+  const track = (category: number, costs: number[]) => [
+    { name: FIELDS.heroStats.category, i32: category },
+    { name: FIELDS.heroStats.levels, i32: costs.length },
+    ...costs.flatMap((c, i) => [
+      { name: FIELDS.heroStats.cost, i32: c },
+      { name: 0xafe941d7, i32: 0 },
+      { name: 0x80ff7e1d, i32: 100 + i },
+    ]),
+  ];
+  const defs = [
+    ...DEFS,
+    // Ten tracks like the retail file: six real ones, three unused, then Will.
+    { group: 'HERO_STATS', name: 'MAIN_HERO_STATS', own: [0, 0, 0, 1, 1, 1, 2, 2, 2, 2].flatMap((c, i) => track(c, [0, 10 * (i + 1), 20 * (i + 1)])) },
+    { group: 'HERO_ABILITY', name: 'HERO_ABILITY_WILL_FIREBALL', own: [{ name: FIELDS.heroAbility.slot, i32: 2 }, { name: FIELDS.heroAbility.costs, i32s: [5, 6, 7, 8] }] },
+    { group: 'HERO_ABILITY', name: 'HERO_ABILITY_STENGTH_BERSERK', own: [{ name: FIELDS.heroAbility.slot, i32: 10 }, { name: FIELDS.heroAbility.costs, i32s: [1, 2, 3, 4] }] },
+  ];
+  const { game, names } = buildBins([...TYPES, 'HERO_STATS', 'HERO_ABILITY'], defs);
+  const p = extract(game, names).progression!;
+  assert.deepEqual(
+    p.stats.map((s) => [s.slot, s.id, s.discipline, s.costs[2]]),
+    [
+      [0, 'physique', 'strength', 20],
+      [1, 'health', 'strength', 40],
+      [2, 'toughness', 'strength', 60],
+      [3, 'speed', 'skill', 80],
+      [4, 'accuracy', 'skill', 100],
+      [5, 'guile', 'skill', 120],
+      [9, 'will', 'will', 200],
+    ],
+  );
+  assert.deepEqual(p.abilities, [
+    { slot: 2, def: 'HERO_ABILITY_WILL_FIREBALL', discipline: 'will', costs: [5, 6, 7, 8] },
+    { slot: 10, def: 'HERO_ABILITY_STENGTH_BERSERK', discipline: 'strength', costs: [1, 2, 3, 4] },
+  ]);
+});
+
 test('parseTng keeps placed creatures and creature generators', () => {
   const tng = `Version 2;
 XXXSectionStart NULL;

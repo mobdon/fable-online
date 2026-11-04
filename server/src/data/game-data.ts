@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import type { Progression } from '../heroes/xp-tables.js';
 
 /**
  * The game numbers the server simulates with. Generated from the operator's own install by
@@ -77,6 +78,8 @@ export interface GameData {
   questCards: Record<string, QuestCardData>;
   /** OBJECT_FAMILY REWARD_* name -> its weighted rows (one pick per kill). */
   rewardTables?: Record<string, RewardRow[]>;
+  /** Experience prices of trainable stats and abilities (src/heroes/xp-tables.ts). Absent: the hand-made fallback. */
+  progression?: Progression;
 }
 
 /** Hand-made numbers in Fable's ballpark. Not taken from the game files. */

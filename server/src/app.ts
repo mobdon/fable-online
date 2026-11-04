@@ -9,6 +9,8 @@ import { LootService } from './economy/loot.js';
 import { QuestRewards } from './economy/quests.js';
 import { Shops } from './economy/shops.js';
 import { Progress } from './heroes/progress.js';
+import { Experience } from './heroes/experience.js';
+import { FALLBACK_PROGRESSION, XpTables } from './heroes/xp-tables.js';
 import { loadGameData, type GameData } from './data/game-data.js';
 import { BALANCE } from './combat/rules.js';
 import { combatSimFactory, type ChannelAi, type AiContext } from './world/combat-sim.js';
@@ -51,6 +53,8 @@ export interface App {
   trades: TradeSessions;
   data: GameData;
   progress: Progress;
+  /** Hero experience pools and the stat and ability levels bought with them. */
+  experience: Experience;
   loot: LootService;
   shops: Shops;
   quests: QuestRewards;
@@ -105,6 +109,11 @@ export function createApp(
   const economy = new Economy(db, events, catalog);
   const trades = new TradeSessions(economy);
   const progress = new Progress(db);
+  const experience = new Experience(db, events, new XpTables(data.progression ?? FALLBACK_PROGRESSION), {
+    localDailyMax: cfg.xpLocalDailyMax,
+    importMax: cfg.xpImportMax,
+    echoMs: cfg.xpEchoMs,
+  });
   const loot = new LootService(economy, data, { mode: cfg.lootMode, hourlyGoldCap: cfg.lootGoldPerHour });
   const clock = opts.clock ?? new WorldClock({ dayMs: cfg.dayMinutes * 60_000, weatherSlotMs: cfg.weatherMinutes * 60_000, seed: cfg.weatherSeed });
   const town = opts.town ?? loadTownData(cfg.townDataPath);
@@ -147,7 +156,9 @@ export function createApp(
           economy,
           loot,
           progress,
+          experience,
           loadout: (heroId) => ({
+            ...experience.loadout(heroId),
             equipped: economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id),
             staff: staffHero(heroId),
             pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
@@ -172,6 +183,8 @@ export function createApp(
     (id, region, p) => heroes.savePosition(id, region, p.x, p.y, p.z),
     clock,
   );
+  experience.out = (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg));
+  experience.onLevels = (heroId) => director.channelOf(heroId)?.sim.refreshHero?.(heroId);
   const things = opts.things ?? WorldThings.load(cfg.thingsPath);
   const objects = new WorldObjects(things, director, economy, db, events);
   const travel = new Travel(things, director, heroes, db, events, { ...TRAVEL_RULES, barred: [...TRAVEL_RULES.barred], allOpen: cfg.gatesOpen });
@@ -246,6 +259,7 @@ export function createApp(
     trades,
     data,
     progress,
+    experience,
     loot,
     shops,
     quests,

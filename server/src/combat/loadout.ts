@@ -10,6 +10,8 @@ export interface HeroLoadout {
   strength?: number;
   skill?: number;
   willLevel?: number;
+  /** Fable's Health stat (0..7). Without it, max health follows Strength as before. */
+  health?: number;
   spells?: Partial<Record<SpellId, number>>;
   pvp?: boolean;
   faction?: string;
@@ -47,8 +49,8 @@ export function heroCombatant(id: number, pos: Vec3, data: GameData, l: HeroLoad
   }
   const strength = lvl(l.strength);
   const willLevel = lvl(l.willLevel);
-  const maxHealth = BALANCE.hero.baseHealth + strength * BALANCE.hero.healthPerStrength;
-  const maxWill = BALANCE.hero.baseWill + willLevel * BALANCE.hero.willPerLevel;
+  const maxHealth = heroMaxHealth(l);
+  const maxWill = heroMaxWill(l);
   return {
     id,
     kind: 'hero',
@@ -79,6 +81,15 @@ export function heroCombatant(id: number, pos: Vec3, data: GameData, l: HeroLoad
     shieldMs: 0,
     chargeMs: 0,
   };
+}
+
+/** Max health from the loadout: the Health stat when the server tracks it, else Strength. */
+export function heroMaxHealth(l: HeroLoadout): number {
+  return BALANCE.hero.baseHealth + lvl(l.health ?? l.strength) * BALANCE.hero.healthPerStrength;
+}
+
+export function heroMaxWill(l: HeroLoadout): number {
+  return BALANCE.hero.baseWill + lvl(l.willLevel) * BALANCE.hero.willPerLevel;
 }
 
 export function creatureFromDef(id: number, defName: string, pos: Vec3, data: GameData, spawnId: string | null = null): Creature {

@@ -13,6 +13,12 @@ export const BALANCE = {
   unarmedDamage: 4,
   /** Each Strength level adds this share to melee damage. */
   strengthPerLevel: 0.15,
+  /**
+   * A server kill pays the creature's experience (after the combat multiplier) into the
+   * Strength, Skill and Will pools by how the hero hurt it, plus this share of it again as
+   * general experience. Fable's own split isn't mapped yet; this is a tunable guess.
+   */
+  xpGeneralShare: 0.5,
   /** Each Skill level adds this share to ranged damage. */
   skillPerLevel: 0.15,
   /** Creatures use their weapon damage times their power times this. */

@@ -1,5 +1,5 @@
 import type { EventSink } from '../analytics/events.js';
-import { CombatSystem, defaultHarmPolicy, type DeathInfo, type HarmPolicy } from '../combat/combat.js';
+import { CombatSystem, defaultHarmPolicy, type DamageStyle, type DeathInfo, type HarmPolicy } from '../combat/combat.js';
 import { heroCombatant, type HeroLoadout } from '../combat/loadout.js';
 import { BALANCE, type SpellId } from '../combat/rules.js';
 import { fableHash } from '../data/fable-bin.js';
@@ -54,6 +54,8 @@ export interface WorldServices {
   economy?: Economy;
   loot?: LootService;
   progress?: Progress;
+  /** Hero experience (src/heroes/experience.ts): kills pay into it. */
+  experience?: { grantKill(heroId: number, xp: number, style: DamageStyle, generalShare: number, detail: string): void };
   /** What the hero has equipped and learned, from the server's own records. */
   loadout?: (heroId: number) => HeroLoadout;
   harm?: HarmPolicy;
@@ -253,6 +255,28 @@ export class CombatSim implements RegionSim {
     this.combat.add(hero);
   }
 
+  /**
+   * The hero's levels changed (bought with experience): take the new stats from the loadout,
+   * keeping the same share of health and Will.
+   */
+  refreshHero(heroId: number): void {
+    const slot = this.heroes.get(heroId);
+    const l = this.s.loadout?.(heroId);
+    if (!slot || !l) return;
+    const h = slot.hero;
+    const fresh = heroCombatant(heroId, h.pos, this.s.data, l);
+    const hp = h.maxHealth > 0 ? h.health / h.maxHealth : 1;
+    const will = h.maxWill > 0 ? h.will / h.maxWill : 1;
+    h.strength = fresh.strength;
+    h.skill = fresh.skill;
+    h.willLevel = fresh.willLevel;
+    h.spells = fresh.spells;
+    h.maxHealth = fresh.maxHealth;
+    h.maxWill = fresh.maxWill;
+    if (h.alive) h.health = Math.max(1, Math.round(h.maxHealth * hp));
+    h.will = Math.round(h.maxWill * will);
+  }
+
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
     this.heroes.delete(heroId);
@@ -402,6 +426,8 @@ export class CombatSim implements RegionSim {
       const killer = this.heroes.get(best)!.hero;
       const xp = Math.round(c.experience * (1 + Math.min(killer.combo, BALANCE.comboCap) * BALANCE.comboStep));
       this.s.progress?.kill(best, xp);
+      const style = d.styleBy.get(best) ?? { strength: 0, skill: 0, will: 0 };
+      this.s.experience?.grantKill(best, xp, style, BALANCE.xpGeneralShare, c.defName);
       const loot = this.s.loot?.award(best, c) ?? { gold: 0, items: [] };
       this.s.events.emit({ type: 'kill', heroId: best, creature: c.defName, channelId: this.channelId, experience: xp, gold: loot.gold, items: loot.items.length });
       return;
