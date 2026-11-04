@@ -36,6 +36,14 @@ export const SELL_BACK = 0.25;
 export const UNSHOPPABLE = new Set(['OBJECT_RESURRECTION_PHIAL']);
 
 /**
+ * Items bound to the hero who earned them: silver and quest keys, Septimal pieces and quest
+ * items. Never sold, bought back or traded, whatever value game.bin gives them (a silver key
+ * is worth 10 there). Shared with lootItemDef so world loot and shop stock agree.
+ */
+export const BOUND_ITEM = /KEY$|SEPTIMAL|QUEST/;
+export const isBound = (id: string): boolean => BOUND_ITEM.test(id);
+
+/**
  * Armour classes no vendor sells. Plate comes from drops and the Arena only; vendors still
  * buy it back. (Platinum is staff gear and is closed separately.)
  */
@@ -43,7 +51,7 @@ export const NOT_SOLD_ARMOUR: ReadonlySet<string> = new Set(['ARMOUR_HERO_PLATE_
 
 /**
  * Turn the extracted item table into catalog entries. Fable's base value is the shop
- * price; vendors buy back at SELL_BACK. Resurrection Phials and staff gear are never sold
+ * price; vendors buy back at SELL_BACK. Resurrection Phials, staff gear and bound items are never sold
  * or bought; plate armour (NOT_SOLD_ARMOUR) is never sold but can be sold back.
  */
 export function catalogFromGameData(
@@ -56,14 +64,15 @@ export function catalogFromGameData(
     const staffOnly = it.armour === staffArmour;
     const gear = !!it.weapon || it.coverage !== undefined;
     const value = Math.max(0, Math.round(it.value));
-    const closed = staffOnly || UNSHOPPABLE.has(id) || value === 0;
+    const bound = isBound(id);
+    const closed = staffOnly || UNSHOPPABLE.has(id) || bound || value === 0;
     const notSold = closed || (it.armour !== undefined && notSoldArmour.has(it.armour));
     out.push({
       id,
       maxStack: gear ? 1 : /POTION|FOOD|APPLE|BEER|MEAT|FISH|ARROW/.test(id) ? 20 : 1,
       buy: notSold ? null : value,
       sell: closed ? null : Math.floor(value * SELL_BACK),
-      tradeable: !staffOnly && !UNSHOPPABLE.has(id),
+      tradeable: !staffOnly && !UNSHOPPABLE.has(id) && !bound,
       ...(staffOnly ? { staffOnly } : {}),
     });
   }

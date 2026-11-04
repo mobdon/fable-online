@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { ItemDef } from '../../economy/catalog.js';
+import { isBound, type ItemDef } from '../../economy/catalog.js';
 
 /**
  * What a container entry from the level files turns into on the server.
@@ -53,7 +53,7 @@ export function resolveLoot(contents: string[], seed: string): LootEntry[] {
  */
 export function lootItemDef(id: string): ItemDef {
   const stack = /POTION|APPLE|PIE|MEAT|CARROT|TOFU|FISH|CHICK|MUSHROOM|AUGMENTATION|GEMSTONE|KEY$/.test(id);
-  return { id, maxStack: stack ? 99 : 1, buy: null, sell: null, tradeable: !/KEY$|SEPTIMAL|QUEST/.test(id) };
+  return { id, maxStack: stack ? 99 : 1, buy: null, sell: null, tradeable: !isBound(id) };
 }
 
 function pick(seed: string, n: number): number {

@@ -39,3 +39,19 @@ test('shops from town data leave out plate armour and Resurrection Phials', () =
   assert.ok(stocked.has('OBJECT_HERO_SHIRT_CHAINMAIL'));
   for (const banned of ['OBJECT_RESURRECTION_PHIAL', 'OBJECT_HERO_SHIRT_PLATE', 'OBJECT_HERO_SHIRT_PLATINUM']) assert.ok(!stocked.has(banned), banned);
 });
+
+test('catalog: keys, Septimal pieces and quest items are bound, whatever game.bin values them at', () => {
+  const c = new ItemCatalog(catalogFromGameData({
+    OBJECT_SILVER_KEY: { value: 10 },
+    OBJECT_SECRET_GROVE_KEY: { value: 500 },
+    OBJECT_SEPTIMAL_PIECE_1: { value: 100 },
+    OBJECT_HEALTH_POTION: { value: 100 },
+  }, BALANCE.staffArmour));
+  for (const id of ['OBJECT_SILVER_KEY', 'OBJECT_SECRET_GROVE_KEY', 'OBJECT_SEPTIMAL_PIECE_1']) {
+    assert.equal(c.get(id).tradeable, false, id);
+    assert.equal(c.get(id).buy, null, id);
+    assert.equal(c.get(id).sell, null, id);
+  }
+  assert.equal(c.get('OBJECT_HEALTH_POTION').tradeable, true);
+  assert.equal(c.get('OBJECT_HEALTH_POTION').buy, 100);
+});
