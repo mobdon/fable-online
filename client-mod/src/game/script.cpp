@@ -49,6 +49,9 @@ constexpr uint32_t kThingComponents = 0x44;  // {begin, end} of sorted (id, comp
 constexpr uint32_t kThingDeadFlags = 0x91;   // bit 0: being removed
 constexpr uint32_t kThingCreatureFlags = 0x6C;  // bit 3: is a creature with an action list
 
+/** What 0x00662D80 reads first: thing+0x70 must be an object with a vtable (0x0042B0A2). */
+constexpr uint32_t kThingAnimSource = 0x70;
+
 // CThing slot the CreateNear sequence reads the "near" value from.
 constexpr unsigned kThingNearValue = 0x18;
 
@@ -301,6 +304,22 @@ bool queue_empty_at(uintptr_t comp) {
 }
 }  // namespace
 
+void describe_for_anims(ThingRef& t, const char* label) {
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing, 0x110)) {
+        fo::log("anims: %s thing unreadable", label);
+        return;
+    }
+    uintptr_t src = read_ptr(thing + kThingAnimSource);
+    fo::log("anims: %s thing %08X vt %08X flags20 %08X %08X %08X %08X +6C %08X +70 %08X (vt %08X) +100 %08X",
+            label, static_cast<unsigned>(thing), static_cast<unsigned>(read_ptr(thing)),
+            static_cast<unsigned>(read_ptr(thing + 0x20)), static_cast<unsigned>(read_ptr(thing + 0x24)),
+            static_cast<unsigned>(read_ptr(thing + 0x28)), static_cast<unsigned>(read_ptr(thing + 0x2C)),
+            static_cast<unsigned>(read_ptr(thing + 0x6C)), static_cast<unsigned>(src),
+            static_cast<unsigned>(src && readable(src, 4) ? read_ptr(src) : 0),
+            static_cast<unsigned>(read_ptr(thing + 0x100)));
+}
+
 bool scripted_queue_empty(ThingRef& t) {
     // The creature's own action slot: empty, or holding an action that has finished.
     uintptr_t thing = t.thing();
@@ -339,10 +358,20 @@ bool creature_ok(uintptr_t thing) {
     return (read_ptr(thing + kThingCreatureFlags) & 8) != 0;
 }
 
+bool vtable_like(uintptr_t obj) {
+    if (!obj || !readable(obj, 4)) return false;
+    uintptr_t vt = read_ptr(obj);
+    return vt >= 0x01200000 && vt < 0x01400000;
+}
+
+
 bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool clear_first, uint32_t sequence) {
     if (!anim || !*anim || !iface() || !t.held()) return false;
     uintptr_t thing = t.thing();
     if (!creature_ok(thing)) return false;
+    // online-7 crashed inside 0x0042B0A2 with thing+0x70 pointing at string data: never
+    // call into the animation lookup unless that field looks like a real object.
+    if (!vtable_like(read_ptr(thing + kThingAnimSource))) return false;
     if (read_ptr(kCreatureAnimActionCtor) != 0x2C24448B) {  // mov eax, [esp+0x2C]: the ctor's first bytes
         disable("creature animation action does not match this Fable.exe");
         return false;

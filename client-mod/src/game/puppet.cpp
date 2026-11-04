@@ -124,6 +124,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     script::clear_commands(p.ref);
     p.lastCommandsMs = nowMs;
     fo::log("puppet: created %s as %s for entity %u", def.c_str(), name, s.id);
+    if (stats_.spawned < 3) script::describe_for_anims(p.ref, name);
     live_.emplace(s.id, std::move(p));
     ++stats_.spawned;
     return true;
@@ -175,6 +176,12 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     }
 
     write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
+    // The server's verdict on hits, visible in the log even while animations are off.
+    if (p.lastHealth >= 0 && pose.health != p.lastHealth && stats_.healthLogs < 200) {
+        ++stats_.healthLogs;
+        fo::log("puppet: %s health %.0f -> %.0f", p.scriptName.c_str(), p.lastHealth, pose.health);
+    }
+    p.lastHealth = pose.health;
     if (animate_) animate(p, pose, nowMs);
 
     // Fable's own AI keeps handing the creature somewhere to walk. Dropping its actions
@@ -226,7 +233,7 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
             fo::log("puppet: %s now %s", p.scriptName.c_str(), sp.first);
         ++stats_.animsPlayed;
     } else if (stats_.animsRefused++ == 0) {
-        fo::log("puppet: %s has no scripted control; it is moved without animations", p.scriptName.c_str());
+        fo::log("puppet: %s refused an animation; it is moved without animations", p.scriptName.c_str());
     }
     p.gait = next;  // also on a refusal: the refresh check retries it slowly
 }

@@ -489,7 +489,7 @@ void start() {
     s.suppressSpawns = env_flag("FABLE_ONLINE_SUPPRESS_SPAWNS", true);
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
-    s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
+    s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", false));
     // Fable's PC controls attack on the left mouse button. Block has no fixed key yet, so it
     // is only sent when a key is named (FABLE_ONLINE_BLOCK_KEY, a virtual-key code).
     if (const char* v = std::getenv("FABLE_ONLINE_ATTACK_KEY")) s.attackVk = std::atoi(v);

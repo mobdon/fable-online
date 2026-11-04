@@ -23,7 +23,8 @@ struct PuppetStats {
     uint32_t lost = 0;  // the engine freed the thing under us
     uint32_t live = 0;
     uint32_t animsPlayed = 0;
-    uint32_t animsRefused = 0;  // no scripted-control component, or a pointer looked wrong
+    uint32_t animsRefused = 0;
+    uint32_t healthLogs = 0;  // no scripted-control component, or a pointer looked wrong
 };
 
 /** What a puppet is playing, picked from the server's anim field (world::Anim). */
@@ -63,6 +64,7 @@ class PuppetPool {
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        float lastHealth = -1;
         Gait gait = Gait::None;
         Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
         uint32_t wantedSinceMs = 0;
@@ -78,7 +80,7 @@ class PuppetPool {
     const std::string& def_for(const world::Spawn& s) const;
 
     std::string heroDef_;
-    bool animate_ = true;
+    bool animate_ = false;
     std::unordered_map<uint32_t, Puppet> live_;
     /** Parked puppets by def, ready to be shown again instead of spawning another. */
     std::unordered_multimap<std::string, Puppet> pool_;

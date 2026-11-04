@@ -83,6 +83,9 @@ void look_in_direction(ThingRef& t, float yaw);
 bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence);
 /** The same, played once the way `.PlayAnimation` does. Queues behind anything already queued. */
 bool play_anim_once(ThingRef& t, const char* anim, bool clear_first, uint32_t sequence);
+/** Logs, read-only, the fields the animation path depends on, once per thing. */
+void describe_for_anims(ThingRef& t, const char* label);
+
 /** True when the thing's scripted-control queue is empty (or the thing has none). */
 bool scripted_queue_empty(ThingRef& t);
 /** Drops everything queued on the thing's scripted-control component. */
