@@ -6,6 +6,7 @@
 #include <cstring>
 #include "../config.h"
 #include "../log.h"
+#include "camera_latch.h"
 #include "camera_probe.h"
 
 namespace fo::display::mouse_look {
@@ -106,6 +107,7 @@ void __fastcall hk_update(void* self, void*) {
     const float yaw0 = *reinterpret_cast<const float*>(b + 0xCC), pitch0 = *reinterpret_cast<const float*>(b + 0xD0);
     const float in_x = *reinterpret_cast<const float*>(b + 0x90), in_y = *reinterpret_cast<const float*>(b + 0x94);
     o_update(self);
+    camera_latch::on_update(wrap_turn(*reinterpret_cast<const float*>(b + 0xCC) - yaw0), reinterpret_cast<const float*>(b + 0x10));
     CamStats& c = g_cam;
     ++c.updates;
     c.yaw += wrap_turn(*reinterpret_cast<const float*>(b + 0xCC) - yaw0);
@@ -122,6 +124,7 @@ void __fastcall hk_update(void* self, void*) {
         ++c.lines;
         fo::log("camera: %u updates, yaw %+.4f turns, pitch %+.4f, game mouse %+.2f %+.2f, mouse %+ld %+ld counts", c.updates,
                 c.yaw, c.pitch, c.in_x, c.in_y, c.mouse_x, c.mouse_y);
+        camera_latch::log_stats();
         if (c.lines <= 30) camera_probe::log_counts(c.updates);
         else camera_probe::log_counts(0);
     } else {
@@ -209,6 +212,7 @@ void install() {
     install_center();
     install_assist();
     camera_probe::install();
+    camera_latch::install();
     install_counter();
     install_aim();
     const int frames = config().mouse_smoothing;   // -1 = Fable's own, else frames to average
@@ -249,6 +253,7 @@ void poll_mouse() {
     if (!g_state_size) fo::log("camera: reading mouse motion every frame (%lu-byte state)", static_cast<unsigned long>(size));
     g_state_size = static_cast<int>(size);
     g_poll_x += st.x;
+    camera_latch::on_mouse(st.x);
     g_poll_y += st.y;
 }
 const char* center_status() { return g_center_status; }

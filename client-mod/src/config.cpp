@@ -90,6 +90,7 @@ void config_load(HMODULE self) {
     std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
     c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
     c.camera_auto_center = ini_bool(f, L"display", L"camera_auto_center", c.camera_auto_center);
+    c.camera_latch = ini_bool(f, L"display", L"camera_latch", c.camera_latch);
     c.camera_assist = ini_bool(f, L"display", L"camera_assist", c.camera_assist);
     std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
     c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
