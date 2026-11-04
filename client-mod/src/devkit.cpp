@@ -65,8 +65,8 @@ void give_test_kit() {
     fo::log("devkit: giving the test kit");
     log_health_of(s);
 
-    fo::log("devkit:   gold +100000");
-    slot<void(__thiscall*)(void*, int)>(s, kGiveGold)(s, 100000);
+    // No gold: the server's ledger owns money online, and gold added here only inflates
+    // Fable's local purse.
 
     for (const char* name : kGear) {
         fo::log("devkit:   give %s", name);
