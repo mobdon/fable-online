@@ -313,7 +313,7 @@ void test_death_view() {
     CHECK(d.fade(2000 + kDeathFadeDelayMs / 2) == 0);
     CHECK(d.fade(2000 + kDeathFadeDelayMs + kDeathFadeOutMs) == 1);
     // The server moves us to a gate: travel once, wait for the load, then rise and fade in.
-    d.respawn_at("Greatwood:7", 6000);
+    d.respawn_at("Greatwood:7", 10, 20, 6000);
     CHECK(d.gate() == "Greatwood:7");
     st = d.update(0, 100, false, 6033);
     CHECK(st.travel && d.phase() == DeathView::Phase::Moving && d.fade(6033) == 1);
@@ -327,14 +327,26 @@ void test_death_view() {
     // A phial: back up in place without a respawn frame.
     DeathView p;
     p.update(0, 100, false, 1000);
-    st = p.update(100, 100, false, 3000);
-    CHECK(st.rose && !st.travel);
+    CHECK(!p.update(100, 100, false, 3000).rose);  // waits in case a respawn move follows
+    st = p.update(100, 100, false, 3000 + kRiseGraceMs);
+    CHECK(st.rose && st.roseInPlace && !st.travel);
+    // The server's order in practice: revive (health back) first, then the respawn move. The
+    // hero must not get up in between.
+    DeathView o;
+    o.update(0, 100, false, 1000);
+    CHECK(!o.update(50, 100, false, 11000).rose);
+    o.respawn_at("BowerstoneSlums_v2:27243", 3953, 4304, 11050);
+    st = o.update(50, 100, false, 11066);
+    CHECK(st.travel && !st.rose && o.target_x() == 3953);
+    o.update(50, 100, true, 12000);
+    st = o.update(50, 100, false, 15000);
+    CHECK(st.rose && !st.roseInPlace);
     // No max from the server (no combat here): health 0 is not a death.
     DeathView n;
     CHECK(!n.update(0, 0, false, 1000).fell);
     // A respawn frame without the dead tick still downs and moves.
     DeathView r;
-    r.respawn_at("LookoutPoint:5", 5000);
+    r.respawn_at("LookoutPoint:5", 0, 0, 5000);
     CHECK(r.down() && r.fade(5000) == 1);
     CHECK(r.update(50, 100, false, 5033).travel);
     // Stuck down with no word: get up after the give-up time rather than stay dark.

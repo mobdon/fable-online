@@ -277,7 +277,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
                 fo::log("sync: %s from %s via %s, arriving at %s; waiting for the local load", rc.region.c_str(),
                         rc.from.c_str(), rc.via.c_str(), rc.entrance.c_str());
             }
-            if (rc.respawn) s.death.respawn_at(rc.thing, nowMs);
+            if (rc.respawn) s.death.respawn_at(rc.thing, rc.x, rc.y, nowMs);
             s.objects.begin_region(rc, nowMs);
             // The hero has been moved: an exit Fable was held at may load the region now.
             if (rc.loading) s.held.on_region_change();
@@ -490,16 +490,33 @@ void show_death(uint32_t nowMs) {
     if (st.travel) {
         fo::log("sync: respawning at %s", s.death.gate().c_str());
         s.haveFellAt = false;
+        // Fable's gate travel runs its own actions on the hero: take the fall off first, so
+        // nothing of ours is left queued in front of them.
+        game::script::ThingRef ref;
+        if (game::script::hero(ref)) game::script::clear_scripted(ref);
         if (s.death.gate().empty() || !game::things::teleport_to_gate(s.death.gate()))
             fo::log("sync: could not start the local move to the gate; the server will correct the position");
     }
     if (st.rose) {
-        fo::log("sync: the hero gets up");
+        fo::log("sync: the hero gets up%s", st.roseInPlace ? " where they fell" : " at the gate");
         s.haveFellAt = false;
         game::script::ThingRef ref;
         if (game::script::hero(ref)) {
-            game::script::clear_scripted(ref);
+            // After a gate move the queue belongs to Fable's own arrival: leave it alone.
+            if (st.roseInPlace) game::script::clear_scripted(ref);
             game::script::set_damageable(ref, true);
+        }
+    }
+    // The gate move has landed (the hero is at the server's spot): the region is loaded even
+    // if the area id did not change, so say so now instead of after the 25 s give-up.
+    if (s.death.phase() == world::DeathView::Phase::Moving && s.objects.loading() && hero) {
+        game::Pos p;
+        if (game::read_pos(hero, p) && std::hypot(p.x - s.death.target_x(), p.y - s.death.target_y()) <= world::kArrivedMetres) {
+            std::string frame;
+            if (s.objects.finish_loading(nowMs, true, frame)) {
+                fo::log("sync: the respawn move landed, telling the server");
+                net::world_send(frame);
+            }
         }
     }
     // Down where they fell: keep them there, whatever the keyboard says.
