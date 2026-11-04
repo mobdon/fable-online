@@ -11,6 +11,13 @@ namespace fo::game {
 namespace {
 /** How often a puppet is told to drop its own actions, so Fable's AI stops steering it. */
 constexpr uint32_t kClearCommandsEveryMs = 1000;
+// While animations play, the AI is cleared less often: every clear also ends the animation.
+constexpr uint32_t kClearCommandsAnimatedMs = 4000;
+// A creature made by CreateNear is finished by the engine over its next frames; until then
+// the fields the animation code reads (+0x70, +0x134) are not set. Wait well past that.
+constexpr uint32_t kAnimateAfterMs = 2000;
+// How long a reported hit shows as a flinch.
+constexpr uint32_t kFlinchMs = 350;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
 constexpr float kSpawnRadius = 6.0f;
 /** Parked puppets kept per def. Beyond this they are released. */
@@ -99,6 +106,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             p.hidden = false;
             p.gait = p.wanted = Gait::None;
             p.lastCommandsMs = 0;
+            p.createdMs = nowMs;
             live_.emplace(s.id, std::move(p));
             ++stats_.reused;
             return true;
@@ -123,8 +131,8 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     script::set_damageable(p.ref, false);
     script::clear_commands(p.ref);
     p.lastCommandsMs = nowMs;
+    p.createdMs = nowMs;
     fo::log("puppet: created %s as %s for entity %u", def.c_str(), name, s.id);
-    if (stats_.spawned < 3) script::describe_for_anims(p.ref, name);
     live_.emplace(s.id, std::move(p));
     ++stats_.spawned;
     return true;
@@ -181,15 +189,19 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
         ++stats_.healthLogs;
         fo::log("puppet: %s health %.0f -> %.0f", p.scriptName.c_str(), p.lastHealth, pose.health);
     }
+    // The server only flags a flinch for some entities: any hit it reports shows one.
+    if (p.lastHealth >= 0 && pose.health < p.lastHealth && pose.health > 0) p.flinchUntilMs = nowMs + kFlinchMs;
     p.lastHealth = pose.health;
     if (animate_) animate(p, pose, nowMs);
 
     // Fable's own AI keeps handing the creature somewhere to walk. Dropping its actions
     // regularly is cheaper than fighting it every frame, and the position write above is
     // what actually decides where it stands.
-    if (nowMs - p.lastCommandsMs >= kClearCommandsEveryMs) {
+    bool animating = animate_ && p.gait != Gait::None && p.animOk;
+    if (nowMs - p.lastCommandsMs >= (animating ? kClearCommandsAnimatedMs : kClearCommandsEveryMs)) {
         p.lastCommandsMs = nowMs;
         script::clear_commands(p.ref);
+        if (animating) p.gait = Gait::None;  // the clear ended it: start the gait again next tick
     }
 }
 
@@ -197,7 +209,16 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
     // The position write stays the authority on where the puppet stands; this only gives
     // Fable an animation to play while it is moved, through the same scripted-control
     // queue a quest's `.PlayLoopingAnim` and `.PlayAnimation` use.
+    if (nowMs - p.createdMs < kAnimateAfterMs) return;
+    if (!p.described && stats_.described < 4) {
+        p.described = true;
+        ++stats_.described;
+        script::describe_for_anims(p.ref, p.scriptName.c_str());
+    }
     Gait want = gait_for(pose);
+    if (static_cast<int32_t>(p.flinchUntilMs - nowMs) > 0 &&
+        (want == Gait::Idle || want == Gait::Walk || want == Gait::Run))
+        want = Gait::Hit;
     if (want != p.wanted) {
         p.wanted = want;
         p.wantedSinceMs = nowMs;
@@ -228,6 +249,7 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
         // Ran dry: carry on with the loop, never replay a one-off (a death or a taunt).
         ok = script::play_looping_anim(p.ref, sp.follow ? sp.follow : sp.first, kGaitLoops, false, seq);
     }
+    p.animOk = ok;
     if (ok) {
         if (change && stats_.animsPlayed < 40)
             fo::log("puppet: %s now %s", p.scriptName.c_str(), sp.first);

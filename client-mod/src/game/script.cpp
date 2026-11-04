@@ -51,6 +51,8 @@ constexpr uint32_t kThingCreatureFlags = 0x6C;  // bit 3: is a creature with an 
 
 /** What 0x00662D80 reads first: thing+0x70 must be an object with a vtable (0x0042B0A2). */
 constexpr uint32_t kThingAnimSource = 0x70;
+/** The second object it reads (+0x134, then its vfunc +0x10 through 0x0073A6E0). */
+constexpr uint32_t kThingAnimTables = 0x134;
 
 // CThing slot the CreateNear sequence reads the "near" value from.
 constexpr unsigned kThingNearValue = 0x18;
@@ -298,6 +300,53 @@ uintptr_t scripted_control(ThingRef& t) {
     return 0;
 }
 
+// The MSVC class name behind an object's vtable (".?AVCThingCreatureBase@@"), read through
+// its RTTI locator at vtable-4. False for anything that is not a live C++ object of
+// Fable.exe: garbage, freed memory and plain data all fail one of these checks.
+bool class_name(uintptr_t obj, char* out, size_t n) {
+    if (n < 8) return false;
+    out[0] = 0;
+    if (!obj || !readable(obj, 4)) return false;
+    uintptr_t vt = read_ptr(obj);
+    if (vt < 0x01200000 || vt >= 0x01400000 || !readable(vt - 4, 8)) return false;
+    uintptr_t col = read_ptr(vt - 4);
+    if (col < 0x01200000 || col >= 0x01400000 || !readable(col, 20) || read_ptr(col) != 0) return false;
+    uintptr_t td = read_ptr(col + 12);
+    if (td < 0x01200000 || td >= 0x01440000 || !readable(td + 8, 4)) return false;
+    size_t i = 0;
+    for (; i + 1 < n; ++i) {
+        if (!readable(td + 8 + i, 1)) return false;
+        char c = *reinterpret_cast<const char*>(td + 8 + i);
+        out[i] = c;
+        if (!c) break;
+    }
+    out[i < n ? i : n - 1] = 0;
+    return out[0] == '.' && out[1] == '?' && out[2] == 'A';
+}
+
+// 0x00662D80's second read: [[[thing+0x134]+0x0C]]+0x08 (0x0073A6E0), whose vfunc +0x10 it calls.
+uintptr_t anim_tables(uintptr_t thing) {
+    uintptr_t a = read_ptr(thing + kThingAnimTables);
+    if (!a || !readable(a + 0x0C, 4)) return 0;
+    uintptr_t b = read_ptr(a + 0x0C);
+    if (!b || !readable(b, 4)) return 0;
+    uintptr_t c = read_ptr(b);
+    if (!c || !readable(c + 8, 4)) return 0;
+    return read_ptr(c + 8);
+}
+
+// Everything 0x00662D80 dereferences before it reaches the animation tables: the thing must
+// be a live creature object, +0x70 its def holder and +0x134 another live object. A refusal
+// names the first check that failed, for the log.
+const char* anim_target_problem(uintptr_t thing) {
+    char name[96];
+    if (!class_name(thing, name, sizeof(name))) return "thing is not a live object";
+    if (!std::strstr(name, "Creature")) return "thing is not a creature";
+    if (!class_name(read_ptr(thing + kThingAnimSource), name, sizeof(name))) return "def holder (+0x70) not set";
+    if (!class_name(anim_tables(thing), name, sizeof(name))) return "anim tables (+0x134) not set";
+    return nullptr;
+}
+
 bool queue_empty_at(uintptr_t comp) {
     uintptr_t head = read_ptr(comp + 0x14);  // std::list sentinel
     return !head || read_ptr(head) == head;
@@ -311,6 +360,13 @@ void describe_for_anims(ThingRef& t, const char* label) {
         return;
     }
     uintptr_t src = read_ptr(thing + kThingAnimSource);
+    char cls[96], srcCls[96], tabCls[96];
+    if (!class_name(thing, cls, sizeof(cls))) std::strcpy(cls, "?");
+    if (!class_name(src, srcCls, sizeof(srcCls))) std::strcpy(srcCls, "?");
+    if (!class_name(anim_tables(thing), tabCls, sizeof(tabCls))) std::strcpy(tabCls, "?");
+    const char* problem = anim_target_problem(thing);
+    fo::log("anims: %s is %s, +0x70 %s, +0x134 %s: %s", label, cls, srcCls, tabCls,
+            problem ? problem : "can animate");
     fo::log("anims: %s thing %08X vt %08X flags20 %08X %08X %08X %08X +6C %08X +70 %08X (vt %08X) +100 %08X",
             label, static_cast<unsigned>(thing), static_cast<unsigned>(read_ptr(thing)),
             static_cast<unsigned>(read_ptr(thing + 0x20)), static_cast<unsigned>(read_ptr(thing + 0x24)),
@@ -371,7 +427,14 @@ bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool cle
     if (!creature_ok(thing)) return false;
     // online-7 crashed inside 0x0042B0A2 with thing+0x70 pointing at string data: never
     // call into the animation lookup unless that field looks like a real object.
-    if (!vtable_like(read_ptr(thing + kThingAnimSource))) return false;
+    if (const char* problem = anim_target_problem(thing)) {
+        static int logged = 0;
+        if (logged < 20) {
+            ++logged;
+            fo::log("anims: refused %s on %08X: %s", anim, static_cast<unsigned>(thing), problem);
+        }
+        return false;
+    }
     if (read_ptr(kCreatureAnimActionCtor) != 0x2C24448B) {  // mov eax, [esp+0x2C]: the ctor's first bytes
         disable("creature animation action does not match this Fable.exe");
         return false;

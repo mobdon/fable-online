@@ -180,3 +180,15 @@ Script-created creatures (`CreateNear` and friends) never pass through this load
 
 Not checked in game yet: whether Fable records a removed level creature as dead in the save,
 which would keep it gone in an offline game played later from the same save.
+
+## Checks before the creature animation call (0x00662D80)
+
+0x00662D80 reads `[thing+0x70]` (def holder; 0x0042B0A2 calls its vfunc +0x38 with
+"CAppearanceDef") and `[[[[thing+0x134]+0x0C]]+0x08]` (0x0073A6E0, then its vfunc +0x10).
+The CThing ctor (0x004C9030) zeroes +0x70. A stand-in made by CreateNear was seen with
+garbage there (0xFFFFFFFF, 0xCCCCCCCC, string bytes), so the mod only calls the
+animation path when the thing, the +0x70 object and the +0x134 chain object all have
+valid MSVC RTTI (vtable-4 -> complete object locator, signature 0 -> type descriptor
+".?AV..."), the thing's class name contains "Creature", and the stand-in is at least
+2 s old. A refusal is logged with the failed check ("anims: refused ...").
+An unknown ST_ name falls back to the def's default animation inside 0x00662D80.

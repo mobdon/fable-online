@@ -50,6 +50,14 @@ async function joinAs(app: any, base: string, name: string) {
   return { hero, ticket: ((await join.json()) as any).ticket };
 }
 
+function latest(inbox: any[], id: number) {
+  for (let i = inbox.length - 1; i >= 0; i--) {
+    const m = inbox[i];
+    if (m.t === 'tick') return m.entities.find((e: any) => e.id === id);
+  }
+  return undefined;
+}
+
 async function swingAt(pvpEverywhere: boolean) {
   const app = testApp({ tickRate: 30, clientMovement: 'trusted', interestRadius: 80, pvpEverywhere });
   const server = await listen(app, 0);
@@ -82,11 +90,15 @@ async function swingAt(pvpEverywhere: boolean) {
     a.ws.send(JSON.stringify({ t: 'input', seq: 1, buttons: 1, camera_yaw: -Math.PI / 2 }));
     await wait(100);
     a.ws.send(JSON.stringify({ t: 'input', seq: 2, buttons: 0, camera_yaw: -Math.PI / 2 }));
-    await wait(400);
+    await wait(150);
+    // What the other player's mod is told to play on each stand-in right after the swing.
+    const swinger = latest(b.inbox, one.hero.id);
+    const flinch = victim();
+    await wait(250);
     const after = victim();
     a.ws.close();
     b.ws.close();
-    return { before: before.health, after: after.health, anim: after.anim };
+    return { before: before.health, after: after.health, swingAnim: swinger?.anim, hitAnim: flinch?.anim };
   } finally {
     app.director.stop();
     server.close();
@@ -96,9 +108,12 @@ async function swingAt(pvpEverywhere: boolean) {
 test('with FO_PVP_ALL a swing from the mod hurts the hero in front', async () => {
   const r = await swingAt(true);
   assert.ok(r.after < r.before, `health ${r.before} -> ${r.after}`);
+  assert.equal(r.swingAnim, 3, 'others see the swing (Anim.Attack)');
+  assert.equal(r.hitAnim, 5, 'others see the flinch (Anim.Hit)');
 });
 
 test('without PvP the same swing does nothing', async () => {
   const r = await swingAt(false);
   assert.equal(r.after, r.before);
+  assert.equal(r.swingAnim, 3, 'the swing still shows');
 });
