@@ -25,7 +25,7 @@ function connect(url: string) {
       const hit = inbox.find(pred);
       if (hit) return resolve(hit);
       waiters.push([pred, resolve]);
-      setTimeout(() => reject(new Error('timed out waiting for a frame')), 3000);
+      setTimeout(() => reject(new Error("timed out waiting for a frame; got " + inbox.map((m) => m.t + (m.t === "trade_error" || m.t === "error" ? ":" + m.error : "")).filter((t) => t !== "tick").join(","))), 3000);
     });
   return { ws, open, next, inbox };
 }
@@ -71,7 +71,7 @@ test('two players trade over the game socket', async () => {
     a.ws.send(JSON.stringify({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: one.ticket }));
     b.ws.send(JSON.stringify({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: two.ticket }));
     await Promise.all([a.next((m) => m.t === 'welcome'), b.next((m) => m.t === 'welcome')]);
-    for (const [c, x] of [[a, 10], [b, 12]] as const) c.ws.send(JSON.stringify({ t: 'hero_pos', x, y: 10, z: 0, area: 0 }));
+    // Both heroes arrive at the region's entrance, side by side.
     await a.next((m) => m.t === 'tick' && m.entities.length === 2);
 
     a.ws.send(JSON.stringify({ t: 'trade_request', to: two.hero.id }));
@@ -96,7 +96,7 @@ test('two players trade over the game socket', async () => {
     a.ws.close();
     b.ws.close();
   } finally {
-    app.director.stop();
     server.close();
+    app.close();
   }
 });
