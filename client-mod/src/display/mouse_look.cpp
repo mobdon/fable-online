@@ -6,6 +6,7 @@
 #include <cstring>
 #include "../config.h"
 #include "../log.h"
+#include "camera_probe.h"
 
 namespace fo::display::mouse_look {
 namespace {
@@ -121,6 +122,10 @@ void __fastcall hk_update(void* self, void*) {
         ++c.lines;
         fo::log("camera: %u updates, yaw %+.4f turns, pitch %+.4f, game mouse %+.2f %+.2f, mouse %+ld %+ld counts", c.updates,
                 c.yaw, c.pitch, c.in_x, c.in_y, c.mouse_x, c.mouse_y);
+        if (c.lines <= 30) camera_probe::log_counts(c.updates);
+        else camera_probe::log_counts(0);
+    } else {
+        camera_probe::log_counts(0);
     }
     c = CamStats{0, 0, 0, 0, 0, 0, 0, now, c.lines};
 }
@@ -203,6 +208,7 @@ void install_counter() {
 void install() {
     install_center();
     install_assist();
+    camera_probe::install();
     install_counter();
     install_aim();
     const int frames = config().mouse_smoothing;   // -1 = Fable's own, else frames to average
