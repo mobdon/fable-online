@@ -244,6 +244,59 @@ bool readable(uint32_t addr, size_t n) {
     if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
     return addr + n <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
 }
+
+// The save screen (0x00499880) switches the render target back to the screen just before it
+// lays out its picture and text: 0x009BF220 resets the 2D rectangle to the real screen size,
+// while the layout itself is in virtual pixels, so the picture came out 1/scale the size in the
+// top-left corner. The call at 0x004999B9 goes through a block that, after it, sets the 2D
+// rectangle back to the whole screen in Fable's own units (0x00A0B560 on the 2D renderer in
+// ebp, as the same function does a few lines earlier), which the layout helpers turn into the
+// virtual size. The viewport hook then stretches that rectangle over the real screen.
+constexpr uint32_t kSaveSite = 0x004999B9, kSaveResetTarget = 0x009BF220, kSetRect2D = 0x00A0B560;
+constexpr uint32_t kUnitsW = 0x013961E8, kUnitsH = 0x013961F0;   // doubles: the whole screen in 2D units
+
+void put32(std::vector<uint8_t>& b, uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>(v >> (8 * i))); }
+void call_to(std::vector<uint8_t>& b, uint32_t base, uint32_t target) {
+    b.push_back(0xE8);
+    put32(b, target - (base + static_cast<uint32_t>(b.size()) + 4));
+}
+
+void install_save_screen() {
+    const uint8_t* at = reinterpret_cast<const uint8_t*>(kSaveSite);
+    if (!readable(kSaveSite, 5) || at[0] != 0xE8 ||
+        kSaveSite + 5 + *reinterpret_cast<const int32_t*>(at + 1) != kSaveResetTarget) {
+        fo::log("display: save screen code not where expected, left as is");
+        return;
+    }
+    auto* mem = static_cast<uint8_t*>(VirtualAlloc(nullptr, 128, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+    if (!mem) return;
+    const uint32_t cave = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mem));
+    std::vector<uint8_t> b;
+    call_to(b, cave, kSaveResetTarget);                                   // call 0x9BF220 (as before)
+    b.insert(b.end(), {0x83, 0xEC, 0x10});                                // sub esp, 16
+    b.insert(b.end(), {0xDD, 0x05}); put32(b, kUnitsH);                   // fld qword [units h]
+    b.insert(b.end(), {0xD9, 0x5C, 0x24, 0x0C});                          // fstp dword [esp+12]
+    b.insert(b.end(), {0xDD, 0x05}); put32(b, kUnitsW);                   // fld qword [units w]
+    b.insert(b.end(), {0xD9, 0x5C, 0x24, 0x08});                          // fstp dword [esp+8]
+    b.insert(b.end(), {0xC7, 0x44, 0x24, 0x04, 0, 0, 0, 0});              // mov dword [esp+4], 0
+    b.insert(b.end(), {0xC7, 0x04, 0x24, 0, 0, 0, 0});                    // mov dword [esp], 0
+    b.push_back(0x54);                                                    // push esp  (the rectangle)
+    b.insert(b.end(), {0x8B, 0xCD});                                      // mov ecx, ebp (2D renderer)
+    call_to(b, cave, kSetRect2D);                                         // call 0xA0B560 (ret 4)
+    b.insert(b.end(), {0x83, 0xC4, 0x10});                                // add esp, 16
+    b.push_back(0xC3);                                                    // ret
+    std::memcpy(mem, b.data(), b.size());
+    FlushInstructionCache(GetCurrentProcess(), mem, b.size());
+    uint8_t patch[5] = {0xE8, 0, 0, 0, 0};
+    const uint32_t rel = cave - (kSaveSite + 5);
+    std::memcpy(patch + 1, &rel, 4);
+    DWORD old = 0;
+    void* site = reinterpret_cast<void*>(kSaveSite);
+    if (!VirtualProtect(site, 5, PAGE_EXECUTE_READWRITE, &old)) return;
+    std::memcpy(site, patch, 5);
+    VirtualProtect(site, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), site, 5);
+}
 }  // namespace
 
 void install() {
@@ -271,6 +324,7 @@ void install() {
     // The cursor is left alone: Fable's CMouseDX reads movement as GetCursorPos minus the
     // window centre and warps the cursor back with SetCursorPos every update, so remapping
     // those calls only rounded small moves away and could pin the warp at the screen edge.
+    install_save_screen();
     std::snprintf(g_status, sizeof g_status, "HUD scaling ready");
 }
 
