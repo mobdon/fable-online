@@ -177,16 +177,17 @@ test('quest rewards: only real quests, never over the card, never twice, daily c
   const { hero } = makeHero(app);
   const q = app.quests;
   assert.deepEqual(q.claim(hero.id, { quest: 'Q_MadeUp', gold: 10 }), { ok: false, reason: 'unknown_quest' });
-  assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 999_999 }), { ok: false, reason: 'over_cap' });
-  assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500, renown: 101 }), { ok: false, reason: 'over_cap' });
   assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500, items: ['OBJECT_IRON_LONGSWORD'] }), { ok: false, reason: 'item_not_allowed' });
-  const ok = q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'] });
-  assert.deepEqual(ok, { ok: true, gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'] });
+  // An edited reward is paid at the card's real value, once.
+  const ok = q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 999_999, renown: 101, items: ['OBJECT_HEALTH_POTION'] });
+  assert.deepEqual(ok, { ok: true, gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'], trimmed: true });
   assert.equal(app.economy.balance(hero.id), 500);
   assert.equal(app.heroes.get(hero.id)!.renown, 100);
   assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500 }), { ok: false, reason: 'already_claimed' });
-  // Rejected attempts are logged for the cheat dashboards.
-  assert.equal(app.sink.events.filter((e) => e.type === 'quest_reward_rejected').length, 5);
+  // Rejected and trimmed attempts are logged for the cheat dashboards.
+  assert.equal(app.sink.events.filter((e) => e.type === 'quest_reward_rejected').length, 3);
+  const { at: _at, ...t } = app.sink.events.find((e) => e.type === 'quest_reward_trimmed')! as { at?: number };
+  assert.deepEqual(t, { type: 'quest_reward_trimmed', heroId: hero.id, quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', claimedGold: 999_999, gold: 500, claimedRenown: 101, renown: 100 });
   assert.equal(app.economy.audit().ok, true);
   app.close();
 });
@@ -337,6 +338,19 @@ test('spawns: a dead monster only comes back while no hero is near its spot', ()
   sm.setHeroes([{ x: 200, y: 0, z: 0 }]); // walked off
   sm.step(50);
   assert.equal([...sm.creatures()].filter((c) => c.alive).length, 1);
+});
+
+test('quest rewards: boasts raise the cap; a script name with no card pays nothing by default', async () => {
+  const { QuestRewards } = await import('../src/economy/quests.js');
+  const app = testApp();
+  const { hero } = makeHero(app);
+  const cards = { OBJECT_QUEST_CARD_TEST_BOAST: { gold: 1000, renown: 100, items: [], boastGold: 1500, boastRenown: 300 } };
+  const q = new QuestRewards(app.db, app.economy, app.sink, {}, ['Q_NoCard'], cards);
+  // Card 1000 + boasts 1500: a hero who kept two boasts worth 1200 is paid all of it.
+  assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_BOAST', gold: 2200, renown: 350 }), { ok: true, gold: 2200, renown: 350, items: [] });
+  assert.deepEqual(q.claim(hero.id, { quest: 'Q_NoCard', gold: 300 }), { ok: true, gold: 0, renown: 0, items: [], trimmed: true });
+  assert.equal(app.economy.balance(hero.id), 2200);
+  app.close();
 });
 
 test('a quest reward item can be claimed only as many times as the quest gives it', async () => {

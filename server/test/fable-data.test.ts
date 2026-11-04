@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GameBin, NamesBin, fableHash, readF32, readI32 } from '../src/data/fable-bin.js';
 import { extract, FIELDS } from '../src/data/extract.js';
+import { extractBoasts } from '../src/data/boasts.js';
 import { buildBins } from './fixtures/fable-bin-builder.js';
 // @ts-expect-error plain JS tool
 import { parseTng } from '../../tools/extractor/spawns.mjs';
@@ -101,6 +102,37 @@ test('extract pulls weapons, armour, creatures, families and quest cards', () =>
   });
   assert.deepEqual(d.families.TEST_FAMILY, ['CREATURE_TEST_GRUNT', 'CREATURE_TEST_GRUNT']);
   assert.deepEqual(d.questCards.OBJECT_QUEST_CARD_TEST, { gold: 750, renown: 300, items: ['OBJECT_TEST_SWORD'] });
+});
+
+test('boasts from script.bin raise the matching quest card cap', () => {
+  // A script.bin is the same container as game.bin, with one CScriptDef holding constants.
+  const DEFS_WITH_FARM = [
+    ...DEFS,
+    {
+      group: 'OBJECT',
+      name: 'OBJECT_QUEST_CARD_PROTECT_FARM',
+      components: [{ type: 'CQuestCardDef', fields: [{ name: 'GoldReward', i32: 750 }, { name: 'RenownReward', i32: 400 }] }],
+    },
+  ];
+  const { game, names } = buildBins(TYPES, DEFS_WITH_FARM);
+  const script = buildBins(['CScriptDef'], [
+    {
+      group: 'CScriptDef',
+      name: 'SCRIPT_DEF',
+      own: [
+        { name: 'SOME_OTHER_CONSTANT', i32: 7 },
+        { name: 'OFGoodNakedBoastCost', i32: 80 },
+        { name: 'OFGoodNakedBoastReward', i32: 160 },
+        { name: 'OFGoodNoDamageBoastReward', i32: 400 },
+        { name: 'OFGoodNoWeaponsBoastReward', i32: -5 }, // nonsense is skipped
+        { name: 'ArenaNakedBoastReward', i32: 4000 }, // no ARENA card in this file
+      ],
+    },
+  ]);
+  // The script.bin above has its own names.bin; extractBoasts takes the pair that belong together.
+  assert.deepEqual(extractBoasts(script.game, script.names).OBJECT_QUEST_CARD_PROTECT_FARM, { gold: 560, renown: 80, found: 2 });
+  const d = extract(game, names, undefined);
+  assert.equal(d.questCards.OBJECT_QUEST_CARD_PROTECT_FARM!.boastGold, undefined);
 });
 
 test('parseTng keeps placed creatures and creature generators', () => {

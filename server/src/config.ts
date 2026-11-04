@@ -112,7 +112,7 @@ export interface ServerConfig {
   pvpEverywhere: boolean;
   /** Test servers: every Cullis Gate counts as found, so heroes from older saves can travel. */
   gatesOpen: boolean;
-  /** Gold a known quest may pay when content/quest-rewards.json has no entry for it. */
+  /** Gold a quest script with no quest card may pay when content/quest-rewards.json has no entry for it (default 0). */
   questDefaultMaxGold: number;
   /** Most quest gold one hero can be paid in 24 hours, across all quests. */
   questDailyGoldCap: number;
@@ -203,7 +203,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     combat: str('FO_COMBAT', '1') !== '0',
     pvpEverywhere: flag('FO_PVP_ALL', false),
     gatesOpen: flag('FO_GATES_OPEN', false),
-    questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
+    questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 0),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
     lootMode: str('FO_LOOT_MODE', 'reward') === 'tables' ? 'tables' : 'reward',
     lootGoldPerHour: num('FO_LOOT_GOLD_PER_HOUR', 3_000),

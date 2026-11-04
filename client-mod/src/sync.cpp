@@ -12,6 +12,7 @@
 #include "crash_exit.h"
 #include "game/hook.h"
 #include "game/puppet.h"
+#include "game/quests.h"
 #include "game/spawns.h"
 #include "game/spirits.h"
 #include "game/thing.h"
@@ -70,6 +71,8 @@ struct State {
     std::unique_ptr<game::PuppetPool> puppets;
     /** Party members (not this player) by hero id, with their colour slot, from the last party frame. */
     std::vector<std::pair<uint32_t, int>> party;
+    /** Finished quests not yet sent (kept while offline; the server pays each card once). */
+    std::vector<game::quests::Completed> questsDone;
     game::PartySpirits spirits;
     bool reportPos = true;
     /** What the server said it does with position reports ("off" until the welcome says). */
@@ -164,6 +167,39 @@ void mark_party(const std::vector<world::Pose>& poses, uint32_t nowMs) {
     }
     overlay::set_party_marks(std::move(marks));
     s.spirits.sync(poses, !s.puppets->holding(nowMs) && game::local_hero() != 0, nowMs);
+}
+
+// Finished quests go to the server, which pays the card's reward into the ledger. Fable's own
+// numbers are sent as read: the server pays at most what the card and its boasts can pay.
+void report_quests() {
+    State& s = *g_state;
+    for (auto& q : game::quests::take())
+        if (s.questsDone.size() < 32) s.questsDone.push_back(std::move(q));
+    if (s.questsDone.empty() || !net::world_connected()) return;
+    for (const auto& q : s.questsDone) {
+        const std::string& id = q.card.empty() ? q.script : q.card;
+        char buf[256];
+        std::snprintf(buf, sizeof buf, "{\"t\":\"quest_complete\",\"quest\":%s,\"gold\":%d,\"renown\":%d,\"items\":[]}",
+                      json::quote(id).c_str(), q.gold > 0 ? q.gold : 0, q.renown > 0 ? q.renown : 0);
+        fo::log("quests: claiming %s (%s): %d gold, %d renown", id.c_str(), q.script.c_str(), q.gold, q.renown);
+        net::world_send(buf);
+    }
+    s.questsDone.clear();
+}
+
+void on_quest_reward(const std::string& frame) {
+    json::Value v;
+    if (!json::parse(frame, v)) return;
+    const std::string quest = v.str("quest");
+    if (v.boolean("ok")) {
+        char line[160];
+        std::snprintf(line, sizeof line, "Quest reward: %d gold, %d renown", static_cast<int>(v.num("gold")),
+                      static_cast<int>(v.num("renown")));
+        fo::log("quests: server paid %s: %s%s", quest.c_str(), line, v.boolean("trimmed") ? " (cut down to the quest's cap)" : "");
+        modsettings::notify(line);
+    } else {
+        fo::log("quests: server refused %s (%s)", quest.c_str(), v.str("reason").c_str());
+    }
 }
 
 void handle_frame(const std::string& json, uint32_t nowMs) {
@@ -272,6 +308,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
     }
     case world::FrameType::Unknown:
         if (json.rfind("{\"t\":\"party", 0) == 0) return on_party_frame(json);
+        if (json.rfind("{\"t\":\"quest_reward\"", 0) == 0) return on_quest_reward(json);
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -571,6 +608,7 @@ void tick() {
     sync_objects(now);
     apply_health(now);
     sync_trade(now);
+    report_quests();
 
     send_party_requests();
     auto spawned = s.table.drain_spawned();
@@ -632,6 +670,8 @@ void start() {
     }
     // Doors, chests and region exits go through the server (FABLE_ONLINE_THINGS=0 leaves them local).
     if (env_flag("FABLE_ONLINE_THINGS", true)) game::things::install();
+    // Finished quests are claimed from the server (FABLE_ONLINE_QUESTS=0 leaves them unreported).
+    if (env_flag("FABLE_ONLINE_QUESTS", true)) game::quests::install();
     net::world_start(cfg);
 }
 

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GameBin, NamesBin, fieldOffset, readF32, readI32, type Def } from './fable-bin.js';
+import { extractBoasts } from './boasts.js';
 import type { CreatureData, GameData, ItemData, QuestCardData, RewardRow, SpellData, WeaponClass, WeaponType } from './game-data.js';
 
 /**
@@ -28,7 +29,8 @@ export const FIELDS = {
 const WEAPON_TYPES: WeaponType[] = ['sword', 'axe', 'hammer', 'longbow', 'crossbow'];
 const WEAPON_CLASSES: Record<number, WeaponClass> = { 1: 'light', 2: 'heavy', 3: 'ranged' };
 
-export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
+/** `scriptBin` (data/CompiledDefs/script.bin) is optional: it adds the boast bonuses to quest cards. */
+export function extract(gameBin: Buffer, namesBin: Buffer, scriptBin?: Buffer): GameData {
   const names = new NamesBin(namesBin);
   const g = new GameBin(gameBin, names);
   const ref = (v: number | undefined) => (v === undefined || v < 0 ? null : (g.defNameAt(v) ?? null));
@@ -137,6 +139,15 @@ export function extract(gameBin: Buffer, namesBin: Buffer): GameData {
     };
   }
 
+  if (scriptBin) {
+    for (const [card, b] of Object.entries(extractBoasts(scriptBin, namesBin))) {
+      const c = questCards[card];
+      if (!c) continue;
+      c.boastGold = b.gold;
+      c.boastRenown = b.renown;
+    }
+  }
+
   return {
     source: { kind: 'game.bin', namesCrc: names.crc.toString(16), extractedAt: new Date().toISOString() },
     items,
@@ -182,7 +193,7 @@ function levelArrays(b: Buffer): Record<string, number[]> {
 }
 
 /** Finds the two files inside a Fable install folder (case-insensitive, as on Windows). */
-export function findDefs(fableDir: string): { game: string; names: string } {
+export function findDefs(fableDir: string): { game: string; names: string; script?: string } {
   const pick = (dir: string, want: string) => {
     if (!fs.existsSync(dir)) return undefined;
     const hit = fs.readdirSync(dir).find((f) => f.toLowerCase() === want.toLowerCase());
@@ -193,5 +204,5 @@ export function findDefs(fableDir: string): { game: string; names: string } {
   const game = pick(defs, 'game.bin');
   const names = pick(defs, 'names.bin');
   if (!game || !names) throw new Error(`Could not find data/CompiledDefs/game.bin and names.bin under ${fableDir}`);
-  return { game, names };
+  return { game, names, script: pick(defs, 'script.bin') };
 }
