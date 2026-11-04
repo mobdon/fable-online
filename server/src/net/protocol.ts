@@ -248,7 +248,7 @@ const idOf = (v: unknown, what: string): string => {
 };
 const keyOf = (v: unknown): string => {
   if (v === undefined) return `srv-${Math.random().toString(36).slice(2)}-${Date.now()}`;
-  if (typeof v !== 'string' || v.length < 8 || v.length > 128) throw new ProtocolError('bad key');
+  if (typeof v !== 'string' || v.length < 8 || v.length > 96) throw new ProtocolError('bad key');
   return v;
 };
 

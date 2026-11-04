@@ -406,3 +406,23 @@ test('the server follows a hero into the region their own Fable loaded', async (
   assert.equal(app.director.follow(hero.id, at(3948, 4286, 20)), undefined, 'same region: nothing to do');
   app.close();
 });
+
+test('a banned account cannot come back on a resume token', async () => {
+  const s = await serve();
+  try {
+    const { hero, acct } = makeHero(s.app);
+    const c = connect(s.url);
+    await c.open;
+    c.send({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: s.ticket(hero.id, acct.id) });
+    const w = await c.next((m) => m.t === 'welcome');
+    c.ws.terminate();
+    await new Promise((r) => setTimeout(r, 100));
+    s.app.db.run('UPDATE accounts SET banned_until = ? WHERE id = ?', Date.now() + 3600_000, acct.id);
+    const r = connect(s.url);
+    await r.open;
+    r.send({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: w.resume });
+    assert.equal((await r.next((m) => m.t === 'error')).error, 'banned');
+  } finally {
+    s.stop();
+  }
+});

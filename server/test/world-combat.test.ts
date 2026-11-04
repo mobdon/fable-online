@@ -338,3 +338,43 @@ test('spawns: a dead monster only comes back while no hero is near its spot', ()
   sm.step(50);
   assert.equal([...sm.creatures()].filter((c) => c.alive).length, 1);
 });
+
+test('a quest reward item can be claimed only as many times as the quest gives it', async () => {
+  const { QuestRewards } = await import('../src/economy/quests.js');
+  const app = testApp();
+  const { hero } = makeHero(app);
+  const q = new QuestRewards(app.db, app.economy, app.sink, { Q_OneSword: { maxGold: 0, items: ['IronLongsword'] } }, [], {});
+  const many = q.claim(hero.id, { quest: 'Q_OneSword', gold: 0, items: ['IronLongsword', 'IronLongsword', 'IronLongsword'] });
+  assert.deepEqual(many, { ok: false, reason: 'item_not_allowed' });
+  assert.equal(app.economy.inventory(hero.id).length, 0);
+  assert.equal(q.claim(hero.id, { quest: 'Q_OneSword', gold: 0, items: ['IronLongsword'] }).ok, true);
+  assert.equal(app.economy.inventory(hero.id).length, 1);
+});
+
+test('combat sim: killing a staff dev spawn pays no gold or experience', () => {
+  const app = testApp();
+  const { hero } = makeHero(app);
+  const sim = new CombatSim(REGION, 'TestRegion#1', {
+    data: D,
+    spawns: { regions: {} },
+    events: app.sink,
+    economy: app.economy,
+    loot: new LootService(app.economy, D, {}, () => 0.1),
+    progress: app.progress,
+    loadout: () => ({ equipped: ['OBJECT_IRON_LONGSWORD'] }),
+    spawnOptions: { rng: () => 0.5 },
+  });
+  sim.addHero(hero.id, { x: 0, y: 0, z: 0 });
+  const r = sim.devSpawn(hero.id, 'CREATURE_BANDIT_GRUNT_LEVEL1', 2);
+  assert.ok('id' in r);
+  const bandit = [...sim.spawns.creatures()].find((c) => c.id === r.id)!;
+  bandit.health = 1;
+  bandit.pos = { x: 0, y: 2, z: 0 };
+  sim.applyInput(hero.id, { seq: 1, moveX: 0, moveY: 0, buttons: BUTTONS.ATTACK, cameraYaw: 0 });
+  sim.step(50);
+  sim.applyInput(hero.id, { seq: 2, moveX: 0, moveY: 0, buttons: 0, cameraYaw: 0 });
+  assert.equal(bandit.alive, false);
+  assert.equal(app.economy.balance(hero.id), 0);
+  assert.equal(app.progress.get(hero.id).kills, 0);
+  app.close();
+});

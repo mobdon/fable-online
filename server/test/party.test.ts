@@ -270,3 +270,20 @@ test('parties over the game socket: invite, accept, party chat, and typed mistak
     app.close();
   }
 });
+
+test('a hero in a fight or down cannot hop to the party channel', () => {
+  const app = testApp({ channelSoftCap: 1, channelHardCap: 4, maxChannels: 4 });
+  const a = makeHero(app).hero;
+  const b = makeHero(app).hero;
+  const c1 = app.director.join(a, link(a.id, a.name, []));
+  const c2 = app.director.join(b, link(b.id, b.name, []));
+  assert.notEqual(c1, c2);
+  let state = { alive: true, lastHitAt: Date.now() };
+  (c2.sim as { combatState?: unknown }).combatState = () => state;
+  assert.throws(() => app.director.moveToChannel(b.id, c1.id), (e: any) => e.code === 'in_combat');
+  state = { alive: false, lastHitAt: 0 };
+  assert.throws(() => app.director.moveToChannel(b.id, c1.id), (e: any) => e.code === 'dead');
+  state = { alive: true, lastHitAt: Date.now() - 11_000 };
+  assert.equal(app.director.moveToChannel(b.id, c1.id), c1);
+  app.close();
+});

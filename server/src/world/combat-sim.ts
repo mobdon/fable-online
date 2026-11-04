@@ -95,6 +95,8 @@ export class CombatSim implements RegionSim {
   readonly law?: ChannelLaw;
   private guards = new Map<number, Creature>();
   private guardPosts = new Map<number, { def: string; post: Vec3; downMs: number | null }>();
+  /** Staff dev spawns: they never pay loot or experience, so they can't be farmed for gold. */
+  private devSpawned = new Set<number>();
   private guardAi?: AiDirector;
 
   constructor(
@@ -191,6 +193,7 @@ export class CombatSim implements RegionSim {
     const at = { x: h.pos.x - s * distance + c0 * side, y: h.pos.y + c0 * distance + s * side, z: h.pos.z };
     // Turned round to face the hero.
     const c = this.spawns.spawnExtra(defName, at, h.yaw + Math.PI);
+    if (c) this.devSpawned.add(c.id);
     return c ? { id: c.id } : { error: 'No walkable ground in front of you.' };
   }
 
@@ -367,6 +370,7 @@ export class CombatSim implements RegionSim {
         return;
       }
       this.spawns.died(c.id);
+      if (this.devSpawned.delete(c.id)) return;
       // Credit goes to the hero who did the most damage, so kill-stealing a nearly dead monster doesn't pay.
       let best: number | null = null;
       let most = 0;

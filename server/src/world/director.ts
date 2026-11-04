@@ -37,6 +37,9 @@ export interface DirectorHooks {
   onClose?(ch: Channel): void;
 }
 
+/** No moving to the party's channel for this long after dealing or taking a hit. */
+export const PARTY_MOVE_COMBAT_LOCK_MS = 10_000;
+
 /** How long a hero may take to load the next region before the server unfreezes them anyway. */
 export const REGION_LOAD_TIMEOUT_MS = 30_000;
 
@@ -233,6 +236,12 @@ export class Director {
     if (from.kind !== 'shared') throw new GameError('private', 'You are in a place of your own');
     if (target.region.name !== from.region.name) throw new GameError('not_here', 'Your party is in another region');
     if (from.loading.has(heroId)) throw new GameError('busy', 'Wait until you have arrived');
+    // Same lock as Cullis Gates: hopping channels mid-fight would drop the monsters, guards
+    // and heroes the hero is fighting.
+    const fight = from.sim.combatState?.(heroId);
+    if (fight && !fight.alive) throw new GameError('dead', 'You cannot move while down');
+    if (fight && fight.lastHitAt && Date.now() - fight.lastHitAt < PARTY_MOVE_COMBAT_LOCK_MS)
+      throw new GameError('in_combat', 'You cannot join your party in the middle of a fight');
     if (target.count >= this.cfg.channelHardCap) throw new GameError('channel_full', 'That place is full');
     for (const p of this.policies) {
       const err = p.canEnter?.(heroId, from.region.name, target.region.name, 'party');
