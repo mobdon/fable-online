@@ -374,6 +374,81 @@ float Renderer::measure(const std::string& s, Face f) const {
     return w;
 }
 
+namespace {
+uint32_t lerp_argb(uint32_t a, uint32_t b, float t) {
+    uint32_t out = 0;
+    for (int sh = 0; sh < 32; sh += 8) {
+        const float ca = static_cast<float>((a >> sh) & 0xFF), cb = static_cast<float>((b >> sh) & 0xFF);
+        out |= static_cast<uint32_t>(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return out;
+}
+}  // namespace
+
+void Renderer::pill(float x, float y, float w, float h, uint32_t top, uint32_t bottom, uint32_t edge) {
+    if (w <= 0 || h <= 0) return;
+    auto shape = [&](float x0, float y0, float pw, float ph, bool shade) {
+        if (pw <= 0 || ph <= 0) return;
+        const float rl = std::min(ph * 0.25f, pw / 2), rr = std::min(ph * 0.5f, pw / 2);
+        std::vector<std::pair<float, float>> pts;
+        const int n = 10;
+        auto arc = [&](float cx, float cy, float r, float a0, float a1) {
+            for (int i = 0; i <= n; ++i) {
+                const float a = a0 + (a1 - a0) * i / n;
+                pts.emplace_back(cx + std::cos(a) * r, cy + std::sin(a) * r);
+            }
+        };
+        const float pi = 3.14159265f;
+        arc(x0 + pw - rr, y0 + rr, rr, -pi / 2, 0);               // top right
+        arc(x0 + pw - rr, y0 + ph - rr, rr, 0, pi / 2);           // bottom right
+        arc(x0 + rl, y0 + ph - rl, rl, pi / 2, pi);               // bottom left
+        arc(x0 + rl, y0 + rl, rl, pi, 1.5f * pi);                 // top left
+        const float cx = x0 + pw / 2, cy = y0 + ph / 2;
+        auto col = [&](float py) { return shade ? lerp_argb(top, bottom, std::clamp((py - y0) / ph, 0.0f, 1.0f)) : edge; };
+        const uint32_t cc = col(cy);
+        for (size_t i = 0; i < pts.size(); ++i) {
+            const auto& a = pts[i];
+            const auto& b = pts[(i + 1) % pts.size()];
+            tri(cx, cy, cc, a.first, a.second, col(a.second), b.first, b.second, col(b.second));
+        }
+    };
+    const float e = std::max(1.5f, h * 0.05f);
+    shape(x, y, w, h, false);
+    shape(x + e, y + e, w - 2 * e, h - 2 * e, true);
+}
+
+float Renderer::text_scaled(float x, float y, const std::string& s, uint32_t argb, Face f, float scale) {
+    const FaceInfo& fi = faces_[static_cast<int>(f)];
+    if (!fi.font || scale <= 0) return 0;
+    flush();
+    dev_->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    dev_->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    const std::u32string u = ui::utf8_to_u32(s);
+    const float o = std::max(1.0f, scale);
+    const float offs[][2] = {{-o, 0}, {o, 0}, {0, -o}, {0, o}, {o, o}, {-o, -o}, {o, -o}, {-o, o}};
+    const uint32_t outline = ((argb >> 24) * 7 / 8) << 24;
+    float pen = x;
+    for (int pass = 0; pass <= 8; ++pass) {
+        const float dx = pass < 8 ? offs[pass][0] : 0, dy = pass < 8 ? offs[pass][1] : 0;
+        const uint32_t c = pass < 8 ? outline : argb;
+        pen = x;
+        for (char32_t ch : u) {
+            const assets::Glyph& g = glyph(f, ch);
+            if (ch != U' ' && g.x1 > g.x0) {
+                const float gx = pen + g.bearing * scale + dx, gy = y + dy;
+                quad(gx, gy, gx + (g.x1 - g.x0) * scale, gy + (g.y1 - g.y0) * scale,
+                     (fi.at.x + g.x0 + 0.5f) / tex_w_, (fi.at.y + g.y0 + 0.5f) / tex_h_,
+                     (fi.at.x + g.x1 - 0.5f) / tex_w_, (fi.at.y + g.y1 - 0.5f) / tex_h_, c);
+            }
+            pen += g.advance * scale;
+        }
+    }
+    flush();
+    dev_->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+    dev_->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+    return pen - x;
+}
+
 float Renderer::text(float x, float y, const std::string& s, uint32_t argb, Face f, bool outline) {
     const FaceInfo& fi = faces_[static_cast<int>(f)];
     if (!fi.font) return 0;

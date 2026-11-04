@@ -11,13 +11,15 @@
 
 #include "../config.h"
 #include "../log.h"
+#include "defs_edit.h"
+#include "menu_row.h"
 #include "shop_stock.h"
 
 namespace fo::game::shop_stock {
 namespace {
 
 // Bump when the filter's rules change, so an old cached copy is rebuilt.
-constexpr int kRulesVersion = 1;
+constexpr int kRulesVersion = 2;   // 2: adds the Mod Settings row to the in-game menu
 
 decltype(&CreateFileA) next_CreateFileA = nullptr;  // whatever the import slot held (kernel32, or another hook)
 decltype(&CreateFileW) next_CreateFileW = nullptr;
@@ -28,6 +30,7 @@ std::mutex g_mu;
 bool g_tried = false;
 std::wstring g_filtered;  // path of the filtered copy; empty = serve the original
 bool g_load_patched = false;
+std::atomic<bool> g_menu_row{false};  // the served game.bin lists the Mod Settings row
 
 bool is_game_bin(std::wstring p) {
     for (auto& c : p) c = c == L'/' ? L'\\' : static_cast<wchar_t>(towlower(c));
@@ -86,22 +89,50 @@ std::wstring build(const std::wstring& original) {
     if (read_all(stamp_path, old_stamp) && std::string(old_stamp.begin(), old_stamp.end()) == stamp &&
         GetFileAttributesW(dst.c_str()) != INVALID_FILE_ATTRIBUTES) {
         fo::log("shops: using the filtered game.bin from cache");
+        // The cached copy carries the menu row when this rules version adds it.
+        defs::Bin bin;
+        std::vector<uint8_t> c;
+        g_menu_row = read_all(dst, c) && bin.load(c, names) && menu_row::patch(bin).error == menu_row::kAlreadyListed;
         return dst;
     }
 
     DWORD t0 = GetTickCount();
     std::vector<uint8_t> out;
-    Report r = filter(game, names, out);
-    if (!r.ok) {
-        fo::log("shops: game.bin not filtered (%s); Fable's own shop stock is used", r.error.c_str());
-        return {};
+    bool changed = false;
+    if (config().shop_filter) {
+        Report r = filter(game, names, out);
+        if (!r.ok) {
+            fo::log("shops: game.bin not filtered (%s); Fable's own shop stock is used", r.error.c_str());
+            out.clear();
+        } else {
+            fo::log("shops: %u shop lists, %u banned item defs, %u stock rows emptied, %u chunks rewritten (%lu ms)",
+                    r.shops, r.banned_defs, r.rows_cleared, r.chunks_rewritten, GetTickCount() - t0);
+            for (const auto& n : r.cleared) fo::log("shops:   no longer sold: %s", n.c_str());
+            changed = r.rows_cleared > 0;
+        }
     }
-    fo::log("shops: %u shop lists, %u banned item defs, %u stock rows emptied, %u chunks rewritten (%lu ms)",
-            r.shops, r.banned_defs, r.rows_cleared, r.chunks_rewritten, GetTickCount() - t0);
-    for (const auto& n : r.cleared) fo::log("shops:   no longer sold: %s", n.c_str());
-    if (!r.rows_cleared) return {};
+    if (out.empty()) out = game;
+    {
+        defs::Bin bin;
+        std::vector<uint8_t> with_row;
+        if (!bin.load(out, names)) {
+            fo::log("menu: game.bin not read (%s); no Mod Settings row in Fable's menu", bin.error.c_str());
+        } else {
+            menu_row::Report m = menu_row::patch(bin);
+            if (!m.ok) fo::log("menu: Mod Settings row not added (%s)", m.error.c_str());
+            else if (!bin.save(with_row)) fo::log("menu: Mod Settings row not added (%s)", bin.error.c_str());
+            else {
+                out.swap(with_row);
+                changed = true;
+                g_menu_row = true;
+                fo::log("menu: Mod Settings row added to Fable's in-game menu");
+            }
+        }
+    }
+    if (!changed) return {};
     if (!write_all(dst, out.data(), out.size()) || !write_all(stamp_path, stamp, std::strlen(stamp))) {
-        fo::log("shops: couldn't write %ls (%lu); Fable's own shop stock is used", dst.c_str(), GetLastError());
+        fo::log("shops: couldn't write %ls (%lu); Fable's own game.bin is used", dst.c_str(), GetLastError());
+        g_menu_row = false;
         return {};
     }
     return dst;
@@ -206,7 +237,6 @@ void* hook_import(const char* fn, void* hook) {
 }  // namespace
 
 void install(HMODULE self) {
-    if (!config().shop_filter) return;
     g_self = self;
     HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
     raw_CreateFileW = reinterpret_cast<decltype(raw_CreateFileW)>(GetProcAddress(k32, "CreateFileW"));
@@ -214,8 +244,10 @@ void install(HMODULE self) {
     next_CreateFileW = raw_CreateFileW;
     if (void* p = hook_import("CreateFileA", reinterpret_cast<void*>(hook_CreateFileA))) next_CreateFileA = reinterpret_cast<decltype(next_CreateFileA)>(p);
     if (void* p = hook_import("CreateFileW", reinterpret_cast<void*>(hook_CreateFileW))) next_CreateFileW = reinterpret_cast<decltype(next_CreateFileW)>(p);
-    g_load_patched = patch_load_check();
+    if (config().shop_filter) g_load_patched = patch_load_check();
 }
+
+bool menu_row_served() { return g_menu_row.load() && g_tried && !g_filtered.empty(); }
 
 void log_status() {
     fo::log("shops: filter %s; saved-stock check %s", g_tried ? (g_filtered.empty() ? "NOT applied (see above)" : "applied") : "not reached yet (game.bin not opened through CreateFile)",
