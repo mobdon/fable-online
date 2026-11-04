@@ -42,6 +42,7 @@ struct Config {
     bool camera_auto_center = false;  // Fable eases the camera pitch back while walking
     int mouse_smoothing = 0;     // mouse-look frames averaged: 0 = off, -1 = Fable's own, else N
     float hud_scale = -1;        // 0 = automatic (as on a 900-pixel-tall screen), -1 = off, else the factor
+    bool aim_at_crosshair = false;    // pick melee, spell and lock targets along the camera's view
     // [overlay]
     Crosshair crosshair = Crosshair::Off;  // a mark at the centre of the view
 };

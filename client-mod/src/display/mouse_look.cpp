@@ -19,6 +19,14 @@ char g_center_status[120] = "camera auto-centre: Fable's own";
 constexpr uint32_t kCenterSite = 0x0087457A, kCenterSkip = 0x00874604;
 constexpr uint8_t kCenterOriginal[2] = {0x0F, 0x84};
 
+// CTCTargetingPlayer's target search (0x804020) scores enemies along a reference direction:
+// the hero's facing, or the camera's view direction when the targeting definition's flag at
+// +0x3A is set (also used while the first-person targeting button is held). The flag is read
+// with `mov dl, [edi+3Ah]`; making that `mov dl, 1` has the search follow the camera.
+constexpr uint32_t kAimSite = 0x008040ED;
+constexpr uint8_t kAimOriginal[3] = {0x8A, 0x57, 0x3A};
+char g_aim_status[120] = "targeting: Fable's own (hero's facing)";
+
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
@@ -51,8 +59,21 @@ void install_center() {
     std::snprintf(g_center_status, sizeof g_center_status, "camera auto-centre: off");
 }
 
+void install_aim() {
+    if (!config().aim_at_crosshair) return;
+    if (!readable(kAimSite, sizeof kAimOriginal) ||
+        std::memcmp(reinterpret_cast<const void*>(kAimSite), kAimOriginal, sizeof kAimOriginal) != 0) {
+        std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: code not where expected, left as is");
+        return;
+    }
+    const uint8_t patch[3] = {0xB2, 0x01, 0x90};  // mov dl, 1 ; nop
+    write_code(kAimSite, patch, sizeof patch);
+    std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: along the camera's view (crosshair)");
+}
+
 void install() {
     install_center();
+    install_aim();
     const int frames = config().mouse_smoothing;   // -1 = Fable's own, else frames to average
     if (frames < 0) return;
     if (!readable(kSite, sizeof kOriginal) || std::memcmp(reinterpret_cast<const void*>(kSite), kOriginal, sizeof kOriginal) != 0) {
@@ -70,4 +91,5 @@ void install() {
 
 const char* status() { return g_status; }
 const char* center_status() { return g_center_status; }
+const char* aim_status() { return g_aim_status; }
 }  // namespace fo::display::mouse_look

@@ -97,6 +97,7 @@ void config_load(HMODULE self) {
     c.hud_scale = hs == L"auto" ? 0.0f : hs == L"off" ? -1.0f : static_cast<float>(_wtof(hs.c_str()));
     if (c.hud_scale > 4.0f) c.hud_scale = 4.0f;
     c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);
+    c.aim_at_crosshair = ini_bool(f, L"display", L"aim_at_crosshair", c.aim_at_crosshair);
     std::wstring ch = ini_str(f, L"overlay", L"crosshair", L"off");
     c.crosshair = ch == L"ring" ? Crosshair::Ring : ch == L"dot" ? Crosshair::Dot : ch == L"cross" ? Crosshair::Cross : Crosshair::Off;
 

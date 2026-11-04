@@ -8,4 +8,5 @@ void install();
 const char* status();
 // The pitch drifting back to level while walking ([display] camera_auto_center).
 const char* center_status();
+const char* aim_status();
 }  // namespace fo::display::mouse_look

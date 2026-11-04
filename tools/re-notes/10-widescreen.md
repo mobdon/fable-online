@@ -59,3 +59,19 @@ Next attempt: send the virtual size to those return addresses as well (a list in
 block, next to the 0x9E1D00-0x9E2430 range), scale and clamp 2D viewports, and test the
 front end, the intro video and the pause menu before the in-game HUD. 3D-projected screen
 positions (camera code at 0xB327A1, 0xB4A881, 0xB8E315) must keep the real size.
+
+## Player targeting (CTCTargetingPlayer)
+
+- Vtable 0x124280C. Slot 9 (0x805600) is the update; every fourth frame, or when forced,
+  it calls the target search at 0x804020.
+- The search builds a reference position and direction:
+  - Position: the hero's position, or the camera's when the targeting definition byte
+    +0x38 is set.
+  - Direction: the hero's facing (physics +0x118), or the camera's view direction (+0x18 in
+    the struct filled by `[[[0x13B8A1C]+0x24]+0x34]` vfunc +4) when any of these hold:
+    - definition byte +0x3A is set;
+    - the first-person targeting counter [this+0x38] is above 8;
+    - the hero mode is 0x2E.
+  - Cone half-angle: definition +0x30 or +0x34, in degrees.
+- `aim_at_crosshair` patches the +0x3A read at 0x8040ED (`8A 57 3A`) to `mov dl,1`, so the
+  search always uses the camera direction.
