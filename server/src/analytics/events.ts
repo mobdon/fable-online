@@ -26,7 +26,7 @@ export type GameEvent =
   /** The client's Fable loaded another region by itself and the server moved the hero there (or refused to). */
   | { type: 'region_follow'; heroId: number; from: string; to: string; channelId?: string; refused?: string }
   | { type: 'gate_unlocked'; heroId: number; gate: string; region: string }
-  | { type: 'gate_travel'; heroId: number; to: string; from?: string; gate?: string | null; via?: 'seal' | 'gate' | 'back'; leader?: number; refused?: string }
+  | { type: 'gate_travel'; heroId: number; to: string; from?: string; gate?: string | null; via?: 'seal' | 'gate' | 'back' | 'respawn'; leader?: number; refused?: string }
   | { type: 'kill'; heroId: number; creature: string; channelId: string; experience: number; gold: number; items: number }
   | { type: 'hero_death'; heroId: number; killer: string | null; pvp: boolean; channelId: string; phialUsed: boolean }
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }

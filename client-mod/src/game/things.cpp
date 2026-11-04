@@ -362,6 +362,20 @@ std::vector<Event> drain_events() {
     return out;
 }
 
+bool teleport_to_gate(const std::string& id) {
+    uint64_t uid = world::runtime_uid(id, g_levels);
+    uintptr_t thing = uid ? find_thing(uid) : 0;
+    uintptr_t gate = thing ? component(thing, kTeleporterVtable) : 0;
+    if (!gate) {
+        fo::log("things: cannot travel to gate %s (uid %s, thing %s)", id.c_str(), uid ? "known" : "unknown",
+                thing ? "has no teleporter" : "not loaded");
+        return false;
+    }
+    fo::log("things: travelling to gate %s for a respawn", id.c_str());
+    reinterpret_cast<TeleportFn>(kTeleportHere)(reinterpret_cast<void*>(gate));
+    return true;
+}
+
 bool release(uintptr_t comp, world::HeldKind kind) {
     if (kind == world::HeldKind::TeleportBack) {
         if (!comp) return false;

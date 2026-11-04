@@ -492,6 +492,20 @@ void draw_crosshair(const Config& cfg) {
     }
 }
 
+float g_fade = 0;
+std::string g_fadeCaption;
+
+void draw_fade() {  // caller holds g_mu
+    if (g_fade <= 0.004f) return;
+    uint32_t a = static_cast<uint32_t>(g_fade * 255.0f + 0.5f);
+    g_r.rect(0, 0, g_r.screen_w(), g_r.screen_h(), a << 24);
+    if (g_fadeCaption.empty() || g_fade < 0.5f) return;
+    uint32_t ta = static_cast<uint32_t>((g_fade - 0.5f) * 2.0f * 255.0f + 0.5f);
+    float w = g_r.measure(g_fadeCaption, Face::Title);
+    g_r.text(std::floor((g_r.screen_w() - w) / 2), std::floor(g_r.screen_h() * 0.45f), g_fadeCaption, (ta << 24) | 0x00E9E4D6,
+             Face::Title);
+}
+
 void draw(IDirect3DDevice9* dev) {
     const Config& cfg = config();
     const assets::UiArt* art = g_art.load();
@@ -511,6 +525,7 @@ void draw(IDirect3DDevice9* dev) {
     draw_tags(cfg);
     draw_party_orbs(cfg);
     draw_party_list();
+    draw_fade();
     if (cfg.chat_enabled) draw_chat(cfg, now);
     g_trade.step(now);
     flush_outbox();
@@ -920,6 +935,12 @@ void log_stats() {
 }
 bool input_blocked_now() { return input_blocked(); }
 unsigned mouse_buttons() { return g_mouse_buttons.load(); }
+
+void set_fade(float alpha, const std::string& caption) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_fade = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+    if (g_fadeCaption != caption) g_fadeCaption = caption;
+}
 
 void on_trade_frame(const std::string& text) {
     json::Value m;

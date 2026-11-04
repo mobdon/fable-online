@@ -378,3 +378,20 @@ test('combat sim: killing a staff dev spawn pays no gold or experience', () => {
   assert.equal(app.progress.get(hero.id).kills, 0);
   app.close();
 });
+
+test('combat sim: a death without a phial hands the hero to the respawn hook after the step', async () => {
+  const calls: number[] = [];
+  const sim = new CombatSim(REGION, 'TestRegion#r', { data: D, spawns: { regions: {} }, events: new MemorySink(), respawn: (id) => (calls.push(id), true) });
+  sim.addHero(9, { x: 0, y: 0, z: 0 });
+  const h = sim.hero(9)!;
+  h.health = 1;
+  const wolf = { id: 9_100_000, kind: 'creature', defName: 'CREATURE_WOLF', pos: { x: 0, y: -1, z: 0 }, yaw: 0, health: 20, maxHealth: 20, alive: true, faction: 'FACTION_MONSTERS', anim: 0, blocking: false, stunnedMs: 0, attackCooldownMs: 0, weapon: null, power: 2, armour: 0, targetId: null, spawnId: null, experience: 0 } as Creature;
+  sim.combat.add(wolf);
+  assert.ok(sim.combat.attack(wolf.id, h.id, 'light').killed);
+  assert.equal(h.alive, false);
+  sim.step(DEATH.respawnMs + 50);
+  assert.equal(h.alive, true);
+  assert.deepEqual(calls, [], 'not during the step');
+  await Promise.resolve();
+  assert.deepEqual(calls, [9]);
+});

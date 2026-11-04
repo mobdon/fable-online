@@ -61,6 +61,12 @@ export interface WorldServices {
   spawnOptions?: Partial<SpawnOptions>;
   /** Crime and the town watch. Without it there are no guards and nothing is a crime. */
   law?: LawServices;
+  /**
+   * A hero who died without a phial gets back up here: move them to their respawn point
+   * (the nearest Cullis Gate, src/world/travel/travel.ts). Called after the channel's step,
+   * never during it. Returns false when it could not move them: they stay at their home.
+   */
+  respawn?: (heroId: number) => boolean;
 }
 
 /** Guard stats when game.bin has no entry for the def (test data, or an unread def). */
@@ -454,12 +460,20 @@ export class CombatSim implements RegionSim {
 
   private respawn(slot: HeroSlot): void {
     const h = slot.hero;
+    const moveAway = !slot.phial && !!this.s.respawn;
     if (!slot.phial) h.pos = { ...slot.home };
     this.combat.revive(h.id, slot.phial ? 1 : 0.5);
     h.will = h.maxWill;
     h.combo = 0;
     slot.downMs = null;
     slot.phial = false;
+    // Moving between channels is not allowed mid-step: do it once the step is over.
+    if (moveAway) {
+      const id = h.id;
+      queueMicrotask(() => {
+        if (this.heroes.get(id)?.hero === h) this.s.respawn!(id);
+      });
+    }
   }
 }
 

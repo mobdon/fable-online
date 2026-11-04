@@ -15,6 +15,7 @@
 #include "game/spawns.h"
 #include "game/spirits.h"
 #include "game/thing.h"
+#include "game/script.h"
 #include "game/things.h"
 #include "log.h"
 #include "modsettings/modsettings.h"
@@ -24,6 +25,7 @@
 #include "ui/json.h"
 #include "ui/party_model.h"
 #include "world/entities.h"
+#include "world/death.h"
 #include "world/health.h"
 #include "world/held.h"
 #include "world/objects.h"
@@ -82,6 +84,11 @@ struct State {
     /** Local heals (potions, food, Heal Life) waiting to be reported or answered. */
     world::HealWatch heals;
     uint32_t healSeq = 0;
+    /** The server's death, shown without Fable's own game over (world/death.h). */
+    world::DeathView death;
+    /** Where the hero fell; held there while down. */
+    game::Pos fellAt;
+    bool haveFellAt = false;
     uint32_t lastCorrectionLogMs = 0;
     bool suppressSpawns = true;
     bool dev = false;
@@ -106,6 +113,8 @@ void on_connected() {
     g_state->objects.clear();
     g_state->table.clear();
     g_state->puppets->clear_all();
+    g_state->death.reset();
+    overlay::set_fade(0, "");
     if (g_state->suppressSpawns) game::spawns::suppress();
 }
 
@@ -252,6 +261,7 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
                 fo::log("sync: %s from %s via %s, arriving at %s; waiting for the local load", rc.region.c_str(),
                         rc.from.c_str(), rc.via.c_str(), rc.entrance.c_str());
             }
+            if (rc.respawn) s.death.respawn_at(rc.thing, nowMs);
             s.objects.begin_region(rc, nowMs);
             // The hero has been moved: an exit Fable was held at may load the region now.
             if (rc.loading) s.held.on_region_change();
@@ -401,6 +411,53 @@ void apply_health(uint32_t nowMs) {
         s.lastHealthLogMs = nowMs;
         fo::log("sync: hero health %.0f -> %.0f of %.0f (server %.0f of %.0f)", hp, want, max, own.health, own.maxHealth);
     }
+}
+
+/** Fable-side of the death: the fall, holding the hero, the gate travel and getting up. */
+void show_death(uint32_t nowMs) {
+    State& s = *g_state;
+    if (!net::world_connected()) {
+        if (s.death.phase() != world::DeathView::Phase::Alive) {
+            s.death.reset();
+            overlay::set_fade(0, "");
+        }
+        return;
+    }
+    world::EntityState own;
+    bool have = s.table.own_state(own);
+    world::DeathView::Step st = s.death.update(have ? own.health : 0, have ? own.maxHealth : 0, s.objects.loading(), nowMs);
+    uintptr_t hero = game::local_hero();
+    if (st.fell) {
+        fo::log("sync: the server has the hero dead; playing the fall (no Fable game over)");
+        s.haveFellAt = hero && game::read_pos(hero, s.fellAt);
+        game::script::ThingRef ref;
+        if (game::script::hero(ref)) {
+            // Local monsters must not finish the hero off: Fable's own death ends in a reload.
+            game::script::set_damageable(ref, false);
+            bool fall = game::script::play_anim_once(ref, "ST_DIE", true, 1);
+            bool lie = game::script::play_looping_anim(ref, "ST_DEATH_FRAME", 1000, false, 2);
+            if (!fall || !lie) fo::log("sync: the fall animation was refused (fall %d, lie %d)", fall, lie);
+        }
+    }
+    if (st.travel) {
+        fo::log("sync: respawning at %s", s.death.gate().c_str());
+        s.haveFellAt = false;
+        if (s.death.gate().empty() || !game::things::teleport_to_gate(s.death.gate()))
+            fo::log("sync: could not start the local move to the gate; the server will correct the position");
+    }
+    if (st.rose) {
+        fo::log("sync: the hero gets up");
+        s.haveFellAt = false;
+        game::script::ThingRef ref;
+        if (game::script::hero(ref)) {
+            game::script::clear_scripted(ref);
+            game::script::set_damageable(ref, true);
+        }
+    }
+    // Down where they fell: keep them there, whatever the keyboard says.
+    if (s.death.phase() == world::DeathView::Phase::Down && s.haveFellAt && hero) game::write_pos(hero, s.fellAt, false, 0);
+    float fade = s.death.fade(nowMs);
+    overlay::set_fade(fade, s.death.down() ? "You have fallen" : "");
 }
 
 const char* event_name(game::things::Event::Kind k) {
@@ -570,6 +627,7 @@ void tick() {
     report_combat(now);
     sync_objects(now);
     apply_health(now);
+    show_death(now);
     sync_trade(now);
 
     send_party_requests();

@@ -227,3 +227,22 @@ test('the extractor picks Cullis Gates by component, not house teleporters or sw
   assert.equal(gateKind(t('OBJECT_HKC_TELEPORTER_OFF_01', { CTCTeleporter: {} })), null);
   assert.equal(gateKind(t('OBJECT_BARREL')), null);
 });
+
+test('death respawns the hero at the nearest Cullis Gate, in another region if need be, with no unlock', () => {
+  const app = setup();
+  // Standing at Greatwood's 7 (region origins are all zero here): its own gate is nearest.
+  const a = join(app, 'Greatwood', [95, 95, 0]);
+  assert.equal(app.travel.respawn(a.id), 'Greatwood:7');
+  assert.equal(regionOf(app, a.id), 'Greatwood');
+  const enter = a.inbox.filter((m) => m.t === 'enter_region').at(-1);
+  assert.equal(enter.respawn, true);
+  assert.equal(enter.via, 'cullis_gate');
+  assert.equal(enter.thing, 'Greatwood:7');
+
+  // From the Guild, the nearest ordinary gate is Lookout Point's, never the Guild's own
+  // pedestal, and never a barred region's gate.
+  const b = join(app, 'HeroGuildComplex', [12, 12, 0]);
+  assert.equal(app.travel.respawn(b.id), 'LookoutPoint:5');
+  assert.equal(regionOf(app, b.id), 'LookoutPoint');
+  assert.ok(app.sink.events.some((e) => e.type === 'gate_travel' && e.heroId === b.id && (e as { via?: string }).via === 'respawn'));
+});

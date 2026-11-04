@@ -207,6 +207,43 @@ export class Travel {
     }
   }
 
+  // ---------------------------------------------------------------- death
+
+  /**
+   * A hero who died gets back up at the Cullis Gate nearest to where they fell (on the world
+   * map, so it can be in another region), which costs them the walk back. No unlock is
+   * needed and no travel rule applies: this is not travel the hero chose. Gates in barred
+   * regions are skipped. Returns the gate, or null when there is none (the hero stays).
+   */
+  respawn(heroId: number): string | null {
+    const ch = this.director.channelOf(heroId);
+    const pos = ch?.sim.position(heroId);
+    if (!ch || !pos) return null;
+    const o = this.director.originOf(ch.region.name);
+    const at = { x: pos.x + o.x, y: pos.y + o.y };
+    let best: GateThing | null = null;
+    let bestD = Infinity;
+    for (const g of this.gates.values()) {
+      if (g.guild || this.barred(g.region)) continue;
+      const go = this.director.originOf(g.region);
+      const d = Math.hypot(g.pos[0] + go.x - at.x, g.pos[1] + go.y - at.y);
+      if (d < bestD) [best, bestD] = [g, d];
+    }
+    // No ordinary gate anywhere (test data, or an extract without gates): the Guild's.
+    best ??= this.guild && !this.barred(this.guild.region) ? this.guild : null;
+    if (!best) return null;
+    try {
+      this.director.transfer(heroId, best.region, this.arrival(best), 'cullis_gate', { thing: best.id, respawn: true });
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.events.emit({ type: 'gate_travel', heroId, to: best.id, refused: e.code });
+      return null;
+    }
+    this.returns.delete(heroId);
+    this.events.emit({ type: 'gate_travel', heroId, from: ch.region.name, to: best.region, gate: best.id, via: 'respawn' });
+    return best.id;
+  }
+
   // ---------------------------------------------------------------- rules
 
   /** Throws the reason this hero may not jump right now. */

@@ -63,6 +63,14 @@ std::vector<Event> drain_events();
 /** Runs a held action now. Returns false if the component is gone (area unloaded). */
 bool release(uintptr_t comp, world::HeldKind kind);
 
+/**
+ * Moves the local hero to a Cullis Gate the way the gate's own travel does (CTCTeleporter's
+ * "move the hero here", 0x7DFCF0), so Fable loads that region itself. Called directly, not
+ * through the routed call sites, so nothing is reported to the server: the server asked for
+ * it. False when the gate's thing is not known to the local game (logged).
+ */
+bool teleport_to_gate(const std::string& id);
+
 /** Makes the local thing match the server: swing a door. Other changes are logged. */
 void apply(const world::ObjectChange& change);
 const Stats& stats();
