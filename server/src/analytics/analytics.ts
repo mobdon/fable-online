@@ -1,10 +1,10 @@
 // The one object the game server talks to. Each call updates the Prometheus
 // metrics, writes an event to the log, and (for the economy) runs the watchdog.
 
-import { ANOMALY_RULES, EconomyWatchdog, type Anomaly, type WatchdogConfig } from "./economy.js";
-import { MemorySink, type EventSink } from "./events.js";
+import { ANOMALY_RULES, EconomyWatchdog, type Anomaly, type WatchdogConfig } from "./watchdog.js";
+import { MemorySink, type EventSink } from "./event-log.js";
 import {
-  ABILITIES, COUNTERS, GOLD_SINKS, GOLD_SOURCES, PVP_VENUES, SCHOOLS,
+  ABILITIES, CHAT_CHANNELS, COUNTERS, GOLD_SINKS, GOLD_SOURCES, PVP_VENUES, SCHOOLS,
   bounded, createMetrics, type Metrics, type PvpVenue, type School,
 } from "./metrics.js";
 
@@ -199,7 +199,7 @@ export class Analytics {
 
   // ---- social ----------------------------------------------------------------
 
-  chat(channel: "say" | "region" | "whisper" | "guild" | "trade" | "arena") { this.metrics.chatMessages.inc({ channel }); }
+  chat(channel: string) { this.metrics.chatMessages.inc({ channel: bounded(channel, CHAT_CHANNELS) }); }
 
   playerReport(reporterId: string, targetId: string, reason: "spam" | "abuse" | "cheating" | "other") {
     this.metrics.chatReports.inc({ reason });

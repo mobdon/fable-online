@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Analytics, EconomyWatchdog, MemorySink } from "../src/index.js";
+import { Analytics } from "../src/analytics/analytics.js";
+import { EconomyWatchdog } from "../src/analytics/watchdog.js";
+import { MemorySink } from "../src/analytics/event-log.js";
 
 const rules = (xs: { rule: string }[]) => xs.map((x) => x.rule).sort();
 

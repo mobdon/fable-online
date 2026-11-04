@@ -2,9 +2,10 @@
 ; Every line is optional.
 
 [chat]
-; The chat server, host:port. Run your own with server/chat (npm start).
+; Realm chat runs inside the game server. The launcher passes its address and login
+; token to the mod, so this line only matters when the launcher sends none.
 server=127.0.0.1:7781
-; Your hero name on a dev server (production logs in through the launcher instead).
+; Fallback name for your own name tag (self=1) before chat has logged in.
 ; Empty = your Windows user name.
 name=
 ; The key that opens the chat box, as a Windows virtual-key code. 13 = Enter.

@@ -123,6 +123,34 @@ export interface ServerConfig {
   weatherMinutes: number;
   /** Changing it reshuffles the weather. */
   weatherSeed: number;
+
+  /** Run Realm chat (chat and name tags) inside this server. */
+  chat: boolean;
+  /** TCP port the chat hub listens on (NDJSON, see shared/protocol/chat.md). */
+  chatPort: number;
+  chatHost: string;
+  /** Host and port /join tells the mod to use for chat. Empty host = publicHost. */
+  chatPublicHost: string;
+  chatPublicPort: number;
+  /**
+   * HMAC secret for chat login tokens. Empty = a new random one each boot, which is fine
+   * while chat runs inside this process; set it when another process has to verify them.
+   */
+  chatSecret: string;
+  /** How long a chat token from /join stays valid (the mod reuses it on every reconnect). */
+  chatTokenTtlMs: number;
+  /** First line every hero sees in Realm chat ('' = the built-in one). */
+  chatMotd: string;
+  /** Words the chat filter stars out. */
+  chatBannedWords: string[];
+  /** Chat mutes and bans ('' = kept in memory only). */
+  chatModerationPath: string;
+
+  /** Prometheus /metrics port, private interface only (0 disables it). */
+  metricsPort: number;
+  metricsHost: string;
+  /** Directory for the analytics event log, one file per UTC day ('' disables it). */
+  analyticsDir: string;
 }
 
 export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
@@ -168,6 +196,19 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     dayMinutes: num('FO_DAY_MINUTES', 48),
     weatherMinutes: num('FO_WEATHER_MINUTES', 12),
     weatherSeed: num('FO_WEATHER_SEED', 1),
+    chat: flag('FO_CHAT', true),
+    chatPort: num('FO_CHAT_PORT', 7781),
+    chatHost: str('FO_CHAT_HOST', '0.0.0.0'),
+    chatPublicHost: str('FO_CHAT_PUBLIC_HOST', ''),
+    chatPublicPort: num('FO_CHAT_PUBLIC_PORT', num('FO_CHAT_PORT', 7781)),
+    chatSecret: str('FO_CHAT_SECRET', ''),
+    chatTokenTtlMs: num('FO_CHAT_TOKEN_TTL_MS', 12 * 3600_000),
+    chatMotd: str('FO_CHAT_MOTD', ''),
+    chatBannedWords: str('FO_CHAT_BANNED_WORDS', '').split(',').map((w) => w.trim()).filter(Boolean),
+    chatModerationPath: str('FO_CHAT_MODERATION', 'data/chat-moderation.json'),
+    metricsPort: num('FO_METRICS_PORT', 9464),
+    metricsHost: str('FO_METRICS_HOST', '127.0.0.1'),
+    analyticsDir: str('FO_ANALYTICS_DIR', 'data/analytics'),
     ...overrides,
   };
 }

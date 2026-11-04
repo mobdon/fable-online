@@ -52,13 +52,14 @@ Mode read_mode() {
 void online_thread() {
     const fo::Config& cfg = fo::config();
     std::thread(fo::overlay::install_late).detach();
-    if (cfg.chat_enabled) {
-        std::string hello = "{\"t\":\"hello\",\"v\":1";
-        if (!cfg.token.empty()) hello += ",\"token\":" + fo::json::quote(cfg.token);
-        else hello += ",\"name\":" + fo::json::quote(cfg.name);
-        fo::log("chat: server %s:%u, %s", cfg.chat_host.c_str(), cfg.chat_port,
-                cfg.token.empty() ? ("dev login as " + cfg.name).c_str() : "token login");
-        fo::net::chat_start(cfg.chat_host, cfg.chat_port, hello + "}");
+    // Realm chat only takes the token the game server signs in /join, which the launcher
+    // passes as FABLE_ONLINE_TOKEN. Without one there is nothing to log in with.
+    if (cfg.chat_enabled && cfg.token.empty()) {
+        fo::log("chat: no login token (start Fable from the launcher); Realm chat is off");
+    } else if (cfg.chat_enabled) {
+        std::string hello = "{\"t\":\"hello\",\"v\":1,\"token\":" + fo::json::quote(cfg.token) + "}";
+        fo::log("chat: server %s:%u, token login", cfg.chat_host.c_str(), cfg.chat_port);
+        fo::net::chat_start(cfg.chat_host, cfg.chat_port, hello);
     }
     fo::game::HeroPos last;
     unsigned ticks = 0;

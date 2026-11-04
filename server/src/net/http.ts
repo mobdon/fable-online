@@ -91,6 +91,8 @@ export function createHttpHandler(app: App) {
       port: cfg.publicPort,
       hero: publicHero(hero),
       protocol: cfg.protocolVersion,
+      // Realm chat: the mod logs in with this token; there is no login by name.
+      ...(app.chat ? { chat: app.chat.joinInfo(acct, hero) } : {}),
     };
   });
 

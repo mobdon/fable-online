@@ -2,8 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { connect } from "node:net";
-import { ChatHub } from "../src/hub.ts";
-import { listen } from "../src/server.ts";
+import { ChatHub } from "../src/chat/hub.js";
+import { listen } from "../src/chat/server.js";
 
 function client(port: number) {
   const sock = connect(port, "127.0.0.1");

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ChatHub, type Conn } from "../src/hub.ts";
-import { signToken } from "../src/auth.ts";
-import { parseClientMsg, type ServerMsg, type ClientMsg } from "../src/protocol.ts";
+import { ChatHub, type Conn } from "../src/chat/hub.js";
+import { signToken } from "../src/chat/auth.js";
+import { parseClientMsg, type ServerMsg, type ClientMsg } from "../src/chat/protocol.js";
 
 class Fake implements Conn {
   got: ServerMsg[] = [];

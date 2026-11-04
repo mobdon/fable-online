@@ -95,7 +95,7 @@ const economy = dashboard("fable-economy", "Fable Online: Economy", [
   }),
   stat("Net gold / hour", g(18, 1, 6, 4), [instant("(sum(rate(fable_gold_minted_total[1h])) - sum(rate(fable_gold_burned_total[1h]))) * 3600")], { unit: "short", description: "Minted minus burned. Positive means inflation." }),
   ts("Anomalies by rule", g(0, 5, 12, 8), [target("sum by (rule) (increase(fable_economy_anomalies_total[5m]))", "{{rule}}")], {
-    stack: true, description: "Each rule is described in server/analytics/src/economy.ts. Look up the hero with economy.anomaly in the event log.",
+    stack: true, description: "Each rule is described in server/src/analytics/watchdog.ts. Look up the hero with economy.anomaly in the event log.",
     options: { tooltip: { mode: "multi" } }, fieldConfig: { custom: { drawStyle: "bars", fillOpacity: 80, stacking: { mode: "normal" } } },
   }),
   ts("Gold supply: ledger vs DB", g(12, 5, 12, 8), [

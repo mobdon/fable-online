@@ -38,6 +38,8 @@ export type GameEvent =
   | { type: 'theft'; heroId: number; thing: string; def: string; region: string }
   | { type: 'region_exit'; heroId: number; from: string; to: string; via: string; thing: string }
   | { type: 'tick_stats'; channels: number; players: number; tickMs: number }
+  /** Realm chat: logins, message counts (never the text), reports, moderation. */
+  | { type: 'chat'; event: string; detail: Record<string, unknown> }
 
   | { type: 'crime'; heroId: number; kind: string; town: string | null; fine: number; level: number }
   | { type: 'crime_witnessed'; heroId: number; kind: string; witness: 'guard' | 'villager'; channelId: string }

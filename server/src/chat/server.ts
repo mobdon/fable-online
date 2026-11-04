@@ -1,7 +1,7 @@
 // Puts a ChatHub on TCP: one JSON object per line. TLS goes in front later (stunnel or the gateway).
 import { createServer, type Server, type Socket } from "node:net";
-import { ChatHub, type Conn } from "./hub.ts";
-import { encode, parseClientMsg, MAX_LINE_BYTES, type ServerMsg } from "./protocol.ts";
+import { ChatHub, type Conn } from "./hub.js";
+import { encode, parseClientMsg, MAX_LINE_BYTES, type ServerMsg } from "./protocol.js";
 
 const MAX_BAD_LINES = 10;
 const IDLE_MS = 90_000;            // clients ping every 30 s

@@ -6,10 +6,10 @@
 //
 // One hero ("exploiter") farms gold far too fast so the economy alerts fire.
 
-import { Analytics } from "./analytics.js";
-import { JsonlFileSink } from "./events.js";
-import { startMetricsServer } from "./http.js";
-import { ABILITIES, GOLD_SINKS, GOLD_SOURCES, SCHOOLS, type School } from "./metrics.js";
+import { Analytics } from "../src/analytics/analytics.js";
+import { JsonlFileSink } from "../src/analytics/event-log.js";
+import { startMetricsServer } from "../src/analytics/http.js";
+import { ABILITIES, GOLD_SINKS, GOLD_SOURCES, SCHOOLS, type School } from "../src/analytics/metrics.js";
 
 const REGIONS = [
   "bowerstone_market", "bowerstone_south", "oakvale", "knothole_glade", "greatwood",
