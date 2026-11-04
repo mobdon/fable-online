@@ -11,4 +11,6 @@ const char* center_status();
 const char* aim_status();
 // Camera (mouse-look) updates since the last call.
 unsigned take_updates();
+// Mouse reads (CMouseDX updates) since the last call.
+unsigned take_mouse_reads();
 }  // namespace fo::display::mouse_look

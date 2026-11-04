@@ -43,6 +43,14 @@ std::atomic<unsigned> g_updates{0};
 using Update_t = void(__thiscall*)(void*);
 Update_t o_update = nullptr;
 std::atomic<bool> g_chain_logged{false};
+// CMouseDX (vtable 0x129EA14) slot 5 = 0xAB58E0 reads the cursor offset and warps it back.
+constexpr uint32_t kMouseDxVtable = 0x0129EA14, kMouseDxUpdate = 0x00AB58E0;
+std::atomic<unsigned> g_mouse_reads{0};
+Update_t o_mouse = nullptr;
+void __fastcall hk_mouse(void* self, void*) {
+    ++g_mouse_reads;
+    o_mouse(self);
+}
 void __fastcall hk_update(void* self, void*) {
     ++g_updates;
     if (!g_chain_logged.exchange(true)) {
@@ -98,7 +106,18 @@ void install_aim() {
     std::snprintf(g_aim_status, sizeof g_aim_status, "targeting: along the camera's view (crosshair)");
 }
 
+void hook_slot(uint32_t addr, uint32_t expect, void* hook, Update_t& orig) {
+    uint32_t* slot = reinterpret_cast<uint32_t*>(addr);
+    if (!readable(addr, 4) || *slot != expect) return;
+    orig = reinterpret_cast<Update_t>(expect);
+    DWORD old = 0;
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) return;
+    *slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(hook));
+    VirtualProtect(slot, 4, old, &old);
+}
+
 void install_counter() {
+    hook_slot(kMouseDxVtable + 5 * 4, kMouseDxUpdate, reinterpret_cast<void*>(&hk_mouse), o_mouse);
     uint32_t* slot = reinterpret_cast<uint32_t*>(kMouseLookVtable + 4);
     if (!readable(kMouseLookVtable + 4, 4) || *slot != kMouseLookUpdate) return;
     o_update = reinterpret_cast<Update_t>(kMouseLookUpdate);
@@ -132,4 +151,5 @@ const char* status() { return g_status; }
 const char* center_status() { return g_center_status; }
 const char* aim_status() { return g_aim_status; }
 unsigned take_updates() { return g_updates.exchange(0); }
+unsigned take_mouse_reads() { return g_mouse_reads.exchange(0); }
 }  // namespace fo::display::mouse_look
