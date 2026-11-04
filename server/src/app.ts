@@ -20,6 +20,7 @@ import { Director } from './world/director.js';
 import { stubSimFactory, type SimFactory } from './world/sim.js';
 import { navSimFactory } from './world/nav-sim.js';
 import { NavStore } from './world/nav/navmesh.js';
+import { monsterAi } from './world/ai/combat-ai.js';
 import { WorldThings } from './world/things/world-things.js';
 import { WorldObjects } from './world/things/objects.js';
 import fs from 'node:fs';
@@ -115,7 +116,7 @@ export function createApp(
             equipped: economy.inventory(heroId).filter((i) => i.location === 'equipped').map((i) => i.def_id),
             staff: staffHero(heroId),
           }),
-          ...(opts.ai ? { ai: opts.ai } : {}),
+          ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
         })
       : cfg.navDir
         ? navSimFactory(new NavStore(cfg.navDir), lawServices)
