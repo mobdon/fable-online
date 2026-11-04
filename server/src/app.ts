@@ -174,7 +174,7 @@ export function createApp(
   );
   const things = opts.things ?? WorldThings.load(cfg.thingsPath);
   const objects = new WorldObjects(things, director, economy, db, events);
-  const travel = new Travel(things, director, heroes, db, events, { ...TRAVEL_RULES, barred: [...TRAVEL_RULES.barred], allOpen: cfg.gatesOpen });
+  const travel = new Travel(things, director, heroes, db, events, { ...TRAVEL_RULES, barred: [...TRAVEL_RULES.barred], allOpen: cfg.gatesOpen, strictTeleports: cfg.strictTeleports });
   law.attach(lawHost(director, regions));
   trades.attach({
     send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),

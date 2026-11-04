@@ -18,6 +18,9 @@ const MAX_DROPS_PER_10S = 200;
  * One player's game connection. The first frame must be `hello` carrying the one-time join
  * ticket from POST /launcher/v1/join. After that the client may only send input, chat and ping.
  */
+
+/** Reports farther than this from the server's position are checked as a possible region change first. */
+const FAR_REPORT_M = 30;
 export class GameSocket {
   private static online = new Map<number, GameSocket>();
   private heroId: number | null = null;
@@ -37,6 +40,8 @@ export class GameSocket {
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
+  /** When this client was last told a jump of its own was refused (one notice per run). */
+  private jumpRefusedAt = -Infinity;
   private helloTimer: NodeJS.Timeout;
 
   constructor(
@@ -163,6 +168,23 @@ export class GameSocket {
       let area = g.noteArea(msg.area, now);
       if (area === 'same' && msg.load) area = g.noteLoad(now);
       if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
+    }
+    // A report far from where the server has the hero may be the client's Fable in another
+    // region. Check that move before accepting anything, so a refused one (a teleport the
+    // server did not approve) never moves the server's copy of the hero.
+    const here = ch.sim.position(heroId);
+    const local = ch.toLocal(at);
+    if (!here || Math.hypot(local.x - here.x, local.y - here.y) > FAR_REPORT_M) {
+      const next = app.director.followCheck(heroId, at);
+      if (next?.error) {
+        const now = Date.now();
+        if (now - this.jumpRefusedAt > 5_000) {
+          app.events.emit({ type: 'region_follow', heroId, from: next.from, to: next.region, refused: next.error.message });
+          this.send({ t: 'error', error: next.error.code, message: next.error.message });
+        }
+        this.jumpRefusedAt = now;
+        return;
+      }
     }
     if (mode === 'trusted') {
       if (ch.placeHero(heroId, ch.toLocal(at), msg.yaw)) this.followRegion(heroId, at, false);

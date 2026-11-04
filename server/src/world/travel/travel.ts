@@ -19,6 +19,12 @@ import type { GateThing, WorldThings } from '../things/world-things.js';
  * the server checks and, if allowed, moves the hero with Director.transfer('cullis_gate'),
  * which sends the usual enter_region with the gate as the arrival thing. Nothing the client
  * says unlocks a gate: a gate unlocks when the server's own copy of the hero stands near it.
+ *
+ * A client that teleports by itself (its Fable ran the jump without asking, or the server
+ * said no) shows up as a region change the server did not make. Director.follow lets the
+ * server keep up with exits the client walks through, but a jump between regions no exit
+ * joins that lands at a Cullis Gate or the Guild is a faked teleport: it is refused, so the
+ * server's copy of the hero stays where it was and unlocks nothing at the far end.
  */
 export interface TravelRules {
   /** Metres from a gate at which a hero unlocks it by being there. */
@@ -37,6 +43,17 @@ export interface TravelRules {
   barred: RegExp[];
   /** Every gate counts as found (test servers, FO_GATES_OPEN). */
   allOpen?: boolean;
+  /**
+   * Metres from a gate in which a region change the server did not make, between regions no
+   * exit joins, counts as a faked gate jump and is refused.
+   */
+  fakeRadius: number;
+  /**
+   * Refuse every region change the server did not make between regions no exit joins, not
+   * only those that land at a gate (FO_STRICT_TELEPORTS). Off by default: client-side quests
+   * can move the hero between regions by themselves.
+   */
+  strictTeleports?: boolean;
 }
 
 export const TRAVEL_RULES: TravelRules = {
@@ -46,6 +63,7 @@ export const TRAVEL_RULES: TravelRules = {
   cooldownMs: 10_000,
   partyRadius: 20,
   arrivalStep: 2.5,
+  fakeRadius: 40,
   barred: [/^DemonDoor_/, /^Prison/, /^BowerstoneJail$/, /^Arena$/, /^ArenaCells$/],
 };
 
@@ -79,6 +97,8 @@ const FLAG = 'gate:';
 export class Travel {
   parties: PartyLookup | null = null;
   private byRegion = new Map<string, GateThing[]>();
+  /** The same gates by the region graph's name, which is what Director.follow locates. */
+  private byGraphName = new Map<string, GateThing[]>();
   private guild: GateThing | undefined;
   /** Online heroes' unlocked gates, read from hero_flags on first use. */
   private unlocked = new Map<number, Set<string>>();
@@ -100,10 +120,15 @@ export class Travel {
       list.push(g);
       this.byRegion.set(g.region, list);
       if (g.guild && !this.guild) this.guild = g;
+      const c = director.canonical(g.region);
+      const near = this.byGraphName.get(c) ?? [];
+      near.push(g);
+      this.byGraphName.set(c, near);
     }
     this.gates = things.gates;
     director.policies.push({
       tick: (_dt, ids) => this.scan(ids),
+      canEnter: (heroId, from, to, via, at) => (via === 'client' ? this.checkClientJump(heroId, from, to, at) : null),
       left: (heroId) => {
         this.unlocked.delete(heroId);
         this.lastJump.delete(heroId);
@@ -253,6 +278,19 @@ export class Travel {
     const len = Math.hypot(g.fwd[0], g.fwd[1]) || 1;
     const s = this.rules.arrivalStep / len;
     return { x: x + g.fwd[0] * s, y: y + g.fwd[1] * s, z };
+  }
+
+  /**
+   * A region change the client made by itself (Director.follow). Walking through an exit is
+   * fine; a jump between regions no exit joins is a teleport the server did not approve, and
+   * one that lands at a gate (or anywhere, with strictTeleports) is refused.
+   */
+  private checkClientJump(_heroId: number, from: string, to: string, at?: Vec3): GameError | null {
+    if (this.director.adjacent(from, to)) return null;
+    let gate: GateThing | undefined;
+    if (at) for (const g of this.byGraphName.get(this.director.canonical(to)) ?? []) if (dist(at, g.pos) <= this.rules.fakeRadius) gate = g;
+    if (!gate && !this.rules.strictTeleports) return null;
+    return new GameError('teleport_refused', gate ? 'That teleport was not approved by the server' : `${from} does not lead to ${to}`);
   }
 
   // ---------------------------------------------------------------- unlocks

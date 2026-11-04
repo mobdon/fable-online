@@ -437,3 +437,48 @@ test('a refused exit the client takes anyway lets its one jump through, for a wh
   late.allowJump(0, 10_000);
   assert.equal(late.check(at(0), at(300), 11_000).ok, false, 'not after the window');
 });
+
+test('a client that jumps to a gate by itself is refused before the server moves the hero', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fo-fake-jump-'));
+  const regionsPath = path.join(dir, 'regions.json');
+  const thingsPath = path.join(dir, 'world-things.json');
+  fs.writeFileSync(
+    regionsPath,
+    JSON.stringify({
+      maps: [
+        { uid: 1, script: 'HeroGuildComplex', sea: false, region: 'HeroGuildComplexInside', x: 4000, y: 4000, w: 256, h: 256 },
+        { uid: 2, script: 'LookoutPoint', sea: false, region: 'LookoutPoint', x: 4256, y: 4000, w: 256, h: 256 },
+        { uid: 3, script: 'Greatwood', sea: false, region: 'Greatwood', x: 3000, y: 3000, w: 256, h: 256 },
+      ],
+      graph: { HeroGuildComplexInside: ['LookoutPoint'], LookoutPoint: ['HeroGuildComplexInside', 'Greatwood'], Greatwood: ['LookoutPoint'] },
+    }),
+  );
+  const gate = { id: 'Greatwood:7', uid: '7', def: 'OBJECT_TELEPORTER_GRIFFONS_01', level: 'Greatwood', region: 'Greatwood', section: 'NULL', script: null, pos: [100, 100, 0], fwd: null, guild: false };
+  fs.writeFileSync(thingsPath, JSON.stringify({ v: 1, exits: [], doors: [], chests: [], containers: [], pickups: [], digSpots: [], demonDoors: [], hooks: [], gates: [gate] }));
+  const s = await serve({ regionsPath, thingsPath });
+  try {
+    const { hero, acct } = makeHero(s.app);
+    s.app.heroes.savePosition(hero.id, 'HeroGuildComplex', 100, 100, 0);
+    const c = connect(s.url);
+    await c.open;
+    c.send({ t: 'hello', protocol: 1, exe_timestamp: 'x', token: s.ticket(hero.id, acct.id) });
+    await c.next((m) => m.t === 'welcome');
+    s.app.director.regionReady(hero.id, 'HeroGuildComplex');
+    c.send({ t: 'hero_pos', x: 4100, y: 4100, z: 0, area: 1 });
+    await new Promise((r) => setTimeout(r, 100));
+    // The client's Fable "loads" Greatwood next to its gate: a new area, so the move guard alone would take it.
+    c.send({ t: 'hero_pos', x: 3102, y: 3101, z: 0, area: 2, load: true });
+    const err = await c.next((m) => m.t === 'error' && m.error === 'teleport_refused');
+    assert.ok(err.message);
+    assert.equal(s.app.director.channelOf(hero.id)?.region.name, 'HeroGuildComplex');
+    const pos = s.app.director.channelOf(hero.id)!.sim.position(hero.id)!;
+    assert.ok(Math.hypot(pos.x - 100, pos.y - 100) < 1, 'the server copy of the hero did not move');
+    assert.equal(s.app.heroes.get(hero.id)!.region, 'HeroGuildComplex');
+    c.ws.close();
+  } finally {
+    s.stop();
+  }
+});
