@@ -28,7 +28,7 @@ struct Config {
     // [shops]
     bool shop_filter = true;     // take plate armour and Resurrection Phials out of Fable's shops
     // [menu]
-    bool menu_enabled = true;    // the start-up menu over Fable's title screen
+    bool menu_enabled = false;   // the start-up menu over Fable's title screen (off: the launcher is the login screen)
     // [overlay]
     bool overlay_enabled = true;
     int font_px = 15;

@@ -32,3 +32,5 @@ moderation.json
 events/
 ops/monitoring/.env
 shared/defs/nav/
+# Built fonts copied next to the play scripts (from client-mod/fonts)
+ops/local-host/fonts/

@@ -26,7 +26,8 @@ full_distance=25
 max_distance=55
 
 [menu]
-; 1 = show the Chapters of the Lost start-up menu over Fable's title screen.
+; 1 = show the Chapters of the Lost start-up menu over Fable's title screen (off by default:
+; the launcher is the login screen and the game goes straight in).
 enabled=1
 
 [overlay]
