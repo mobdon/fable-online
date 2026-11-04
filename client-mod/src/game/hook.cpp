@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <exception>
 #include <mutex>
 #include <vector>
 
@@ -36,7 +37,16 @@ void run_ticks() {
                 due.push_back(t.fn);
             }
     }
-    for (auto& fn : due) fn();
+    for (auto& fn : due) {
+        // A C++ exception must never unwind into Fable's message loop: that ends the game.
+        try {
+            fn();
+        } catch (const std::exception& e) {
+            fo::log("hook: a game-thread step failed (%s); carrying on", e.what());
+        } catch (...) {
+            fo::log("hook: a game-thread step failed; carrying on");
+        }
+    }
 }
 
 LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
@@ -50,7 +60,13 @@ LRESULT CALLBACK wndproc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
             std::lock_guard<std::mutex> lock(g_mu);
             keys = g_keys;
         }
-        for (auto& fn : keys) fn(static_cast<int>(wp));
+        for (auto& fn : keys) {
+            try {
+                fn(static_cast<int>(wp));
+            } catch (...) {
+                fo::log("hook: a key handler failed; carrying on");
+            }
+        }
     }
     return CallWindowProcW(g_prev, w, msg, wp, lp);
 }

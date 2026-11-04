@@ -33,6 +33,8 @@ bool looks_like_hero(uintptr_t a) {
            read(phys, &pvt, 4) && pvt == kPhysicsVtable;
 }
 
+constexpr size_t kScanPiece = 64 * 1024;
+
 /** Walks the process's own private, writable, committed memory. */
 template <typename Fn>
 void each_region(Fn&& fn) {
@@ -45,8 +47,11 @@ void each_region(Fn&& fn) {
         if (!VirtualQuery(reinterpret_cast<LPCVOID>(p), &mbi, sizeof(mbi))) break;
         uintptr_t lo = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         bool rw = (mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE)) && !(mbi.Protect & PAGE_GUARD);
+        // Handed out in 64 KB pieces, so a caller's buffer stays small: one the size of a
+        // large region could not be allocated in Fable's crowded 32-bit address space.
         if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && rw && mbi.RegionSize < (256u << 20))
-            fn(lo, mbi.RegionSize);
+            for (size_t off = 0; off < mbi.RegionSize; off += kScanPiece)
+                fn(lo + off, mbi.RegionSize - off < kScanPiece ? mbi.RegionSize - off : kScanPiece);
         if (mbi.RegionSize == 0) break;
         p = lo + mbi.RegionSize;
     }
