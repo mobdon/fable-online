@@ -62,6 +62,10 @@ low_latency=0
 mouse_smoothing=off
 ; 1 = Fable pulls the camera back to level while you walk (faster at high frame rates).
 camera_auto_center=0
+; 1 = keep Fable's camera assist, which turns and shifts the view on its own (toward a
+; target, or the way the hero faces) and makes it sway while you turn. 0 = only the mouse
+; turns the camera.
+camera_assist=0
 ; 1 = melee, spells and target lock pick the enemy you're looking at (the centre of the
 ; view) instead of the one in front of the hero. Experimental.
 aim_at_crosshair=0

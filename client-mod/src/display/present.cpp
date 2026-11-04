@@ -164,6 +164,7 @@ void after_present(IDirect3DDevice9*) {
         if (ms > g_worst_ms.load()) g_worst_ms = ms;
     }
     g_last = now;
+    mouse_look::poll_mouse();
     if (++g_frames == 600) {
         // Once, a few seconds in: the render loop's thread and callers, to compare with the camera's.
         const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));

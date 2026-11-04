@@ -29,6 +29,17 @@ constexpr uint32_t kAimSite = 0x008040ED;
 constexpr uint8_t kAimOriginal[3] = {0x8A, 0x57, 0x3A};
 char g_aim_status[120] = "targeting: Fable's own (hero's facing)";
 
+// After applying the mouse, CPCMouseLook's update runs an assist block (0x874152..0x8744C8)
+// when the flag at +0x20A of the camera's subject is set: it shifts the focus point a third
+// of the way toward a picked target through a spring (offset at +0xE0, eased by 3/4 a tick)
+// and turns the yaw at +0xCC toward it, up to 0.375 of a turn. As targets change while the
+// mouse turns the view, both pull the camera back and forth. `je 0x8744C9` skips the block
+// when the flag is clear; making it a plain jump skips it always, and the spring offset then
+// eases back to the hero.
+constexpr uint32_t kAssistSite = 0x0087414C, kAssistSkip = 0x008744C9;
+constexpr uint8_t kAssistOriginal[2] = {0x0F, 0x84};
+char g_assist_status[120] = "camera assist: Fable's own";
+
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
@@ -47,9 +58,34 @@ std::atomic<bool> g_chain_logged{false};
 constexpr uint32_t kMouseDxVtable = 0x0129EA14, kMouseDxUpdate = 0x00AB58E0;
 std::atomic<unsigned> g_mouse_reads{0};
 Update_t o_mouse = nullptr;
+// Per-frame mouse motion, read with GetDeviceState on CMouseDX's DirectInput device
+// ([+0x341C]). Fable reads that device's buffered data, which is separate from the
+// immediate state, so this does not take anything from the game.
+void* g_mouse_dx = nullptr;
+int g_state_size = 0;  // 0 = not known yet, -1 = not readable
+long g_poll_x = 0, g_poll_y = 0;
+
 void __fastcall hk_mouse(void* self, void*) {
     ++g_mouse_reads;
+    g_mouse_dx = self;
     o_mouse(self);
+}
+
+// What each camera update did, logged every two seconds while the mouse moves: how far the
+// yaw (+0xCC) and pitch (+0xD0) turned and which mouse values (+0x90, +0x94) it used, next
+// to the motion read every frame. Calibrates turning the view between updates.
+struct CamStats {
+    unsigned updates = 0;
+    double yaw = 0, pitch = 0, in_x = 0, in_y = 0;
+    long mouse_x = 0, mouse_y = 0;
+    DWORD since = 0;
+    unsigned lines = 0;
+} g_cam;
+
+float wrap_turn(float t) {
+    while (t > 0.5f) t -= 1.0f;
+    while (t < -0.5f) t += 1.0f;
+    return t;
 }
 void __fastcall hk_update(void* self, void*) {
     ++g_updates;
@@ -65,7 +101,28 @@ void __fastcall hk_update(void* self, void*) {
         }
         fo::log("%s", buf);
     }
+    const char* b = static_cast<const char*>(self);
+    const float yaw0 = *reinterpret_cast<const float*>(b + 0xCC), pitch0 = *reinterpret_cast<const float*>(b + 0xD0);
+    const float in_x = *reinterpret_cast<const float*>(b + 0x90), in_y = *reinterpret_cast<const float*>(b + 0x94);
     o_update(self);
+    CamStats& c = g_cam;
+    ++c.updates;
+    c.yaw += wrap_turn(*reinterpret_cast<const float*>(b + 0xCC) - yaw0);
+    c.pitch += *reinterpret_cast<const float*>(b + 0xD0) - pitch0;
+    c.in_x += in_x;
+    c.in_y += in_y;
+    c.mouse_x += g_poll_x;
+    c.mouse_y += g_poll_y;
+    g_poll_x = g_poll_y = 0;
+    const DWORD now = GetTickCount();
+    if (!c.since) c.since = now;
+    if (now - c.since < 2000) return;
+    if ((c.mouse_x || c.mouse_y || c.in_x != 0 || c.in_y != 0) && c.lines < 300) {
+        ++c.lines;
+        fo::log("camera: %u updates, yaw %+.4f turns, pitch %+.4f, game mouse %+.2f %+.2f, mouse %+ld %+ld counts", c.updates,
+                c.yaw, c.pitch, c.in_x, c.in_y, c.mouse_x, c.mouse_y);
+    }
+    c = CamStats{0, 0, 0, 0, 0, 0, 0, now, c.lines};
 }
 
 }  // namespace
@@ -92,6 +149,21 @@ void install_center() {
                               static_cast<uint8_t>(jmp >> 24), 0x90};
     write_code(kCenterSite, patch, sizeof patch);
     std::snprintf(g_center_status, sizeof g_center_status, "camera auto-centre: off");
+}
+
+void install_assist() {
+    if (config().camera_assist) return;
+    const int32_t rel = *reinterpret_cast<const int32_t*>(kAssistSite + 2);
+    if (!readable(kAssistSite, 6) || std::memcmp(reinterpret_cast<const void*>(kAssistSite), kAssistOriginal, 2) != 0 ||
+        static_cast<uint32_t>(kAssistSite + 6 + rel) != kAssistSkip) {
+        std::snprintf(g_assist_status, sizeof g_assist_status, "camera assist: code not where expected, left as is");
+        return;
+    }
+    const uint32_t jmp = kAssistSkip - (kAssistSite + 5);
+    const uint8_t patch[6] = {0xE9, static_cast<uint8_t>(jmp), static_cast<uint8_t>(jmp >> 8), static_cast<uint8_t>(jmp >> 16),
+                              static_cast<uint8_t>(jmp >> 24), 0x90};
+    write_code(kAssistSite, patch, sizeof patch);
+    std::snprintf(g_assist_status, sizeof g_assist_status, "camera assist: off (only the mouse turns the camera)");
 }
 
 void install_aim() {
@@ -130,6 +202,7 @@ void install_counter() {
 
 void install() {
     install_center();
+    install_assist();
     install_counter();
     install_aim();
     const int frames = config().mouse_smoothing;   // -1 = Fable's own, else frames to average
@@ -148,6 +221,30 @@ void install() {
 }
 
 const char* status() { return g_status; }
+const char* assist_status() { return g_assist_status; }
+
+void poll_mouse() {
+    void* self = g_mouse_dx;
+    if (!self || g_state_size < 0) return;
+    const uint32_t dev = *reinterpret_cast<const uint32_t*>(static_cast<const char*>(self) + 0x341C);
+    if (!dev || !readable(dev, 4) || !readable(*reinterpret_cast<const uint32_t*>(dev) + 9 * 4, 4)) return;
+    using GetDeviceState_t = HRESULT(__stdcall*)(void*, DWORD, void*);
+    auto get_state = reinterpret_cast<GetDeviceState_t>((*reinterpret_cast<uint32_t* const*>(dev))[9]);
+    struct { LONG x, y, z; BYTE buttons[8]; } st = {};
+    DWORD size = g_state_size ? static_cast<DWORD>(g_state_size) : 20;  // DIMOUSESTATE2, else DIMOUSESTATE
+    HRESULT hr = get_state(reinterpret_cast<void*>(dev), size, &st);
+    if (hr == E_INVALIDARG && !g_state_size) { size = 16; hr = get_state(reinterpret_cast<void*>(dev), size, &st); }
+    if (hr == E_INVALIDARG && !g_state_size) {
+        g_state_size = -1;
+        fo::log("camera: the mouse device's state can't be read");
+        return;
+    }
+    if (FAILED(hr)) return;  // not acquired (menus, alt-tab)
+    if (!g_state_size) fo::log("camera: reading mouse motion every frame (%lu-byte state)", static_cast<unsigned long>(size));
+    g_state_size = static_cast<int>(size);
+    g_poll_x += st.x;
+    g_poll_y += st.y;
+}
 const char* center_status() { return g_center_status; }
 const char* aim_status() { return g_aim_status; }
 unsigned take_updates() { return g_updates.exchange(0); }

@@ -9,6 +9,10 @@ const char* status();
 // The pitch drifting back to level while walking ([display] camera_auto_center).
 const char* center_status();
 const char* aim_status();
+// Fable's camera assist that turns and shifts the view on its own ([display] camera_assist).
+const char* assist_status();
+// Reads the mouse's motion since the last call, from Fable's own mouse device. Render thread.
+void poll_mouse();
 // Camera (mouse-look) updates since the last call.
 unsigned take_updates();
 // Mouse reads (CMouseDX updates) since the last call.
