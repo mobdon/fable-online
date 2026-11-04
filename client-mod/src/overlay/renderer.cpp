@@ -311,12 +311,13 @@ void Renderer::window(float x, float y, float w, float h, float a) {
     sprite(msn_[8], x + w - r, y + h - b, r, b, c);
 }
 
-float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends) {
+float Renderer::bar(float x, float y, float w, float h, float a, bool on, bool ends, uint32_t tint) {
     if (!fable_bar_) {
-        rect(x, y, w, h, scale_alpha(on ? 0xC0A28F74 : 0xA0938D7E, a));
+        const uint32_t plain = tint != 0xFFFFFFFF ? (0xC0000000 | (tint & 0x00FFFFFF)) : on ? 0xC0A28F74 : 0xA0938D7E;
+        rect(x, y, w, h, scale_alpha(plain, a));
         return 0;
     }
-    uint32_t c = scale_alpha(0xFFFFFFFF, a);
+    uint32_t c = scale_alpha(tint, a);
     const Rect* b = bar_[on ? 1 : 0];
     if (!ends) { sprite(b[1], x, y, w, h, c); return 0; }
     float e = b[0].w * h / b[0].h;          // keep the ornate ends' proportions

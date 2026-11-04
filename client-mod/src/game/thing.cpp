@@ -69,6 +69,26 @@ void each_region(Fn&& fn) {
 
 }  // namespace
 
+bool read_renown(uintptr_t thing, int32_t& total) {
+    uint8_t flags = 0;
+    uint32_t range[2] = {};  // begin, end of the {type, component} pairs
+    if (!read(thing + kFlags91, &flags, 1) || (flags & 1) || !read(thing + kComponentsBegin, range, sizeof(range))) return false;
+    if (range[1] < range[0] || range[1] - range[0] > 64 * 8 || (range[1] - range[0]) % 8) return false;
+    uint32_t pairs[64 * 2];
+    const size_t n = (range[1] - range[0]) / 8;
+    if (!n || !read(range[0], pairs, n * 8)) return false;
+    for (size_t i = 0; i < n; ++i) {
+        if (pairs[i * 2] != kHeroStatsType) continue;
+        uint32_t comp = pairs[i * 2 + 1], vt = 0;
+        int32_t v = 0;
+        if (!read(comp, &vt, 4) || vt != kHeroStatsVtable || !read(comp + kStatsRenownTotal, &v, 4)) return false;
+        if (v < 0 || v > 10000000) return false;
+        total = v;
+        return true;
+    }
+    return false;
+}
+
 bool read_health(uintptr_t thing, float& health, float& maxHealth) {
     uint8_t flags = 0;
     float v[2];  // +0xB0 max, +0xB4 current

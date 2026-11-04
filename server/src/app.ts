@@ -9,6 +9,7 @@ import { LootService } from './economy/loot.js';
 import { QuestRewards } from './economy/quests.js';
 import { Shops } from './economy/shops.js';
 import { Progress } from './heroes/progress.js';
+import { Renown } from './heroes/renown.js';
 import { loadGameData, type GameData } from './data/game-data.js';
 import { BALANCE } from './combat/rules.js';
 import { combatSimFactory, type ChannelAi, type AiContext } from './world/combat-sim.js';
@@ -54,6 +55,8 @@ export interface App {
   loot: LootService;
   shops: Shops;
   quests: QuestRewards;
+  /** Renown reported from each hero's own Fable: one capped import, then a daily cap. */
+  renown: Renown;
   regions: RegionTable;
   director: Director;
   objects: WorldObjects;
@@ -120,6 +123,7 @@ export function createApp(
     data.questCards,
     { defaultMaxGold: cfg.questDefaultMaxGold, dailyGoldCap: cfg.questDailyGoldCap },
   );
+  const renown = new Renown(db, events, { importMax: cfg.renownImportMax, dailyMax: cfg.renownDailyMax });
   const regions = RegionTable.load(cfg.regionsPath);
   const lawFile = cfg.contentDir && path.join(cfg.contentDir, 'law.json');
   const law = new Law(db, economy, events, mergeRules(lawFile && fs.existsSync(lawFile) ? JSON.parse(fs.readFileSync(lawFile, 'utf8')) : undefined));
@@ -249,6 +253,7 @@ export function createApp(
     loot,
     shops,
     quests,
+    renown,
     regions,
     director,
     objects,

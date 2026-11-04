@@ -15,6 +15,7 @@ struct Tag {
     std::string name, title, guild;
     double renown = 0;
     bool pvp = false;
+    std::string staff;                // "DEV" / "GM" from the server's account role, "" for players
     float x = 0, y = 0, z = 0;        // last position from the server
     float px = 0, py = 0, pz = 0;     // where we draw it: eased toward x/y/z
 };
@@ -26,6 +27,8 @@ struct Label {
     uint32_t name_color, info_color;   // 0xAARRGGBB, alpha already applied
     float depth;                       // view distance, for sorting
     bool pvp;                          // flagged for open-world PvP
+    bool self = false;                 // the player's own hero: drawn on a gold plate
+    std::string badge;                 // staff badge above the name ("DEV", "GM"), "" for none
 };
 
 struct TagSettings {
@@ -47,7 +50,8 @@ public:
     void apply(const json::Value& m);
     void clear() { tags_.clear(); }
     // Dev check: put a tag on your own hero so placement can be checked solo.
-    void set_self(bool on, const std::string& name, double renown, float x, float y, float z);
+    void set_self(bool on, const std::string& name, double renown, float x, float y, float z,
+                  const std::string& staff = "");
 
     // Eases drawn positions toward the latest server positions (call once a frame).
     void step(float dt);

@@ -116,6 +116,14 @@ export interface ServerConfig {
   questDefaultMaxGold: number;
   /** Most quest gold one hero can be paid in 24 hours, across all quests. */
   questDailyGoldCap: number;
+  /**
+   * Renown the server takes from a hero's own Fable the first time the mod reports it
+   * (src/heroes/renown.ts). Quests run on each player's Fable, so the save already holds
+   * renown the server never saw. Taken once per hero, up to this much.
+   */
+  renownImportMax: number;
+  /** After that one import, the most renown reports may add per hero per UTC day. */
+  renownDailyMax: number;
   /** 'reward': each kill pays the creature's reward value. 'tables': Fable's drop tables, gold only. */
   lootMode: 'reward' | 'tables';
   /** Most gold one hero can earn from monster kills per hour (0 = no cap). */
@@ -205,6 +213,8 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     gatesOpen: flag('FO_GATES_OPEN', false),
     questDefaultMaxGold: num('FO_QUEST_DEFAULT_MAX_GOLD', 2_000),
     questDailyGoldCap: num('FO_QUEST_DAILY_GOLD_CAP', 50_000),
+    renownImportMax: num('FO_RENOWN_IMPORT_MAX', 5_000),
+    renownDailyMax: num('FO_RENOWN_DAILY_MAX', 5_000),
     lootMode: str('FO_LOOT_MODE', 'reward') === 'tables' ? 'tables' : 'reward',
     lootGoldPerHour: num('FO_LOOT_GOLD_PER_HOUR', 3_000),
     monsterRespawnSec: num('FO_RESPAWN_SEC', 300),

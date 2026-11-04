@@ -32,6 +32,8 @@ export type GameEvent =
   | { type: 'pvp_kill'; heroId: number; victimId: number; channelId: string }
   | { type: 'staff_item_blocked'; heroId: number; defId: string; action: string; actor: string }
   | { type: 'quest_reward'; heroId: number; quest: string; gold: number; items: number }
+  /** The mod reported the hero's renown in its own Fable; what the server took from it. */
+  | { type: 'renown_report'; heroId: number; reported: number; gained: number; renown: number; kind: 'import' | 'daily'; capped: boolean }
   | { type: 'quest_reward_rejected'; heroId: number; quest: string; gold: number; reason: string }
   | { type: 'interact'; heroId: number; thing: string; kind: string; ok: boolean; reason?: string }
   | { type: 'loot'; heroId: number; thing: string; txId: number; gold: number; items: number; blocked: string[] }
