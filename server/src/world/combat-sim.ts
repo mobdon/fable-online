@@ -281,13 +281,22 @@ export class CombatSim implements RegionSim {
       let need = TOWN_WATCH.perMonster - (busy.get(m.id) ?? 0);
       if (need <= 0) continue;
       const free = [...this.guards.values()]
-        .filter((g) => g.alive && g.targetId === null && dist2d(g.pos, m.pos) <= TOWN_WATCH.respondRadius)
+        .filter((g) => g.alive && g.targetId === null && dist2d(g.pos, m.pos) <= TOWN_WATCH.respondRadius && this.canReach(g.pos, m.pos))
         .sort((a, b) => dist2d(a.pos, m.pos) - dist2d(b.pos, m.pos));
       for (const g of free) {
         if (need <= 0) break;
         if (this.guardAi.pursue(g.id, m.id)) need--;
       }
     }
+  }
+
+  /** Ground joins the two spots (always true without a navmesh). A guard who can't get there isn't sent. */
+  private canReach(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+    const nav = this.nav;
+    if (!nav) return true;
+    const ca = nav.nearestCell(a.x, a.y, 2);
+    const cb = nav.nearestCell(b.x, b.y, 4);
+    return !!ca && !!cb && nav.connected(ca, cb);
   }
 
   /** Post a guard (the town layer places them at its villages), walking `route` if given. Returns its id. */

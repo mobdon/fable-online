@@ -154,11 +154,8 @@ test('guards walk their beat from the level files, end to end and back', () => {
 
 test('a monster that comes into town is fought by the watch, which fights back', () => {
   const w = world({}, { monsters: true });
-  const h = w.hero({ x: 50, y: 30 });
-  w.combat.hero(h)!.yaw = 0; // facing +y, into the village
-  const r = w.combat.devSpawn(h, 'CREATURE_EARTH_TROLL', 15); // (50, 45): the middle of town
-  assert.ok('id' in r, JSON.stringify(r));
-  const troll = w.combat.spawns.creatures().next().value!;
+  // A troll that wandered into the middle of town, with no hero about: only the watch is there to fight.
+  const troll = w.combat.spawns.spawnExtra('CREATURE_EARTH_TROLL', { x: 50, y: 47, z: 0 }, 0)!;
   const hp0 = troll.health;
   const guardHp0 = w.guards().reduce((n, g) => n + g.health, 0);
   w.run(10_000);
