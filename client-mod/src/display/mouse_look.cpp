@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include "../config.h"
+#include "../log.h"
 
 namespace fo::display::mouse_look {
 namespace {
@@ -28,23 +29,37 @@ constexpr uint32_t kAimSite = 0x008040ED;
 constexpr uint8_t kAimOriginal[3] = {0x8A, 0x57, 0x3A};
 char g_aim_status[120] = "targeting: Fable's own (hero's facing)";
 
-// CPCMouseLook's vtable; slot 1 (0x873E10) is its per-update camera step. Counting its calls
-// shows whether the in-game camera follows the mouse every rendered frame or at a lower rate.
-constexpr uint32_t kMouseLookVtable = 0x01277784, kMouseLookUpdate = 0x00873E10;
-std::atomic<unsigned> g_updates{0};
-using Update_t = void(__thiscall*)(void*);
-Update_t o_update = nullptr;
-void __fastcall hk_update(void* self, void*) {
-    ++g_updates;
-    o_update(self);
-}
-
 bool readable(uint32_t addr, size_t n) {
     MEMORY_BASIC_INFORMATION mbi = {};
     if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return false;
     if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
     return addr + n <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
 }
+
+// CPCMouseLook's vtable; slot 1 (0x873E10) is its per-update camera step. Counting its calls
+// shows whether the in-game camera follows the mouse every rendered frame or at a lower rate.
+constexpr uint32_t kMouseLookVtable = 0x01277784, kMouseLookUpdate = 0x00873E10;
+std::atomic<unsigned> g_updates{0};
+using Update_t = void(__thiscall*)(void*);
+Update_t o_update = nullptr;
+std::atomic<bool> g_chain_logged{false};
+void __fastcall hk_update(void* self, void*) {
+    ++g_updates;
+    if (!g_chain_logged.exchange(true)) {
+        // Once: return addresses in Fable.exe on the stack, to trace the loop that runs the camera.
+        const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+        char buf[600];
+        int n = std::snprintf(buf, sizeof buf, "camera: update thread %lu, called from", GetCurrentThreadId());
+        for (int i = 0, found = 0; i < 256 && found < 14 && n < 560; ++i) {
+            if (!readable(reinterpret_cast<uint32_t>(sp + i), 4)) break;
+            const uint32_t v = sp[i];
+            if (v > 0x00401000 && v < 0x00E00000) { n += std::snprintf(buf + n, sizeof buf - n, " %08X", v); ++found; }
+        }
+        fo::log("%s", buf);
+    }
+    o_update(self);
+}
+
 }  // namespace
 
 void write_code(uint32_t addr, const uint8_t* bytes, size_t n) {

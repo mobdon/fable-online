@@ -1,5 +1,6 @@
 #include "present.h"
 #include <atomic>
+#include <cstdio>
 #include "../config.h"
 #include "../log.h"
 #include "hud_scale.h"
@@ -163,7 +164,19 @@ void after_present(IDirect3DDevice9*) {
         if (ms > g_worst_ms.load()) g_worst_ms = ms;
     }
     g_last = now;
-    ++g_frames;
+    if (++g_frames == 600) {
+        // Once, a few seconds in: the render loop's thread and callers, to compare with the camera's.
+        const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));
+        char buf[600];
+        int n = std::snprintf(buf, sizeof buf, "display: render thread %lu, present called from", GetCurrentThreadId());
+        MEMORY_BASIC_INFORMATION mbi = {};
+        for (int i = 0, found = 0; i < 256 && found < 14 && n < 560; ++i) {
+            if (!VirtualQuery(sp + i, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) break;
+            const uint32_t v = sp[i];
+            if (v > 0x00401000 && v < 0x00E00000) { n += std::snprintf(buf + n, sizeof buf - n, " %08X", v); ++found; }
+        }
+        fo::log("%s", buf);
+    }
 }
 
 void on_device_lost() {
