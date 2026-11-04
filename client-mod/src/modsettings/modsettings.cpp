@@ -36,7 +36,7 @@ enum Id {
     // Extras
     kShoulder = 1, kSmooth, kAim, kRedTarget, kCrosshair, kNameTags, kHudScale, kHudBottom,
     // Developer: tools
-    kEnemyType = 90, kSpawn1, kSpawn3, kDespawnNearest, kDespawnNear,
+    kEnemyType = 90, kSpawn1, kSpawn3, kDespawnNearest, kDespawnNear, kTimePick, kSetTime, kWeatherPick, kSetWeather,
     kTestKit = 100, kGold10k, kHeal, kGod, kSpawning, kStandIn, kShowPos, kTagSelf,
     // Developer: logs and capture
     kStatusLog, kHealthLog, kCapture, kFrameTools,
@@ -51,6 +51,9 @@ const int kSmoothFrames[] = {0, -1, 2, 4};
 // Server dev spawns: "" lets the server pick from the monsters it already runs.
 const char* const kEnemyDefs[] = {"", "CREATURE_BANDIT_GRUNT_LEVEL1", "CREATURE_BANDIT_ARCHER_LEVEL1", "CREATURE_HOBBE_BASIC",
                                   "CREATURE_BALVERINE_EASY", "CREATURE_MINION_WARDOG"};
+// Realm sky tools: the hour each "Realm time" choice moves the clock to, and the weathers.
+const float kHours[] = {6.0f, 12.0f, 18.0f, 20.5f, 0.0f};
+const char* const kWeathers[] = {"auto", "clear", "cloudy", "fog", "rain", "storm", "snow"};
 HWND g_window = nullptr;
 constexpr int kInGameMenuMode = 43;
 bool g_pause_lit = false, g_pause_mouse_was_down = false;
@@ -132,6 +135,12 @@ void build() {   // caller holds g_mu
             action(kSpawn3, "Spawn 3 enemies (server)", "Three side by side, 10-20 m ahead of you. Needs a gm or admin account."),
             action(kDespawnNearest, "Remove nearest enemy (server)", "Removes the closest monster within 50 m for everyone. Needs a gm or admin account."),
             action(kDespawnNear, "Remove enemies near me (server)", "Removes every monster within 30 m for everyone. Needs a gm or admin account."),
+            choice(kTimePick, "Realm time", "The hour the button below moves every player's clock to.",
+                   {"Dawn 06:00", "Noon 12:00", "Evening 18:00", "Night 20:30", "Midnight 00:00"}),
+            action(kSetTime, "Set realm time (server)", "For everyone online at once. Needs a gm or admin account."),
+            choice(kWeatherPick, "Realm weather", "Outdoor weather for the button below, for 30 minutes. Normal ends it.",
+                   {"Normal", "Clear", "Cloudy", "Fog", "Rain", "Storm", "Snow"}),
+            action(kSetWeather, "Set realm weather (server)", "For everyone outdoors. Rain, storm and snow show in Fable; fog and cloud do not yet. Needs gm or admin."),
             action(kTestKit, "Give test gear", "Sword of Aeons and the platinum set (worn), 100,000 gold and a full heal."),
             action(kGold10k, "Give 10,000 gold", "Local game only: the server ledger is not changed."),
             action(kHeal, "Heal to full", "Tops up the hero's health in the local game."),
@@ -264,6 +273,8 @@ void act(int id) {   // caller holds g_mu
     case kSpawn3:
     case kDespawnNearest:
     case kDespawnNear:
+    case kSetTime:
+    case kSetWeather:
         g_pending.push_back(id);
         flash("Asking the server...");
         return;
@@ -302,6 +313,18 @@ void run_pending() {
         }
         case kDespawnNearest: sync::dev_despawn(false); break;
         case kDespawnNear: sync::dev_despawn(true); break;
+        case kSetTime:
+        case kSetWeather: {
+            int pick = 0;
+            {
+                std::lock_guard<std::mutex> lock(g_mu);
+                const Row* r = g_model.find(id == kSetTime ? kTimePick : kWeatherPick);
+                pick = r ? r->value : 0;
+            }
+            if (id == kSetTime) sync::dev_time(kHours[pick >= 0 && pick < 5 ? pick : 0]);
+            else sync::dev_weather(kWeathers[pick >= 0 && pick < 7 ? pick : 0]);
+            break;
+        }
         case kSpawning: {
             int want = 0;
             {

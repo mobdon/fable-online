@@ -150,6 +150,10 @@ export class GameSocket {
       case 'dev_spawn':
         if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
         return this.devSpawn(this.heroId, msg.def, msg.count);
+      case 'dev_time':
+      case 'dev_weather':
+        if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
+        return this.devSky(this.heroId, msg);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
@@ -446,6 +450,30 @@ export class GameSocket {
     }
     console.log(`dev_spawn: hero ${heroId} spawned ${made.length ? made.join(', ') : 'nothing'}${error ? ` (${error})` : ''}`);
     this.send({ t: 'dev_result', ok: made.length > 0, message: made.length ? `Spawned ${made.join(', ')}` : error });
+  }
+
+  /** Staff dev tool: realm time and weather, sent to every player at once. */
+  private devSky(heroId: number, msg: Extract<ClientMessage, { t: 'dev_time' | 'dev_weather' }>): void {
+    const { app } = this;
+    if (!app.staffHero(heroId)) {
+      app.events.emit({ type: 'input_rejected', heroId, reason: `${msg.t} by a player account` });
+      return this.send({ t: 'dev_result', ok: false, message: 'Changing the sky needs a gm or admin account.' });
+    }
+    let message: string;
+    if (msg.t === 'dev_time') {
+      app.clock.setHour(msg.hour);
+      const mins = Math.round(app.clock.hour() * 60) % 1440;
+      message = `Realm time is now ${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+    } else if (msg.weather === 'auto') {
+      app.clock.forceWeather(null);
+      message = 'Weather back to normal';
+    } else {
+      app.clock.forceWeather(msg.weather, msg.minutes * 60_000);
+      message = `Weather set to ${msg.weather} for ${msg.minutes} min outdoors`;
+    }
+    app.director.resyncSky();
+    console.log(`${msg.t}: hero ${heroId}: ${message}`);
+    this.send({ t: 'dev_result', ok: true, message });
   }
 
   private hello(protocol: number, token: string): void {

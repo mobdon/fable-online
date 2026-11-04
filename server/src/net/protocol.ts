@@ -1,3 +1,4 @@
+import { WEATHERS, type Weather } from '../world/clock.js';
 import type { PlayerInput } from '../world/sim.js';
 
 /**
@@ -61,6 +62,13 @@ export type ClientMessage =
   | { t: 'dev_spawn'; def: string; count: number }
   /** Staff only: remove the nearest server monster, or every one near the hero. */
   | { t: 'dev_despawn'; what: 'nearest' | 'near' }
+  /**
+   * Staff only: move the realm's clock forward to `hour` (0..24), for every player at once.
+   * Kept in memory only; a server restart goes back to the normal clock.
+   */
+  | { t: 'dev_time'; hour: number }
+  /** Staff only: the same weather on every outdoor region for `minutes`; 'auto' ends it. */
+  | { t: 'dev_weather'; weather: Weather | 'auto'; minutes: number }
   | TradeRequest
   | PartyRequest
   /**
@@ -236,6 +244,16 @@ export function decode(raw: string): ClientMessage {
       const count = isNum(m.count) ? m.count : 1;
       if (!Number.isInteger(count) || count < 1 || count > 10) throw new ProtocolError('bad count');
       return { t: 'dev_spawn', def, count };
+    }
+    case 'dev_time':
+      if (!isNum(m.hour) || m.hour < 0 || m.hour > 24) throw new ProtocolError('bad hour');
+      return { t: 'dev_time', hour: m.hour };
+    case 'dev_weather': {
+      const weather = m.weather;
+      if (weather !== 'auto' && !(WEATHERS as readonly unknown[]).includes(weather)) throw new ProtocolError('bad weather');
+      const minutes = isNum(m.minutes) ? m.minutes : 10;
+      if (minutes < 1 || minutes > 240) throw new ProtocolError('bad minutes');
+      return { t: 'dev_weather', weather: weather as Weather | 'auto', minutes };
     }
     case 'shop_sell':
       if (typeof m.item !== 'string' || m.item.length > 64) throw new ProtocolError('bad item');

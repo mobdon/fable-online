@@ -101,9 +101,17 @@ export interface SkyState {
   server_time: number;
 }
 
+export const WEATHERS: readonly Weather[] = ['clear', 'cloudy', 'fog', 'rain', 'storm', 'snow', 'blizzard'];
+
 export class WorldClock {
   readonly opts: ClockOptions;
   private now: () => number;
+  /** Days added by a staff time change (dev_time). Not stored: a restart goes back to the plain clock. */
+  private shiftDays = 0;
+  /** Weather a staff member forced on every outdoor region until `until` (dev_weather). */
+  private forced: { weather: Weather; intensity: number; since: number; until: number } | null = null;
+  /** Bumped on every staff change so skyKey changes and channels resend the sky at once. */
+  private version = 0;
 
   constructor(opts: Partial<ClockOptions> = {}, now: () => number = Date.now) {
     this.opts = { ...DEFAULT_CLOCK, ...opts };
@@ -114,7 +122,26 @@ export class WorldClock {
 
   /** Days since the epoch, including the fraction. */
   private days(t: number): number {
-    return (t - this.opts.epoch) / this.opts.dayMs + this.opts.startFraction;
+    return (t - this.opts.epoch) / this.opts.dayMs + this.opts.startFraction + this.shiftDays;
+  }
+
+  /**
+   * Staff tool: moves the realm's clock forward to `hour` (0..24). Always forward, so the day
+   * count never goes back and shop restocks keyed on it stay correct.
+   */
+  setHour(hour: number, t = this.now()): void {
+    if (!(hour >= 0 && hour <= 24)) throw new Error('hour must be 0..24');
+    const want = (hour % 24) / 24;
+    let d = want - this.dayFraction(t);
+    if (d < 0) d += 1;
+    this.shiftDays += d;
+    this.version++;
+  }
+
+  /** Staff tool: the same weather on every outdoor region for `ms`; null weather goes back to the rolls. */
+  forceWeather(weather: Weather | null, ms = 10 * 60_000, t = this.now()): void {
+    this.forced = weather ? { weather, intensity: weather === 'clear' ? 0 : 1, since: t, until: t + ms } : null;
+    this.version++;
   }
 
   dayFraction(t = this.now()): number {
@@ -137,7 +164,19 @@ export class WorldClock {
     return f < DAWN || f >= DUSK;
   }
 
+  /** The forced weather, if one is in force at `t` for this region. */
+  private forcedAt(region: string, t: number) {
+    return this.forced && t >= this.forced.since && t < this.forced.until && climateOf(region) !== 'indoor' ? this.forced : null;
+  }
+
   weatherAt(region: string, t = this.now()): { weather: Weather; intensity: number; slot: number } {
+    const f = this.forcedAt(region, t);
+    const rolled = this.rolledAt(region, t);
+    return f ? { weather: f.weather, intensity: f.intensity, slot: rolled.slot } : rolled;
+  }
+
+  /** The weather the seeded rolls give, ignoring any staff override. */
+  private rolledAt(region: string, t: number): { weather: Weather; intensity: number; slot: number } {
     const climate = climateOf(region);
     const slot = Math.floor((t - this.opts.epoch) / this.opts.weatherSlotMs);
     if (climate === 'indoor') return { weather: 'clear', intensity: 0, slot };
@@ -158,8 +197,15 @@ export class WorldClock {
 
   sky(region: string, t = this.now()): SkyState {
     const { weather, intensity, slot } = this.weatherAt(region, t);
-    const since = this.opts.epoch + slot * this.opts.weatherSlotMs;
-    const previous = this.weatherAt(region, since - 1).weather;
+    let since = this.opts.epoch + slot * this.opts.weatherSlotMs;
+    let until = since + this.opts.weatherSlotMs;
+    let previous = this.weatherAt(region, since - 1).weather;
+    const f = this.forcedAt(region, t);
+    if (f) {
+      since = f.since;
+      until = f.until;
+      previous = this.rolledAt(region, f.since - 1).weather;
+    }
     return {
       day_fraction: Math.round(this.dayFraction(t) * 1e6) / 1e6,
       day: Math.floor(this.days(t)),
@@ -170,7 +216,7 @@ export class WorldClock {
       intensity,
       previous,
       since,
-      until: since + this.opts.weatherSlotMs,
+      until,
       fade_ms: this.opts.fadeMs,
       server_time: t,
     };
@@ -181,7 +227,8 @@ export class WorldClock {
    * so channels can broadcast on change instead of every tick.
    */
   skyKey(region: string, t = this.now()): string {
-    return `${this.weatherAt(region, t).slot}|${this.isNight(t) ? 'n' : 'd'}`;
+    const forcedOn = this.forcedAt(region, t) ? 'f' : '';
+    return `${this.version}|${forcedOn}|${this.weatherAt(region, t).slot}|${this.isNight(t) ? 'n' : 'd'}`;
   }
 }
 
