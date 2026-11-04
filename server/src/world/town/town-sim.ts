@@ -145,6 +145,11 @@ export class TownSim implements RegionSim {
     this.inner.setTownZones?.(zones);
   }
 
+  devDespawn(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string } {
+    if (!this.inner.devDespawn) return { error: 'This server runs no monsters (combat is off).' };
+    return this.inner.devDespawn(heroId, what);
+  }
+
   devSpawn(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string } {
     if (!this.inner.devSpawn) return { error: 'This server runs no monsters (combat is off).' };
     return this.inner.devSpawn(heroId, defName, distance, side);
