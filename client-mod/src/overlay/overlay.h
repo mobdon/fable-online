@@ -14,4 +14,6 @@ void set_hero(const game::HeroPos& pos);
 void log_stats();
 /** True while the chat box or the start-up menu has the keyboard and mouse. */
 bool input_blocked_now();
+/** Mouse buttons as Fable last read them through DirectInput (bit 0 = left). */
+unsigned mouse_buttons();
 }  // namespace fo::overlay

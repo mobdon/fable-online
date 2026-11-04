@@ -499,8 +499,19 @@ bool is_mouse(void* dev) {
     return false;
 }
 
+/** Mouse buttons as Fable reads them through DirectInput (bit n = button n), for sync. */
+std::atomic<unsigned> g_mouse_buttons{0};
+
 HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
     HRESULT hr = o_GetDeviceState(dev, size, data);
+    if (SUCCEEDED(hr) && data && size >= 16 && is_mouse(dev)) {
+        // DIMOUSESTATE: lX, lY, lZ, then rgbButtons[4] at byte 12.
+        const unsigned char* b = static_cast<const unsigned char*>(data) + 12;
+        unsigned m = 0;
+        for (int i = 0; i < 4; ++i)
+            if (b[i] & 0x80) m |= 1u << i;
+        g_mouse_buttons = m;
+    }
     if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
         menu::on_mouse_state(data, size);   // the menu reads the mouse, Fable's menu underneath doesn't
         std::memset(data, 0, size);
@@ -511,6 +522,21 @@ HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
 
 HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DWORD flags) {
     HRESULT hr = o_GetDeviceData(dev, cb, rg, inout, flags);
+    if (SUCCEEDED(hr) && inout && rg && cb >= 8 && is_mouse(dev) && !(flags & 0x1 /* DIGDD_PEEK */)) {
+        // Buffered DIDEVICEOBJECTDATA: dwOfs, dwData, ... ; DIMOFS_BUTTON0..3 are offsets 12..15.
+        unsigned m = g_mouse_buttons.load();
+        const unsigned char* p = static_cast<const unsigned char*>(rg);
+        for (DWORD i = 0; i < *inout; ++i, p += cb) {
+            DWORD ofs = 0, val = 0;
+            std::memcpy(&ofs, p, 4);
+            std::memcpy(&val, p + 4, 4);
+            if (ofs >= 12 && ofs <= 15) {
+                unsigned bit = 1u << (ofs - 12);
+                m = (val & 0x80) ? (m | bit) : (m & ~bit);
+            }
+        }
+        g_mouse_buttons = m;
+    }
     if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
         if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) menu::on_mouse_data(rg, cb, *inout);
         *inout = 0;
@@ -669,5 +695,6 @@ void log_stats() {
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
 bool input_blocked_now() { return input_blocked(); }
+unsigned mouse_buttons() { return g_mouse_buttons.load(); }
 
 }  // namespace fo::overlay

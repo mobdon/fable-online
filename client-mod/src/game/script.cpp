@@ -302,8 +302,14 @@ bool queue_empty_at(uintptr_t comp) {
 }  // namespace
 
 bool scripted_queue_empty(ThingRef& t) {
-    uintptr_t comp = scripted_control(t);
-    return !comp || queue_empty_at(comp);
+    // The creature's own action slot: empty, or holding an action that has finished.
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing, 0x110)) return true;
+    uintptr_t cur = read_ptr(thing + 0x100);
+    if (!cur || !readable(cur + 0x61, 1)) return true;
+    uint8_t done = 0;
+    std::memcpy(&done, reinterpret_cast<const void*>(cur + 0x61), 1);
+    return done != 0;
 }
 
 void clear_scripted(ThingRef& t) {
@@ -313,35 +319,62 @@ void clear_scripted(ThingRef& t) {
 }
 
 namespace {
+// What CActionPlayAnimation::Update (0x00712900) does once the scripted-control queue
+// starts it, done here directly: a CREATURE_HERO stand-in has no CTCScriptedControl
+// (the component comes from the def, and the hero's def does not list it), but every
+// creature has its own action slot at thing+0x100 and queue at thing+0x108.
+constexpr uintptr_t kCreatureIsBusy = 0x0085F0C0;    // CThing: true = no new actions now
+constexpr uintptr_t kCreatureAnimByName = 0x00662D80;  // CThing: (CCharString*, int -1) -> anim
+constexpr uintptr_t kCreatureAnimActionCtor = 0x008425E0;  // 11 args, object 0xB4 bytes
+constexpr size_t kCreatureAnimActionSize = 0xB4;
+constexpr uintptr_t kCreatureSetAction = 0x006644F0;   // CThing: (action*) -> bool, clones it
+constexpr uintptr_t kCreatureQueueAction = 0x00664490; // CThing: (action*), clones it
+constexpr uint32_t kCreatureCurrentAction = 0x100;
+
+bool creature_ok(uintptr_t thing) {
+    if (!thing || !readable(thing, 0x110)) return false;
+    uint8_t dead = 0;
+    std::memcpy(&dead, reinterpret_cast<const void*>(thing + kThingDeadFlags), 1);
+    if (dead & 1) return false;
+    return (read_ptr(thing + kThingCreatureFlags) & 8) != 0;
+}
+
 bool queue_anim(ThingRef& t, const char* anim, bool looping, int loops, bool clear_first, uint32_t sequence) {
-    if (!anim || !*anim || !iface()) return false;
-    uintptr_t comp = scripted_control(t);
-    if (!comp) return false;
+    if (!anim || !*anim || !iface() || !t.held()) return false;
     uintptr_t thing = t.thing();
-    if (read_ptr(kPlayAnimVtable) != 0x00905070) {  // first slot: its destructor
-        disable("play-animation action vtable does not match this Fable.exe");
+    if (!creature_ok(thing)) return false;
+    if (read_ptr(kCreatureAnimActionCtor) != 0x2C24448B) {  // mov eax, [esp+0x2C]: the ctor's first bytes
+        disable("creature animation action does not match this Fable.exe");
         return false;
     }
+    void* self = reinterpret_cast<void*>(thing);
+    if (as<bool(__thiscall*)(void*)>(reinterpret_cast<void*>(kCreatureIsBusy))(self)) return false;
 
-    // The same order as the slot `.PlayLoopingAnim` lands in (handle vtable +0x50).
-    if (clear_first) {
-        as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kQueueClear))(reinterpret_cast<void*>(comp));
-        if (read_ptr(thing + kThingCreatureFlags) & 8)
-            as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kStopCreatureAction))(reinterpret_cast<void*>(thing));
-    }
-
-    void* action = as<void*(__cdecl*)(size_t)>(reinterpret_cast<void*>(kOperatorNew))(kPlayAnimSize);
+    Str name(anim);
+    void* handle = as<void*(__thiscall*)(void*, void*, int)>(reinterpret_cast<void*>(kCreatureAnimByName))(
+        self, name.raw(), -1);
+    void* action = as<void*(__cdecl*)(size_t)>(reinterpret_cast<void*>(kOperatorNew))(kCreatureAnimActionSize);
     if (!action) return false;
     uint8_t global = 0;
     if (readable(kScriptGlobalFlag, 1)) std::memcpy(&global, reinterpret_cast<const void*>(kScriptGlobalFlag), 1);
-    Str name(anim);
-    // The runner's defaults: `.PlayLoopingAnim` builds (name, 0, 1, loops, 0, seq, 0, 1, global, 0, 0)
-    // and `.PlayAnimation` builds (name, 0, 0, -1, 0, seq, 0, 1, global, 0, 0).
-    as<void*(__thiscall*)(void*, void*, int, int, int, int, int, int, int, int, int, int)>(
-        reinterpret_cast<void*>(kPlayAnimCtor))(action, name.raw(), 0, looping ? 1 : 0, looping ? loops : -1, 0,
-                                               static_cast<int>(sequence), 0, 1, global, 0, 0);
-    as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kQueueAction))(reinterpret_cast<void*>(comp), action);
-    return true;
+    alignas(4) uint32_t out[2] = {0, 0};
+    // (creature, anim, 0, looping, loops, &out, 0, global, 0, 0, seq): the arguments the
+    // scripted action passes for `.PlayLoopingAnim` / `.PlayAnimation` defaults.
+    as<void*(__thiscall*)(void*, void*, void*, int, int, int, void*, int, int, int, int, int)>(
+        reinterpret_cast<void*>(kCreatureAnimActionCtor))(action, self, handle, 0, looping ? 1 : 0,
+                                                          looping ? loops : -1, out, 0, global, 0, 0,
+                                                          static_cast<int>(sequence));
+    bool ok = true;
+    uintptr_t cur = read_ptr(thing + kCreatureCurrentAction);
+    if (!clear_first && cur) {
+        as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kCreatureQueueAction))(self, action);
+    } else {
+        ok = as<bool(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kCreatureSetAction))(self, action);
+    }
+    // Both calls keep a copy (action vtable +0x2C clones), so ours is deleted, as the engine does.
+    uintptr_t vt = read_ptr(reinterpret_cast<uintptr_t>(action));
+    as<void(__thiscall*)(void*, int)>(reinterpret_cast<void*>(read_ptr(vt)))(action, 1);
+    return ok;
 }
 }  // namespace
 
