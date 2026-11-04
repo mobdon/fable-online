@@ -301,6 +301,11 @@ bool in_game() {
     return t && GetTickCount() - t < 300;
 }
 
+bool in_game_within(unsigned ms) {
+    const DWORD t = g_last_update_ms.load();
+    return t && GetTickCount() - t < ms;
+}
+
 void hold(bool on, HWND window) {
     if (window) g_hold_window = window;
     g_hold = on;
