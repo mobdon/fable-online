@@ -293,7 +293,7 @@ export class CombatSim implements RegionSim {
 
   snapshot(): EntityState[] {
     const out: EntityState[] = [];
-    for (const { hero: h } of this.heroes.values()) out.push(state(h, 0));
+    for (const { hero: h } of this.heroes.values()) out.push({ ...state(h, 0), max_health: Math.ceil(h.maxHealth) });
     for (const c of this.spawns.creatures()) out.push(state(c, fableHash(c.defName)));
     for (const c of this.guards.values()) out.push({ ...state(c, fableHash(c.defName)), def: c.defName });
     return out;

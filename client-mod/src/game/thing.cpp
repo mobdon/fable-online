@@ -54,6 +54,24 @@ void each_region(Fn&& fn) {
 
 }  // namespace
 
+bool read_health(uintptr_t thing, float& health, float& maxHealth) {
+    uint8_t flags = 0;
+    float v[2];  // +0xB0 max, +0xB4 current
+    if (!read(thing + kFlags91, &flags, 1) || (flags & 1) || !read(thing + kMaxHealth, v, sizeof(v))) return false;
+    if (!sane(v[0]) || !sane(v[1]) || v[0] < 0) return false;
+    maxHealth = v[0];
+    health = v[1];
+    return true;
+}
+
+bool write_health(uintptr_t thing, float health) {
+    float hp = 0, max = 0;
+    if (!read_health(thing, hp, max) || !sane(health)) return false;
+    if (health < 0) health = 0;
+    if (health > max) health = max;
+    return write(thing + kHealth, &health, sizeof(health));
+}
+
 uintptr_t physics_of(uintptr_t thing) {
     uint32_t phys = 0, pvt = 0;
     if (!read(thing + kPhysicsPtr, &phys, 4) || !phys) return 0;

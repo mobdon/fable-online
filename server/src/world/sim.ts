@@ -24,6 +24,11 @@ export interface EntityState {
   yaw: number;
   anim: number;
   health: number;
+  /**
+   * Heroes only, and only from a sim that runs combat: the server's max health. The mod sets
+   * the local hero's Fable health to the same share of Fable's own max (health / max_health).
+   */
+  max_health?: number;
   /** Fable def name for anything that isn't a hero; the client mod picks the puppet's mesh from it. */
   def?: string;
 }

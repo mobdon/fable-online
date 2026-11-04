@@ -38,6 +38,8 @@ struct EntityState {
     float yaw = 0;
     Anim anim = Anim::Idle;
     float health = 0;
+    /** Heroes in combat regions only: the server's max health. 0 when the frame has none. */
+    float maxHealth = 0;
     uint32_t renown = 0;
 };
 

@@ -24,6 +24,7 @@ void EntityTable::clear() {
     live_.clear();
     spawned_.clear();
     lastTick_ = 0;
+    haveOwn_ = false;
 }
 
 void EntityTable::on_tick(const Tick& t, uint32_t nowMs) {
@@ -36,7 +37,12 @@ void EntityTable::on_tick(const Tick& t, uint32_t nowMs) {
     lastTick_ = t.tick;
 
     for (const EntityState& s : t.entities) {
-        if (s.id == localId_) continue;  // our own hero is driven by the player, not by us
+        if (s.id == localId_) {
+            // Our own hero is driven by the player, not by us; only its server state is kept.
+            own_ = s;
+            haveOwn_ = true;
+            continue;
+        }
         auto it = live_.find(s.id);
         if (it == live_.end()) {
             Entry e;

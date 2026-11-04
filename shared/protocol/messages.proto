@@ -32,6 +32,7 @@ message EnterRegion  { uint32 region_uid = 1; float x = 2; float y = 3; float z 
 message EntityState  {
   uint32 id = 1; uint32 def_id = 2; float x = 3; float y = 4; float z = 5; float yaw = 6;
   uint32 anim = 7; float health = 8; string kind = 9; string def = 10; string name = 11; uint32 renown = 12;
+  float max_health = 13;  // heroes in combat regions only
 }
 // Only the entities within the server's interest radius of the receiving player.
 message WorldTick    { uint32 tick = 1; uint32 last_input_seq = 2; repeated EntityState entities = 3; uint32 removed = 4; }
