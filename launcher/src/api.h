@@ -29,7 +29,14 @@ struct Session {
     bool valid() const;
 };
 
-struct Ticket { std::string ticket, host; int port = 0; };
+struct Ticket {
+    std::string ticket, host;
+    int port = 0;
+    // Realm chat: where the mod's chat client connects, and its login token. Empty when the
+    // server runs without chat.
+    std::string chat_host, chat_token;
+    int chat_port = 0;
+};
 
 Status status(const Config& c);
 bool news(const Config& c, std::vector<NewsItem>& out, std::string& error);

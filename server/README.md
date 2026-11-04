@@ -130,13 +130,14 @@ platinum set never drops.
 | `src/data/` | game.bin / names.bin reader and the extractor |
 | `src/law/` | Crime records, fines, bribes, kick-outs, jail and Bargate sentences, stealing rules, and the town watch that runs guards ([docs/law.md](../docs/law.md)) |
 | `src/net/` | HTTP launcher API, game WebSocket, protocol validation |
-| `src/analytics/` | Typed game events written as JSON lines to `data/events.jsonl` |
+| `src/analytics/` | Typed game events (JSON lines in `data/events.jsonl`), and the bridge that feeds them to Prometheus metrics (`:9464/metrics`) and the economy watchdog ([README](src/analytics/README.md)) |
+| `src/chat/` | Realm chat: channels, whispers, moderation, flood control and name tags, on TCP 7781 |
 
 ## HTTP API
 
 Launcher contract (`/launcher/v1`): `GET status`, `GET news`, `GET manifest?channel=live`,
 `POST register` (logs straight in, same reply as login), `POST login`, `POST refresh`, `POST logout`, `GET heroes`, `POST heroes`,
-`POST join {region, client_version, hero_id?}` which returns `{ticket, host, port}`. The mod
+`POST join {region, client_version, hero_id?}` which returns `{ticket, host, port, chat: {host, port, token}}`. The mod
 sends the ticket as `Hello.token`; it works once, for 60 seconds. News and manifests are read
 from `content/news.json` and `content/manifest-<channel>.json`.
 
@@ -164,10 +165,12 @@ Admin (`/admin/v1`, admin accounts only): `GET stats`, `GET economy/audit`.
 - **Region graph** comes from `shared/defs/regions.json`, which you generate from your own
   install with `tools/extractor/regions.mjs`. Without it the server uses a small built-in map.
 
-## chat/
+## Realm chat
 
-Chat channels, whispers, moderation, flood control and name tags. Runs on its own so chat
-survives region server restarts. See `chat/` and `../shared/protocol/chat.md`.
-Hooks: `ChatHub.updateHero()` (region server: positions, renown, PvP flag),
-`ChatHub.setParty()` (party system), the `EventSink` passed to `ChatHub` (analytics),
-and `auth.ts` (gateway login tokens).
+Chat channels, whispers, moderation, flood control and name tags (`src/chat/`), run by the game
+server on its own TCP port (`FO_CHAT_PORT`, 7781). Protocol: `../shared/protocol/chat.md`.
+`RealmChat` (`src/chat/realm-chat.ts`) signs the chat login token returned by `/join` (there is no
+login by name), and five times a second copies each online hero's channel, Fable area, position,
+renown and PvP flag from the world into the hub, so the client's own position reports are
+ignored. Chat events (logins, message counts, reports, moderation) go to the game event log and
+the analytics. Hook left for the party system: `ChatHub.setParty()`.

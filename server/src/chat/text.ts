@@ -1,5 +1,5 @@
 // Cleaning player text and names before anyone else sees them.
-import { MAX_TEXT_CHARS } from "./protocol.ts";
+import { MAX_TEXT_CHARS } from "./protocol.js";
 
 /** Hero names: 3 to 16 letters, digits, spaces, apostrophes or hyphens; starts with a letter. */
 const NAME_RE = /^[A-Za-z][A-Za-z0-9' -]{1,14}[A-Za-z0-9]$/;

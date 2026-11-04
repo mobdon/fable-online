@@ -1,6 +1,6 @@
 // Flood control: a token bucket per player, a cooldown per busy channel,
 // a repeat check, and automatic mutes for players who keep hitting the limits.
-import type { TalkChannel } from "./protocol.ts";
+import type { TalkChannel } from "./protocol.js";
 
 export interface RateConfig {
   burst: number;            // messages a player can send back to back

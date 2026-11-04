@@ -1,24 +1,29 @@
-# @fable-online/analytics
+# Server analytics
 
-Metrics, event log and economy watchdog for the Fable Online server. The gateway and
-the region orchestrators import it; Prometheus scrapes it; Grafana shows it
-(dashboards and alert rules live in [`ops/monitoring`](../../ops/monitoring)).
+Metrics, event log and economy watchdog, inside the game server. Prometheus scrapes it;
+Grafana shows it (dashboards and alert rules live in [`ops/monitoring`](../../../ops/monitoring)).
 
-```ts
-import { Analytics, JsonlFileSink, startMetricsServer } from "@fable-online/analytics";
+The server's own systems don't call the metrics directly. They emit `GameEvent`s
+(`events.ts`) as they always have, and `createApp` sends every event both to the raw game event
+log (`FO_EVENTS`) and to `AnalyticsBridge` (`bridge.ts`), which turns them into `Analytics` calls:
 
-const analytics = new Analytics({
-  sink: new JsonlFileSink("/var/log/fable/events"),   // one JSON line per event, per UTC day
-  onAnomaly: (a) => gm.alert(a),                        // your call: log, freeze the hero, page a GM
-});
-await startMetricsServer(analytics.metrics.registry, { port: 9464, host: "10.0.0.5" }); // private address only
+| Game event | Analytics |
+| --- | --- |
+| `login` | `fable_logins_total`, unique accounts today |
+| `player_connected`, `region_enter`, `player_disconnected` | heroes online per region, region transfers, session length |
+| `gold` (ledger) | gold minted per source, burned per sink, transferred; every one checked by the watchdog |
+| `item` | items created and destroyed; Resurrection Phials created (`phial_rate`) |
+| `hero_death` with a phial, `pvp_kill` | phials used, PvP kills |
+| `chat` (Realm chat) | chat messages per channel, player reports |
 
-analytics.setLedgerSupply(await db.sumAllGold());      // on startup
-analytics.enterRegion(heroId, "oakvale");
-analytics.goldMinted({ playerId: heroId, amount: 250, source: "quest_reward", region: "oakvale", txnId, balanceBefore, balanceAfter });
-analytics.pvpKill({ venue: "arena", killerId, victimId, killerSchool: "will", victimSchool: "melee", secondsToKill: 8, region: "arena" });
-setInterval(async () => analytics.reportDbSupply(await db.sumAllGold()), 60_000);
-```
+The ledger's reasons are renamed to the allow-list's (`loot` is `monster_drop`, `vendor_sell` is
+`shop_sell`, `vendor_buy` is `shop_buy`...). The app also reports tick time every frame, open
+world and chat connections, and every minute compares the ledger's gold supply with the wallets.
+
+Settings (`server/src/config.ts`): `FO_METRICS_PORT` (9464, 0 = off) and `FO_METRICS_HOST`
+(127.0.0.1: `/metrics` must never be reachable from the internet), `FO_ANALYTICS_DIR`
+(`data/analytics`, one `events-YYYY-MM-DD.jsonl` per UTC day, '' = off). Watchdog anomalies
+are printed to the server console too.
 
 ## Two outputs, on purpose
 
@@ -33,7 +38,7 @@ anything unknown into `other`), so a bug or a hostile client can't blow up the m
 ## Economy watchdog
 
 Every gold change goes through `goldMinted`, `goldBurned` or `goldTransferred`. Each is
-checked against these rules (`src/economy.ts`). The watchdog only reports; the server decides what to do.
+checked against these rules (`watchdog.ts`). The watchdog only reports; the server decides what to do.
 
 | Rule | Catches |
 | --- | --- |
@@ -57,8 +62,7 @@ first week, use those numbers to set the fixed limits.
 ## Commands
 
 ```
-npm install
-npm test          # unit tests (node:test)
-npm run demo      # fake traffic on :9464/metrics so the dashboards have data
-npm run build     # compile to dist/
+cd server
+npm test                  # includes test/analytics.test.ts and test/realm-chat.test.ts
+npm run analytics-demo    # fake traffic on :9464/metrics so the dashboards have data
 ```

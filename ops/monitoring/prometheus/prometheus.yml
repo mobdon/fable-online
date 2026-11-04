@@ -6,9 +6,8 @@ rule_files:
   - alerts.yml
 
 scrape_configs:
-  # Every server process (gateway, region orchestrators) exposes /metrics on 9464.
-  # Add one target per process. For local testing, `npm run demo` in server/analytics
-  # serves fake data on the host's port 9464.
+  # The game server exposes /metrics on 9464 (FO_METRICS_PORT). Add one target per server
+  # process. For local testing, `npm run analytics-demo` in server/ serves fake data there.
   - job_name: fable-server
     static_configs:
       - targets: ["host.docker.internal:9464"]

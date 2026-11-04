@@ -33,6 +33,10 @@ import { shopsFromTown } from './world/town/town-shops.js';
 import { withTown } from './world/town/town-sim.js';
 import { Scoreboard } from './scoreboard/scoreboard.js';
 import { ResumeTokens } from './net/resume.js';
+import { Analytics } from './analytics/analytics.js';
+import { AnalyticsBridge, TeeSink } from './analytics/bridge.js';
+import { JsonlFileSink, type EventSink as AnalyticsLog } from './analytics/event-log.js';
+import { RealmChat } from './chat/realm-chat.js';
 
 /** Everything the server is made of, wired together. Tests build one with ':memory:'. */
 export interface App {
@@ -57,6 +61,10 @@ export interface App {
   scoreboard: Scoreboard;
   /** Lets a dropped game connection come back without a new launcher ticket. */
   resume: ResumeTokens;
+  /** Prometheus metrics and the economy watchdog, fed from `events`. */
+  analytics: Analytics;
+  /** Realm chat and name tags; null when FO_CHAT=0. main.ts opens its port. */
+  chat: RealmChat | null;
   /** Creature defs the server spawns itself; the mod leaves the level files' copies out. Empty when it runs none. */
   spawnDefs: string[];
   close(): void;
@@ -68,7 +76,20 @@ export function createApp(
 ): App {
   const cfg = loadConfig(overrides);
   const db = new Database(cfg.dbPath);
-  const events = opts.events ?? (cfg.eventsPath ? new JsonlSink(cfg.eventsPath) : new NullSink());
+  const gameLog = opts.events ?? (cfg.eventsPath ? new JsonlSink(cfg.eventsPath) : new NullSink());
+  // A caller that brings its own sink (tests, scripts) owns the event output, so the analytics
+  // log stays off for it; metrics are still counted.
+  const analyticsLog: AnalyticsLog | undefined = !opts.events && cfg.analyticsDir ? new JsonlFileSink(cfg.analyticsDir) : undefined;
+  const analytics = new Analytics({
+    sink: analyticsLog ?? { write() {} },
+    defaultMetrics: !opts.events,
+    onAnomaly: (a) => console.warn(`economy watchdog: ${a.rule}${a.playerId ? ` hero ${a.playerId}` : ''} ${JSON.stringify(a.detail)}`),
+  });
+  let director: Director;
+  const bridge = new AnalyticsBridge(analytics, {
+    regionOf: (heroId) => director?.channelOf(heroId)?.region.name,
+  });
+  const events: EventSink = new TeeSink([gameLog, bridge]);
   const accounts = new Accounts(db, events, cfg.sessionTtlMs);
   const heroes = new Heroes(db, events, cfg.maxHeroesPerAccount, cfg.newHeroPhase);
   const data = opts.data ?? loadGameData(cfg.gameDataPath);
@@ -95,7 +116,6 @@ export function createApp(
   const regions = RegionTable.load(cfg.regionsPath);
   const lawFile = cfg.contentDir && path.join(cfg.contentDir, 'law.json');
   const law = new Law(db, economy, events, mergeRules(lawFile && fs.existsSync(lawFile) ? JSON.parse(fs.readFileSync(lawFile, 'utf8')) : undefined));
-  let director: Director;
   const lawServices: LawServices = {
     law,
     events,
@@ -149,6 +169,24 @@ export function createApp(
     left: (heroId) => law.flush(heroId),
   });
   const scoreboard = new Scoreboard(db);
+  const chat = cfg.chat
+    ? new RealmChat(cfg, director, heroes, (event, detail) => events.emit({ type: 'chat', event, detail }))
+    : null;
+  // Gold in the world, from the ledger, so the supply gauges start from the truth.
+  const supply = () => economy.audit().supply.circulating;
+  analytics.setLedgerSupply(supply());
+  let supplyAt = Date.now();
+  director.policies.push({
+    tick: () => {
+      analytics.tick('realm', director.lastTickMs / 1000);
+      const now = Date.now();
+      if (now - supplyAt < SUPPLY_CHECK_MS) return;
+      supplyAt = now;
+      analytics.metrics.connections.set({ service: 'world' }, director.online);
+      if (chat) analytics.metrics.connections.set({ service: 'chat' }, chat.hub.online);
+      analytics.reportDbSupply(supply());
+    },
+  });
   return {
     cfg,
     db,
@@ -170,15 +208,22 @@ export function createApp(
     town,
     scoreboard,
     resume: new ResumeTokens(cfg.resumeMs),
+    analytics,
+    chat,
     spawnDefs,
     close() {
+      chat?.close();
       director.stop();
       law.flush();
-      if (events instanceof JsonlSink) events.close();
+      if (gameLog instanceof JsonlSink) gameLog.close();
+      void analyticsLog?.close?.();
       db.close();
     },
   };
 }
+
+/** How often the ledger's gold supply is compared with the wallets (a full audit query). */
+const SUPPLY_CHECK_MS = 60_000;
 
 /**
  * The law's view of the world. Moves are queued and run after the frame, so an arrest in

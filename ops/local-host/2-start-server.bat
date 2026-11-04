@@ -24,6 +24,6 @@ set "FABLE=C:\Program Files (x86)\Steam\steamapps\common\Fable The Lost Chapters
 if exist "%FABLE%\Fable.exe" node ..\tools\extractor\regions.mjs "%FABLE%"
 rem Test realm: every hero can fight every other hero (no Guild mission needed).
 set FO_PVP_ALL=1
-echo Players connect to %FO_PUBLIC_HOST% port 7777. Press Ctrl+C to stop (heroes are saved).
+echo Players connect to %FO_PUBLIC_HOST% port 7777 (Realm chat on 7781). Press Ctrl+C to stop (heroes are saved).
 call npm run dev
 pause

@@ -39,7 +39,7 @@ group can reach. No router settings, and your PC is not exposed to the internet.
 2. Each friend: `3-play.bat 100.101.102.103`.
 
 On the same home network, use your PC's LAN address (like `192.168.1.20`) instead.
-`open-firewall.bat` (Run as administrator) lets Windows Firewall through on port 7777.
+`open-firewall.bat` (Run as administrator) lets Windows Firewall through on ports 7777 (game) and 7781 (Realm chat).
 
 The launcher only talks plain http to this PC, a home network or a Tailscale address. A
 public server will use https.

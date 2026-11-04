@@ -33,9 +33,12 @@ export type GoldSource = (typeof GOLD_SOURCES)[number];
 /** Every legitimate way gold leaves the world. */
 export const GOLD_SINKS = [
   "shop_buy", "tavern", "trainer", "property_buy", "gambling_loss", "death_penalty",
-  "repair", "tax", "cullis_fee", "arena_entry", "gm_remove",
+  "repair", "tax", "cullis_fee", "arena_entry", "gm_remove", "crime", "tattoo_haircut",
 ] as const;
 export type GoldSink = (typeof GOLD_SINKS)[number];
+
+/** Realm chat channels (see src/chat/protocol.ts), plus the Arena's own. */
+export const CHAT_CHANNELS = ["say", "region", "realm", "trade", "party", "guild", "whisper", "arena"] as const;
 
 export const PVP_VENUES = ["arena", "open_world", "duel"] as const;
 export type PvpVenue = (typeof PVP_VENUES)[number];

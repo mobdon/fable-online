@@ -17,8 +17,7 @@ Plan: https://claude.ai/artifact/H5LgN8n6CD1f8CFtjkGp1e
 | `client-mod/` | `fable_online.dll`, injected into Fable.exe (32-bit) |
 | `launcher/` | `fable_online_launcher.exe`: login, news, region select, patching, then starts Fable with the DLL injected |
 | `tools/dev-gateway/` | Dev-only stand-in for the gateway, so the launcher runs before `server/` does |
-| `server/` | Gateway, region orchestrator, persistence (TypeScript) |
-| `server/chat/` | Chat and name tag service (TypeScript, Node 22) |
+| `server/` | Gateway, region orchestrator, persistence, Realm chat (`src/chat/`) and analytics (`src/analytics/`) (TypeScript) |
 | `tools/re-notes/` | What we've found inside Fable.exe, one file per system |
 | `tools/extractor/` | Reads game data from a local install into `shared/defs/` |
 
@@ -92,22 +91,24 @@ Logic tests: configure with `-DFO_BUILD_TESTS=ON`, start the dev gateway with
 The mod draws a chat box (bottom left) and name tags over other heroes (name, guild,
 title, renown; red name = flagged for PvP). Protocol and rules: `shared/protocol/chat.md`.
 
-### Run a chat server
+### Chat server
+
+Realm chat is part of the game server: `npm run dev` in `server/` opens it on port 7781 next to
+the game port. Logins only work with the token `/launcher/v1/join` hands out, so start Fable from
+the launcher. To chat with a fake player, log in a second account:
 
 ```
-cd server/chat
-npm install            # dev tools only; the server itself has no dependencies
-npm start              # dev mode: log in by name, port 7781
-npm test               # 13 tests
-npm run bot -- --name Maze --renown 12500 --title "Arrow Master"   # a fake player to chat with
+cd server
+npm run chat-bot -- --user Maze --password password123 --hero Maze   # registers it if needed
 ```
 
-Production sets `CHAT_TOKEN_SECRET` (shared with the gateway) so only launcher logins work.
+`FO_CHAT=0` turns chat off; `FO_CHAT_PORT`, `FO_CHAT_PUBLIC_HOST`, `FO_CHAT_MOTD`,
+`FO_CHAT_BANNED_WORDS` and `FO_CHAT_SECRET` are the other settings (see `server/src/config.ts`).
 
 ### In game
 
-Copy `client-mod/fable_online.ini.example` to `fable_online.ini` next to the DLL and set
-`server=` and `name=`. The chat window (Realm chat) follows the layout of the chat screen
+Start Fable from the launcher: it passes the chat address and login token to the mod
+(`client-mod/fable_online.ini.example` lists the other settings). The chat window (Realm chat) follows the layout of the chat screen
 Lionhead left unfinished in the PC build: channels, whisper contacts and heroes nearby down the
 left, the conversation on the right, the edit box below. Its frame is read from the player's
 `textures.big` (`PC_UI_MSN_FRAME_1..9_SPRITE`); without it the pewter frame is used.

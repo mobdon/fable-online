@@ -1,12 +1,12 @@
 # Monitoring: Prometheus + Grafana
 
-Dashboards and alerts for the Fable Online server. The metrics come from
-[`server/analytics`](../../server/analytics).
+Dashboards and alerts for the Fable Online server. The metrics come from the game server
+itself ([`server/src/analytics`](../../server/src/analytics)), on `127.0.0.1:9464/metrics`.
 
 ## Try it with fake data
 
 ```
-cd server/analytics && npm install && npm run demo      # leave running
+cd server && npm install && npm run analytics-demo      # leave running (or run the real server)
 cd ops/monitoring && cp .env.example .env               # set a Grafana password
 docker compose up -d
 ```

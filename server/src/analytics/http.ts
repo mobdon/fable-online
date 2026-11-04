@@ -20,5 +20,8 @@ export function startMetricsServer(registry: Registry, opts: { port?: number; ho
       res.writeHead(404).end();
     }
   });
-  return new Promise((resolve) => server.listen(opts.port ?? 9464, opts.host ?? "127.0.0.1", () => resolve(server)));
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(opts.port ?? 9464, opts.host ?? "127.0.0.1", () => resolve(server));
+  });
 }

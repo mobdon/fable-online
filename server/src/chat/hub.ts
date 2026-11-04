@@ -1,14 +1,14 @@
 // The chat and name tag logic, with no sockets in it, so tests can drive it directly.
-// server.ts puts it on TCP. The region servers (phase 5) will call updateHero() with
+// server.ts puts it on TCP. In the game server, realm-chat.ts calls updateHero() with
 // authoritative positions, renown and PvP flags.
 import {
   PROTOCOL_VERSION, TALK_CHANNELS,
   type ClientMsg, type ServerMsg, type TalkChannel, type ErrCode, type TagInfo, type TagMove,
-} from "./protocol.ts";
-import { verifyToken, type Role } from "./auth.ts";
-import { cleanText, isValidName, nameKey, WordFilter } from "./text.ts";
-import { PlayerRate, DEFAULT_RATE, type RateConfig } from "./ratelimit.ts";
-import { Moderation } from "./moderation.ts";
+} from "./protocol.js";
+import { verifyToken, type Role } from "./auth.js";
+import { cleanText, isValidName, nameKey, WordFilter } from "./text.js";
+import { PlayerRate, DEFAULT_RATE, type RateConfig } from "./ratelimit.js";
+import { Moderation } from "./moderation.js";
 
 export interface HubConfig {
   /** HMAC secret shared with the gateway. null = dev mode: anyone can log in by name. */
@@ -49,6 +49,11 @@ export interface HeroState {
   renown: number; title: string; guild: string; pvp: boolean;
   /** Guild chat goes to heroes with the same guildId. Each guild, sub guilds included, has its own. */
   guildId: string;
+  /**
+   * The client's own Fable area inside the region, 0 when unknown. Positions in two
+   * different areas are in different spaces, so name tags only pair heroes in the same one.
+   */
+  area: number;
 }
 
 interface Session extends HeroState {
@@ -153,7 +158,7 @@ export class ChatHub {
     this.pending.delete(conn);
     const s: Session = {
       id: this.nextId++, conn, account, name, key, role,
-      region: 0, x: 0, y: 0, z: 0, hasPos: false, renown, title, guild, guildId, pvp: false,
+      region: 0, area: 0, x: 0, y: 0, z: 0, hasPos: false, renown, title, guild, guildId, pvp: false,
       party: null, ignore: new Set(), replyTo: null,
       rate: new PlayerRate(this.cfg.rate, this.now()), seen: new Map(), tagsDirty: false,
     };
@@ -270,6 +275,7 @@ export class ChatHub {
       s.seen.clear();  // client drops tags on region change; resend everything
     }
     if (st.x !== undefined) { s.x = st.x; s.y = st.y ?? s.y; s.z = st.z ?? s.z; s.hasPos = true; }
+    if (st.area !== undefined) s.area = st.area;  // tags in the old area are dropped by the next tick
     if (st.guildId !== undefined) s.guildId = st.guildId;  // joining or leaving a guild: chat follows at once
     for (const k of ["renown", "title", "guild", "pvp"] as const) {
       if (st[k] !== undefined && st[k] !== s[k]) { (s as any)[k] = st[k]; s.tagsDirty = true; }
@@ -300,6 +306,7 @@ export class ChatHub {
       if (s.hasPos) {
         for (const o of byRegion.get(s.region) ?? []) {
           if (o === s || dist2(o, s) > r2) continue;
+          if (o.area && s.area && o.area !== s.area) continue;
           near.add(o.id);
           const was = s.seen.get(o.id);
           const now = tagOf(o);
