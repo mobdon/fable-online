@@ -10,14 +10,16 @@
 
 namespace fo::display::hud {
 namespace {
-constexpr int kSetScissorRect = 75, kSetVertexShaderConstantF = 94;
+constexpr int kGetRenderTarget = 38, kSetViewport = 47, kSetScissorRect = 75, kSetVertexShaderConstantF = 94;
 using SetVertexShaderConstantF_t = HRESULT(WINAPI*)(IDirect3DDevice9*, UINT, const float*, UINT);
 using SetScissorRect_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const RECT*);
+using SetViewport_t = HRESULT(WINAPI*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
 using GetCursorPos_t = BOOL(WINAPI*)(LPPOINT);
 using SetCursorPos_t = BOOL(WINAPI*)(int, int);
 
 SetVertexShaderConstantF_t o_SetVertexShaderConstantF = nullptr;
 SetScissorRect_t o_SetScissorRect = nullptr;
+SetViewport_t o_SetViewport = nullptr;
 GetCursorPos_t o_GetCursorPos = nullptr;
 SetCursorPos_t o_SetCursorPos = nullptr;
 
@@ -25,7 +27,7 @@ char g_status[200] = "not installed";
 volatile int32_t* g_virtual = nullptr;      // [0] width, [1] height inside the code block
 std::atomic<float> g_scale{1.0f};
 UINT g_w = 0, g_h = 0, g_vw = 0, g_vh = 0;
-std::atomic<unsigned> g_c20_fixed{0}, g_scissor_fixed{0};
+std::atomic<unsigned> g_c20_fixed{0}, g_scissor_fixed{0}, g_viewport_fixed{0};
 
 bool active() { return g_virtual && g_virtual[0] != 0 && g_scale.load() > 1.001f; }
 
@@ -53,16 +55,50 @@ HRESULT WINAPI hk_SetVertexShaderConstantF(IDirect3DDevice9* d, UINT start, cons
     return o_SetVertexShaderConstantF(d, start, c, n);
 }
 
+// True when the device draws to a target the size of the screen (the back buffer), not to
+// a shadow map, reflection or other render texture.
+bool drawing_to_screen(IDirect3DDevice9* d) {
+    IDirect3DSurface9* rt = nullptr;
+    if (FAILED(d->GetRenderTarget(0, &rt)) || !rt) return false;
+    D3DSURFACE_DESC desc = {};
+    const bool ok = SUCCEEDED(rt->GetDesc(&desc)) && desc.Width == g_w && desc.Height == g_h;
+    rt->Release();
+    return ok;
+}
+
 // Clipping rectangles from the 2D layer are in virtual pixels.
 HRESULT WINAPI hk_SetScissorRect(IDirect3DDevice9* d, const RECT* r) {
-    if (r && active() && r->right <= static_cast<LONG>(g_vw) && r->bottom <= static_cast<LONG>(g_vh)) {
+    if (r && active() && r->right <= static_cast<LONG>(g_vw) + 1 && r->bottom <= static_cast<LONG>(g_vh) + 1 &&
+        drawing_to_screen(d)) {
         const float s = g_scale.load();
         RECT x = {static_cast<LONG>(std::floor(r->left * s)), static_cast<LONG>(std::floor(r->top * s)),
                   static_cast<LONG>(std::ceil(r->right * s)), static_cast<LONG>(std::ceil(r->bottom * s))};
+        if (x.right > static_cast<LONG>(g_w)) x.right = static_cast<LONG>(g_w);
+        if (x.bottom > static_cast<LONG>(g_h)) x.bottom = static_cast<LONG>(g_h);
         ++g_scissor_fixed;
         return o_SetScissorRect(d, &x);
     }
     return o_SetScissorRect(d, r);
+}
+
+// 2D viewports (menus, text boxes) come from the layout in virtual pixels too: Fable sets
+// the virtual size + 1 for full-screen 2D. Viewports already the screen's size are 3D.
+HRESULT WINAPI hk_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
+    if (v && active() && !(v->Width == g_w && v->Height == g_h) && v->X + v->Width <= g_vw + 1 &&
+        v->Y + v->Height <= g_vh + 1 && drawing_to_screen(d)) {
+        const float s = g_scale.load();
+        D3DVIEWPORT9 x = *v;
+        const DWORD l = static_cast<DWORD>(std::floor(v->X * s)), t = static_cast<DWORD>(std::floor(v->Y * s));
+        DWORD r = static_cast<DWORD>(std::ceil((v->X + v->Width) * s)), b = static_cast<DWORD>(std::ceil((v->Y + v->Height) * s));
+        if (r > g_w) r = g_w;
+        if (b > g_h) b = g_h;
+        if (r > l && b > t) {
+            x.X = l; x.Y = t; x.Width = r - l; x.Height = b - t;
+            ++g_viewport_fixed;
+            return o_SetViewport(d, &x);
+        }
+    }
+    return o_SetViewport(d, v);
 }
 
 POINT client_origin() {
@@ -154,6 +190,8 @@ void hook_device(IDirect3DDevice9* dev) {
         o_SetVertexShaderConstantF = reinterpret_cast<SetVertexShaderConstantF_t>(o);
     if (auto o = fo::patch::vtable(dev, kSetScissorRect, reinterpret_cast<void*>(hk_SetScissorRect)))
         o_SetScissorRect = reinterpret_cast<SetScissorRect_t>(o);
+    if (auto o = fo::patch::vtable(dev, kSetViewport, reinterpret_cast<void*>(hk_SetViewport)))
+        o_SetViewport = reinterpret_cast<SetViewport_t>(o);
 }
 
 LPARAM map_mouse(UINT msg, LPARAM l) {
@@ -171,7 +209,8 @@ float scale() { return active() ? g_scale.load() : 1.0f; }
 void log_status() {
     fo::log("display: %s", g_status);
     if (active())
-        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u", g_vw, g_vh,
-                g_w, g_h, static_cast<double>(g_scale.load()), g_c20_fixed.load(), g_scissor_fixed.load());
+        fo::log("display: HUD laid out for %ux%u, drawn at %ux%u (x%.2f); 2D constants fixed %u, clip rects %u, 2D viewports %u",
+                g_vw, g_vh, g_w, g_h, static_cast<double>(g_scale.load()), g_c20_fixed.load(), g_scissor_fixed.load(),
+                g_viewport_fixed.load());
 }
 }  // namespace fo::display::hud
