@@ -19,6 +19,34 @@ constexpr size_t kPoolPerDef = 8;
 constexpr uint32_t kHoldAfterLossMs = 5000;
 /** Fewest milliseconds between two new puppets, so a crowd does not arrive in one frame. */
 constexpr uint32_t kSpawnEveryMs = 250;
+/**
+ * A gait must be asked for this long before the puppet switches to it, so a single frame
+ * of jitter at a walk/run boundary does not restart the loop (which shows as a hitch).
+ */
+constexpr uint32_t kGaitSettleMs = 150;
+/** How often a gait loop is checked for having run out, and queued again if so. */
+constexpr uint32_t kGaitRefreshMs = 500;
+/** Loops per queued animation. The loop is re-queued whenever the queue runs dry. */
+constexpr int kGaitLoops = 50;
+
+Gait gait_for(const world::Pose& pose) {
+    switch (pose.anim) {
+        case world::Anim::Run: return Gait::Run;
+        case world::Anim::Walk:
+        case world::Anim::Strafe: return Gait::Walk;
+        default: break;
+    }
+    return Gait::Idle;
+}
+
+/** Names from the creature's own animation map (each creature def maps them to its own). */
+const char* anim_for(Gait g) {
+    switch (g) {
+        case Gait::Walk: return "ST_WALK";
+        case Gait::Run: return "ST_RUN";
+        default: return "ST_IDLE";
+    }
+}
 }  // namespace
 
 void PuppetPool::hold(uint32_t nowMs, uint32_t ms) {
@@ -42,6 +70,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             p.spawn = s;
             script::set_drawable(p.ref, true);
             p.hidden = false;
+            p.gait = p.wanted = Gait::None;
             p.lastCommandsMs = 0;
             live_.emplace(s.id, std::move(p));
             ++stats_.reused;
@@ -83,8 +112,10 @@ void PuppetPool::park(uint32_t id) {
         return;
     }
     script::clear_commands(p.ref);
+    script::clear_scripted(p.ref);
     script::set_drawable(p.ref, false);
     p.hidden = true;
+    p.gait = p.wanted = Gait::None;
     if (pool_.count(p.def) >= kPoolPerDef) {
         script::set_free(p.ref);
         p.ref.release();
@@ -114,6 +145,7 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     if (pose.anim == world::Anim::Death) return;
 
     write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
+    if (animate_) animate(p, pose, nowMs);
 
     // Fable's own AI keeps handing the creature somewhere to walk. Dropping its actions
     // regularly is cheaper than fighting it every frame, and the position write above is
@@ -121,6 +153,35 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     if (nowMs - p.lastCommandsMs >= kClearCommandsEveryMs) {
         p.lastCommandsMs = nowMs;
         script::clear_commands(p.ref);
+    }
+}
+
+void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
+    // The position write above stays the authority on where the puppet stands; this only
+    // gives Fable a walk, run or idle loop to play while it is moved, through the same
+    // scripted-control queue a quest's `.PlayLoopingAnim` uses.
+    Gait want = gait_for(pose);
+    if (want != p.wanted) {
+        p.wanted = want;
+        p.wantedSinceMs = nowMs;
+    }
+    bool settled = nowMs - p.wantedSinceMs >= kGaitSettleMs || p.gait == Gait::None;
+    bool change = p.wanted != p.gait && settled;
+    bool refresh = !change && p.gait != Gait::None && nowMs - p.lastAnimMs >= kGaitRefreshMs &&
+                   script::scripted_queue_empty(p.ref);
+    if (!change && !refresh) return;
+
+    p.lastAnimMs = nowMs;
+    Gait next = change ? p.wanted : p.gait;
+    if (script::play_looping_anim(p.ref, anim_for(next), kGaitLoops, change, ++p.animSeq)) {
+        if (change && stats_.animsPlayed < 20)
+            fo::log("puppet: %s now %s", p.scriptName.c_str(), anim_for(next));
+        p.gait = next;
+        ++stats_.animsPlayed;
+    } else {
+        if (stats_.animsRefused++ == 0)
+            fo::log("puppet: %s has no scripted control; it is moved without animations", p.scriptName.c_str());
+        p.gait = next;  // do not retry every tick; the refresh check retries it slowly
     }
 }
 

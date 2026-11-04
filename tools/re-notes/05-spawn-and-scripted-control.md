@@ -74,10 +74,41 @@ up, and they build the `NTCScriptedControl::CAction*` objects:
 | +0x64 | `.LookAt` | `CActionTurnToFacePosition` |
 | +0x28 / +0x58 | `.StopFollowingThing`, `.ClearCommands` | drops queued actions |
 
-The mod does not use these yet: it writes the position and facing into the physics
-component instead (`02-hero-live-state.md`), which needs no mapping of the move modes and
-cannot leave a creature walking somewhere the server never asked for. The move actions are
-the next step, for walk and run animations that match the speed the server reports.
+The mod does not use the move actions: it writes the position and facing into the physics
+component (`02-hero-live-state.md`), which cannot leave a creature walking somewhere the
+server never asked for, and plays the walk, run or idle loop itself (below).
+
+### What the move slot takes
+
+Slot +0x14 (`0x00903E20`, `ret 0x1C`) is `(ref* target, float stopDistance, int mode, int,
+bool, bool, bool)`. The target is another 12-byte thing reference: its vtable +0x12C is
+"is valid" and +0x2C returns the `CThing*`. `.RunTo` passes `(target, 0.3, 1, 0, 1, 0, 1)`
+by default. The mode maps to a move type: 0 -> 3, 1 -> 5, anything else -> 1. There is no
+form that takes coordinates: `CActionMoveTo` (0x50 bytes, ctor `0x009051F0`) keeps a
+reference to the target thing, so driving a puppet with it needs a second thing to aim at.
+
+## Playing animations (used by the puppets)
+
+The handle is not needed: every handle slot finds the thing's `CTCScriptedControl`
+(component id 0x1F, vtable `0x012658E4`) and queues an action on it. The mod does the same.
+
+| What | Address | Shape |
+| --- | --- | --- |
+| component lookup | inline | thing+0x20 sign bit set, then sorted `(id, component*)` pairs from `[thing+0x44]` to `[thing+0x48]` |
+| `operator new` | `0x00BFEA1A` | `__cdecl (size)` |
+| `CActionPlayAnimation` ctor | `0x009034F0` | `__thiscall`, 11 args, object 0x28 bytes, vtable `0x0128D6F4` |
+| queue an action | `0x007137D0` | `CTCScriptedControl::(action*)`, takes ownership |
+| stop and drop the queue | `0x00713630` | `CTCScriptedControl::()` |
+| end the creature's own action | `0x00662650` | `CThing::()`, only when `thing+0x6C` bit 3 is set |
+| queue update | `0x00713910` | runs whenever the queue is not empty (called from `0x006AD9B8`) |
+
+`.PlayLoopingAnim` (handle +0x50) builds `ctor(name, 0, 1, loops, 0, seq, 0, 1, [0x01375748], 0, 0)`;
+`.PlayAnimation` (+0x48) builds `ctor(name, b, 0, -1, 0, seq, ...)`. When the action runs,
+`0x00662D80` looks the name up in the creature's animation map (`[thing+0x70]` -> `+0x34`),
+the same map the movement code reads `ST_WALK` and `ST_RUN` from (`0x00663610`). So
+`ST_IDLE`, `ST_WALK`, `ST_RUN` and the other `ST_*` names play each creature's own loop.
+
+`.ClearCommands` (+0x840) only zeroes component 0x30 +0x1C; it does not touch this queue.
 
 ## Creature generators
 

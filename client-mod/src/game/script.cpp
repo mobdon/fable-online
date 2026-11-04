@@ -31,6 +31,24 @@ constexpr unsigned kLookInDirection = 0x768; // (reference*, float yaw, bool)
 constexpr unsigned kHeroHealth = 0x404;      // () -> float
 constexpr unsigned kHeroMaxHealth = 0x408;   // () -> float
 
+// NTCScriptedControl: what the script runner's `.PlayLoopingAnim` ends up calling.
+// tools/re-notes/05-spawn-and-scripted-control.md, "Playing animations".
+constexpr uintptr_t kOperatorNew = 0x00BFEA1A;     // void* __cdecl operator new(size_t)
+constexpr uintptr_t kPlayAnimCtor = 0x009034F0;    // CActionPlayAnimation ctor, 11 args
+constexpr uintptr_t kPlayAnimVtable = 0x0128D6F4;  // CActionPlayAnimation vtable
+constexpr size_t kPlayAnimSize = 0x28;
+constexpr uintptr_t kQueueAction = 0x007137D0;     // CTCScriptedControl::Add(action*)
+constexpr uintptr_t kQueueClear = 0x00713630;      // CTCScriptedControl: stop and drop all
+constexpr uintptr_t kStopCreatureAction = 0x00662650;  // CThingCreatureBase: end current action
+constexpr uintptr_t kScriptGlobalFlag = 0x01375748;    // byte the runner passes through
+constexpr uint32_t kScriptedControlVtable = 0x012658E4;
+constexpr uint32_t kScriptedControlId = 0x1F;
+// CThing layout used to find a component (the inline lookup in every scripted-thing slot).
+constexpr uint32_t kThingFlags = 0x20;       // sign bit: has a component table
+constexpr uint32_t kThingComponents = 0x44;  // {begin, end} of sorted (id, component*) pairs
+constexpr uint32_t kThingDeadFlags = 0x91;   // bit 0: being removed
+constexpr uint32_t kThingCreatureFlags = 0x6C;  // bit 3: is a creature with an action list
+
 // CThing slot the CreateNear sequence reads the "near" value from.
 constexpr unsigned kThingNearValue = 0x18;
 
@@ -249,6 +267,79 @@ void look_in_direction(ThingRef& t, float yaw) {
     if (!obj || !t.held()) return;
     void* fn = slot(obj, kLookInDirection);
     if (fn) as<void(__thiscall*)(void*, void*, float, int)>(fn)(reinterpret_cast<void*>(obj), t.raw(), yaw, 1);
+}
+
+// ---------- scripted control ----------
+
+namespace {
+/** The thing's CTCScriptedControl, or 0. Reads only; never calls the engine. */
+uintptr_t scripted_control(ThingRef& t) {
+    if (g_disabled.load() || !t.held()) return 0;
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing, 0x100)) return 0;
+    uint8_t dead = 0;
+    std::memcpy(&dead, reinterpret_cast<const void*>(thing + kThingDeadFlags), 1);
+    if (dead & 1) return 0;
+    int32_t flags = static_cast<int32_t>(read_ptr(thing + kThingFlags));
+    if (flags >= 0) return 0;
+    uintptr_t begin = read_ptr(thing + kThingComponents);
+    uintptr_t end = read_ptr(thing + kThingComponents + 4);
+    if (!begin || end < begin || end - begin > 0x100 * 8 || !readable(begin, end - begin)) return 0;
+    for (uintptr_t p = begin; p < end; p += 8) {
+        uint32_t id = read_ptr(p);
+        if (id != kScriptedControlId) continue;
+        uintptr_t comp = read_ptr(p + 4);
+        if (comp && readable(comp, 0x20) && read_ptr(comp) == kScriptedControlVtable) return comp;
+        return 0;
+    }
+    return 0;
+}
+
+bool queue_empty_at(uintptr_t comp) {
+    uintptr_t head = read_ptr(comp + 0x14);  // std::list sentinel
+    return !head || read_ptr(head) == head;
+}
+}  // namespace
+
+bool scripted_queue_empty(ThingRef& t) {
+    uintptr_t comp = scripted_control(t);
+    return !comp || queue_empty_at(comp);
+}
+
+void clear_scripted(ThingRef& t) {
+    uintptr_t comp = scripted_control(t);
+    if (!comp) return;
+    as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kQueueClear))(reinterpret_cast<void*>(comp));
+}
+
+bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_first, uint32_t sequence) {
+    if (!anim || !*anim || !iface()) return false;
+    uintptr_t comp = scripted_control(t);
+    if (!comp) return false;
+    uintptr_t thing = t.thing();
+    if (read_ptr(kPlayAnimVtable) != 0x00905070) {  // first slot: its destructor
+        disable("play-animation action vtable does not match this Fable.exe");
+        return false;
+    }
+
+    // The same order as the slot `.PlayLoopingAnim` lands in (handle vtable +0x50).
+    if (clear_first) {
+        as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kQueueClear))(reinterpret_cast<void*>(comp));
+        if (read_ptr(thing + kThingCreatureFlags) & 8)
+            as<void(__thiscall*)(void*)>(reinterpret_cast<void*>(kStopCreatureAction))(reinterpret_cast<void*>(thing));
+    }
+
+    void* action = as<void*(__cdecl*)(size_t)>(reinterpret_cast<void*>(kOperatorNew))(kPlayAnimSize);
+    if (!action) return false;
+    uint8_t global = 0;
+    if (readable(kScriptGlobalFlag, 1)) std::memcpy(&global, reinterpret_cast<const void*>(kScriptGlobalFlag), 1);
+    Str name(anim);
+    // (name, 0, looping=1, loops, 0, sequence, 0, 1, global, 0, 0): the runner's defaults.
+    as<void*(__thiscall*)(void*, void*, int, int, int, int, int, int, int, int, int, int)>(
+        reinterpret_cast<void*>(kPlayAnimCtor))(action, name.raw(), 0, 1, loops, 0, static_cast<int>(sequence), 0, 1,
+                                               global, 0, 0);
+    as<void(__thiscall*)(void*, void*)>(reinterpret_cast<void*>(kQueueAction))(reinterpret_cast<void*>(comp), action);
+    return true;
 }
 
 bool hero_health(float& current, float& max) {

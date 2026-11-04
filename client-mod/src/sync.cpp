@@ -307,9 +307,9 @@ void tick() {
         uint64_t received = 0, sent = 0;
         net::world_counters(received, sent);
         const game::PuppetStats& st = s.puppets->stats();
-        fo::log("sync: %s (ping %d ms, %u corrections), %u entities, puppets live %u spawned %u reused %u failed %u lost %u, frames in %llu out %llu, stale %u",
+        fo::log("sync: %s (ping %d ms, %u corrections), %u entities, puppets live %u spawned %u reused %u failed %u lost %u anims %u/%u refused, frames in %llu out %llu, stale %u",
                 net::world_connected() ? "online" : "offline", s.reporter.rtt_ms(), s.corrections, static_cast<unsigned>(s.table.size()), st.live,
-                st.spawned, st.reused, st.spawnFailed, st.lost, static_cast<unsigned long long>(received),
+                st.spawned, st.reused, st.spawnFailed, st.lost, st.animsPlayed, st.animsRefused, static_cast<unsigned long long>(received),
                 static_cast<unsigned long long>(sent), s.table.stale_frames());
     }
 }
@@ -325,6 +325,7 @@ void start() {
     s.suppressSpawns = env_flag("FABLE_ONLINE_SUPPRESS_SPAWNS", true);
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
+    s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
 
     fo::log("sync: stand-in heroes use %s, local spawning %s, position reports %s", heroDef.c_str(),
             s.suppressSpawns ? "suppressed in server regions" : "left alone", s.reportPos ? "on" : "off");
