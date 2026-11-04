@@ -11,6 +11,7 @@
 #include <cstring>
 #include "devkit.h"
 #include "herolook.h"
+#include "armourlook.h"
 #include <string>
 #include <thread>
 #include "config.h"
@@ -131,6 +132,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         DisableThreadLibraryCalls(module);
         // Before the game is resumed, so the hooks see graphics.big open (test-only, env-gated).
         fo::herolook::install();
+        fo::armourlook::install();  // test-only plate recolour, env-gated; chains after herolook
         // Byte patches only (no locks, no allocation), so safe here and done before the game
         // thread is resumed and builds its scoreboard client.
         fo::scoreboard_patch();
