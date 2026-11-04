@@ -74,14 +74,27 @@ long g_poll_x = 0, g_poll_y = 0;
 std::atomic<bool> g_hold{false};
 std::atomic<HWND> g_hold_window{nullptr};
 
-// Throws away the mouse's buffered events (button presses, wheel), so Fable never reads them.
-void flush_device(void* self) {
+std::atomic<int> g_held_clicks{0}, g_held_wheel{0};
+
+// Takes the mouse's buffered events (button presses, wheel) away from Fable. While held they
+// are kept for chat: left-button presses and wheel turns.
+void flush_device(void* self, bool keep) {
     const uint32_t dev = *reinterpret_cast<const uint32_t*>(static_cast<const char*>(self) + 0x341C);
     if (!dev || !readable(dev, 4) || !readable(*reinterpret_cast<const uint32_t*>(dev) + 10 * 4, 4)) return;
     using GetDeviceData_t = HRESULT(__stdcall*)(void*, DWORD, void*, DWORD*, DWORD);
     auto get_data = reinterpret_cast<GetDeviceData_t>((*reinterpret_cast<uint32_t* const*>(dev))[10]);
-    DWORD n = INFINITE;
-    get_data(reinterpret_cast<void*>(dev), 16 /* sizeof(DIDEVICEOBJECTDATA) */, nullptr, &n, 0);
+    struct Obj { DWORD ofs, data, stamp, seq, app; };   // DIDEVICEOBJECTDATA (DirectInput 8)
+    Obj buf[64];
+    for (int round = 0; round < 8; ++round) {
+        DWORD n = 64;
+        if (FAILED(get_data(reinterpret_cast<void*>(dev), sizeof(Obj), buf, &n, 0)) || n == 0) break;
+        if (keep)
+            for (DWORD i = 0; i < n; ++i) {
+                if (buf[i].ofs == 12 /* DIMOFS_BUTTON0 */ && (buf[i].data & 0x80)) ++g_held_clicks;
+                else if (buf[i].ofs == 8 /* DIMOFS_Z */) g_held_wheel += static_cast<LONG>(buf[i].data);
+            }
+        if (n < 64) break;
+    }
 }
 
 bool window_centre(HWND w, POINT& c) {
@@ -103,7 +116,7 @@ void __fastcall hk_mouse(void* self, void*) {
         // the player has it, so the chat pointer follows the mouse.
         POINT at;
         GetCursorPos(&at);
-        flush_device(self);
+        flush_device(self, true);
         SetCursorPos(centre.x, centre.y);
         o_mouse(self);
         SetCursorPos(at.x, at.y);
@@ -113,7 +126,7 @@ void __fastcall hk_mouse(void* self, void*) {
     if (was_held) {
         // Released: start from the centre so the camera doesn't jump by the pointer's offset.
         was_held = false;
-        flush_device(self);
+        flush_device(self, false);
         if (window_centre(g_hold_window.load(), centre)) SetCursorPos(centre.x, centre.y);
     }
     menu_cursor::before_read();
@@ -316,6 +329,9 @@ void hold(bool on, HWND window) {
 }
 
 bool held() { return g_hold.load(); }
+
+int take_held_clicks() { return g_held_clicks.exchange(0); }
+int take_held_wheel() { return g_held_wheel.exchange(0); }
 
 void poll_mouse() {
     void* self = g_mouse_dx;

@@ -155,14 +155,19 @@ bool to_backbuffer(HWND w, LONG cx, LONG cy, float& x, float& y) {
     return true;
 }
 
-// A left click in the open chat window. Caller holds g_mu.
-void chat_click(float x, float y) {
-    if (!g_layout.valid) return;
+// A left click in the open chat window. Caller holds g_mu. `how` says which input saw it.
+void chat_click(float x, float y, const char* how) {
+    if (!g_layout.valid) { fo::log("chat: click (%s) at %.0f,%.0f before the window was laid out", how, x, y); return; }
     auto inside = [&](float rx, float ry, float rw, float rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; };
     for (const ChatHit& h : g_layout.hits) {
         if (!inside(h.x, h.y, h.w, h.h)) continue;
-        if (h.kind == ChatHit::Tab) g_chat.set_tab(static_cast<ui::ChatTab>(h.tab));
-        else g_chat.whisper_to(h.name);
+        if (h.kind == ChatHit::Tab) {
+            g_chat.set_tab(static_cast<ui::ChatTab>(h.tab));
+            fo::log("chat: click (%s) at %.0f,%.0f: channel %s", how, x, y, ui::tab_name(static_cast<ui::ChatTab>(h.tab)));
+        } else {
+            g_chat.whisper_to(h.name);
+            fo::log("chat: click (%s) at %.0f,%.0f: whisper %s", how, x, y, h.name.c_str());
+        }
         return;
     }
     if (inside(g_layout.edit_x, g_layout.edit_y, g_layout.edit_w, g_layout.edit_h) && !g_layout.caret_x.empty()) {
@@ -170,7 +175,11 @@ void chat_click(float x, float y) {
         for (size_t i = 1; i < g_layout.caret_x.size(); ++i)
             if (std::fabs(g_layout.caret_x[i] - x) < std::fabs(g_layout.caret_x[best] - x)) best = i;
         g_chat.set_cursor(g_layout.caret_from + best);
+        fo::log("chat: click (%s) at %.0f,%.0f: edit box, cursor %u", how, x, y, static_cast<unsigned>(g_layout.caret_from + best));
+        return;
     }
+    fo::log("chat: click (%s) at %.0f,%.0f: nothing there (window %.0f,%.0f %.0fx%.0f, %u rows)", how, x, y, g_layout.win_x,
+            g_layout.win_y, g_layout.win_w, g_layout.win_h, static_cast<unsigned>(g_layout.hits.size()));
 }
 
 // ---- drawing ---------------------------------------------------------------
@@ -452,6 +461,35 @@ void draw_chat(const Config& cfg, double now) {
 
 // The pointer for the open chat window, where the Windows cursor is (Fable no longer pulls
 // it back to the centre while chat has the mouse). Same arrow as the Mod settings screen.
+// Clicks and the wheel for the open chat window, read every frame. Fable's window does not
+// reliably get mouse messages in game (its mouse device may hold the mouse), so the button
+// is read from Windows' key state and from the presses taken off Fable's mouse device
+// (display/mouse_look), whichever sees it.
+bool g_lbutton_was_down = false, g_chat_was_open = false;
+DWORD g_last_wm_wheel = 0;
+unsigned g_hidden_at_open = 0;
+void poll_chat_mouse() {
+    const bool open = g_chat.is_open();
+    if (open != g_chat_was_open) {
+        g_chat_was_open = open;
+        if (open) {
+            g_hidden_at_open = display::hud::hidden_count();
+            fo::log("chat: opened; pointer %.0f,%.0f, Fable's mouse %s", g_ptr_x, g_ptr_y,
+                    display::mouse_look::held() ? "held for chat" : "NOT held");
+        } else {
+            fo::log("chat: closed; %u HUD draws left out while it was open", display::hud::hidden_count() - g_hidden_at_open);
+        }
+    }
+    const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+    const bool pressed = down && !g_lbutton_was_down;
+    g_lbutton_was_down = down;
+    const int di_clicks = display::mouse_look::take_held_clicks();
+    const int di_wheel = display::mouse_look::take_held_wheel();
+    if (!open || !g_hwnd || GetForegroundWindow() != g_hwnd) return;
+    if ((pressed || di_clicks > 0) && g_ptr_x >= 0) chat_click(g_ptr_x, g_ptr_y, pressed ? "button" : "mouse device");
+    if (di_wheel && GetTickCount() - g_last_wm_wheel > 2000) g_chat.scroll_by(di_wheel > 0 ? 3 : -3);
+}
+
 void draw_chat_pointer() {
     g_ptr_x = g_ptr_y = -1;
     if (!g_chat.is_open() || !g_hwnd) return;
@@ -654,7 +692,11 @@ void draw(IDirect3DDevice9* dev) {
     flush_outbox();
     draw_trade(now);
     modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
-    if (cfg.chat_enabled && !modsettings::is_open()) draw_chat_pointer();
+    if (cfg.chat_enabled && !modsettings::is_open()) {
+        draw_chat_pointer();   // on top of everything
+        poll_chat_mouse();
+        flush_outbox();
+    }
     g_r.end();
 }
 
@@ -860,20 +902,14 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             // Our own pointer is drawn while chat is open; keep the Windows arrow out of the way.
             if (g_chat_open && LOWORD(l) == HTCLIENT) { SetCursor(nullptr); return TRUE; }
             break;
-        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: {
-            if (!g_chat_open) break;
-            std::lock_guard<std::mutex> lock(g_mu);
-            float x, y;
-            if (to_backbuffer(h, static_cast<short>(LOWORD(l)), static_cast<short>(HIWORD(l)), x, y)) chat_click(x, y);
-            flush_outbox();
-            return 0;
-        }
         case WM_MOUSEWHEEL: {
             if (!g_chat_open) break;
             std::lock_guard<std::mutex> lock(g_mu);
+            g_last_wm_wheel = GetTickCount();
             g_chat.scroll_by(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 3 : -3);
             return 0;
         }
+        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK:   // clicks are read each frame (poll_chat_mouse)
         case WM_MOUSEMOVE: case WM_LBUTTONUP: case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
         case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_XBUTTONDOWN: case WM_XBUTTONUP:
             if (g_chat_open) return 0;   // chat has the mouse; Fable doesn't see it

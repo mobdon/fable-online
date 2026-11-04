@@ -28,4 +28,8 @@ unsigned take_mouse_reads();
 // the player moves it instead of being pulled back to the window centre. Any thread.
 void hold(bool on, HWND window);
 bool held();
+// While held: left-button presses and wheel movement (120 per notch) Fable's mouse device
+// had buffered, taken away from Fable. Since the last call.
+int take_held_clicks();
+int take_held_wheel();
 }  // namespace fo::display::mouse_look
