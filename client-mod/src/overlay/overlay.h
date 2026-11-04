@@ -41,6 +41,11 @@ void set_party_marks(std::vector<ui::PartyMark> marks);
 void set_tag_positions(std::map<uint32_t, std::array<float, 3>> live);
 /** The world connection went down: the party list is no longer current. */
 void clear_party();
+/**
+ * Darkens the whole screen (0 clear .. 1 black) with an optional line in the middle, over
+ * the world and name tags but under the chat. Used while the hero is down. Any thread.
+ */
+void set_fade(float alpha, const std::string& caption);
 /** Mouse buttons as Fable last read them through DirectInput (bit 0 = left). */
 unsigned mouse_buttons();
 }  // namespace fo::overlay

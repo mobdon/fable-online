@@ -36,6 +36,8 @@ struct RegionChange {
     bool hasYaw = false;
     /** The server holds the hero until it gets region_ready. */
     bool loading = false;
+    /** The hero died and is brought back at `thing` (a Cullis Gate): the mod starts the move. */
+    bool respawn = false;
 };
 bool parse_region_change(const std::string& json, RegionChange& out);
 

@@ -23,6 +23,11 @@ export interface ArrivalInfo {
   yaw?: number;
   /** Thing id of the exit or door used. */
   thing?: string;
+  /**
+   * The hero died and is being brought back at `thing` (a Cullis Gate). Nothing on the
+   * client asked for it, so the mod starts the local move to that gate itself.
+   */
+  respawn?: boolean;
 }
 
 /** Other world systems that follow heroes and channels (doors, loot, exits). */
@@ -260,6 +265,11 @@ export class Director {
     return target;
   }
 
+  /** Where a region's own frame starts on the world map (world = origin + local). */
+  originOf(region: string): { x: number; y: number } {
+    return this.regions.origin(region);
+  }
+
   /** The client finished loading the region it was sent to. */
   regionReady(heroId: number, region: string): void {
     const ch = this.where.get(heroId);
@@ -353,6 +363,7 @@ export class Director {
       if (change.entrance) msg.entrance = change.entrance;
       if (change.thing) msg.thing = change.thing;
       if (change.yaw !== undefined) msg.yaw = change.yaw;
+      if (change.respawn) msg.respawn = true;
     }
     link.send(JSON.stringify(msg));
     this.hooks.onEnter?.(ch, link);

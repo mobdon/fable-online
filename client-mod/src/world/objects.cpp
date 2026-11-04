@@ -211,6 +211,7 @@ bool parse_region_change(const std::string& json, RegionChange& out) {
     rc.entrance = v.str("entrance");
     if (!rc.entrance.empty() && !valid_id(rc.entrance)) rc.entrance.clear();
     rc.thing = v.str("thing");
+    rc.respawn = v.flag("respawn");
     if (!rc.thing.empty() && !valid_id(rc.thing)) rc.thing.clear();
     double yaw;
     if (v.num("yaw", yaw)) {

@@ -136,6 +136,7 @@ export function createApp(
   const staffHero = (heroId: number) =>
     !!db.get("SELECT 1 FROM heroes h JOIN accounts a ON a.id = h.account_id WHERE h.id = ? AND a.role IN ('gm','admin')", heroId);
   const spawns = loadSpawns(cfg.spawnsPath);
+  let travelRef: Travel | undefined;
   const spawnDefs = !opts.sim && cfg.combat ? serverSpawnDefs(spawns, data) : [];
   const baseSim =
     opts.sim ??
@@ -159,6 +160,8 @@ export function createApp(
           },
           ai: opts.ai ?? monsterAi(cfg.navDir ? new NavStore(cfg.navDir) : undefined),
           law: lawServices,
+          // Bound late: travel needs the director, which needs this sim.
+          respawn: (heroId) => travelRef?.respawn(heroId) != null,
         })
       : cfg.navDir
         ? navSimFactory(new NavStore(cfg.navDir), lawServices)
@@ -175,6 +178,7 @@ export function createApp(
   const things = opts.things ?? WorldThings.load(cfg.thingsPath);
   const objects = new WorldObjects(things, director, economy, db, events);
   const travel = new Travel(things, director, heroes, db, events, { ...TRAVEL_RULES, barred: [...TRAVEL_RULES.barred], allOpen: cfg.gatesOpen });
+  travelRef = travel;
   law.attach(lawHost(director, regions));
   trades.attach({
     send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
