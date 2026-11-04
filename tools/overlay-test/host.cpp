@@ -4,6 +4,8 @@
 // tools/re-notes/02-hero-live-state.md, and renders a floor with a perspective camera.
 //   build: see CMakeLists.txt (FO_BUILD_OVERLAY_TEST=ON)
 //   run:   overlay_test_host.exe [path\to\fable_online.dll] [seconds] [screenshot.bmp]
+// FO_TEST_CHAT=1 opens Realm chat after 2 s, moves the cursor onto the Realm channel and
+// clicks it, so the screenshot shows the chat window with its pointer.
 #include <windows.h>
 #include <d3d9.h>
 #define DIRECTINPUT_VERSION 0x0800
@@ -128,6 +130,8 @@ int main(int argc, char** argv) {
     struct V { float x, y, z; DWORD c; };
     DWORD start = GetTickCount();
     bool shot_taken = false;
+    const bool chat_test = std::getenv("FO_TEST_CHAT") && std::getenv("FO_TEST_CHAT")[0] == '1';
+    int chat_step = 0;
     MSG msg;
     for (;;) {
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -139,6 +143,30 @@ int main(int argc, char** argv) {
         if (t > seconds) break;
         phys.x = std::cos(t * 0.3f) * 2; phys.y = std::sin(t * 0.3f) * 2; phys.z = 0;  // hero walks a circle
         if (kb) { BYTE keys[256]; kb->GetDeviceState(sizeof(keys), keys); }
+        if (chat_test) {
+            // The Realm channel: the third row of the chat window's left column, which sits
+            // at about (60, 646) of a 1280x800 back buffer. The window's client area may be
+            // smaller than the back buffer, so aim by fraction.
+            RECT rc;
+            GetClientRect(w, &rc);
+            POINT realm = {rc.right * 60 / 1280, rc.bottom * 646 / 800};
+            if (chat_step == 0 && t > 2) { PostMessageW(w, WM_KEYDOWN, VK_RETURN, 0); ++chat_step; }
+            if (chat_step == 1 && t > 3) {
+                POINT s = realm;
+                ClientToScreen(w, &s);
+                SetCursorPos(s.x, s.y);
+                ++chat_step;
+            }
+            if (chat_step == 2 && t > 3.5f) {
+                POINT c;
+                GetCursorPos(&c);
+                ScreenToClient(w, &c);
+                std::printf("cursor at %ld,%ld; clicking\n", c.x, c.y);
+                PostMessageW(w, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(c.x, c.y));
+                PostMessageW(w, WM_LBUTTONUP, 0, MAKELPARAM(c.x, c.y));
+                ++chat_step;
+            }
+        }
 
         dev->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(40, 60, 50), 1.0f, 0);
         dev->BeginScene();
