@@ -41,8 +41,8 @@ export const BALANCE = {
    */
   heroMeleeCone: (Math.PI * 5) / 9,
   heroReachSlack: 0.7,
-  /** A hero swing pressed this close to the end of the last one is held and fired when it ends. */
-  swingBufferMs: 400,
+  /** A hero swing pressed this close to the end of the last one (or of a flinch) is held and fired when it ends. */
+  swingBufferMs: 600,
 
   cooldownMs: { light: 550, heavy: 850, unarmed: 450, ranged: 900, flourish: 1200 } as Record<string, number>,
   /** Hold attack this long and release for a flourish. */

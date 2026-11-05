@@ -112,6 +112,8 @@ interface HeroSlot {
   actAnim: number;
   /** A swing pressed just before the last one finished, fired when it does. */
   queued: AttackKind | null;
+  /** The held press is dropped if it has not fired within this many ms (a longer stun came). */
+  queuedMs: number;
   /** ms since the hero last dealt or took a hit (sim time), for health regeneration. */
   calmMs: number;
 }
@@ -400,7 +402,7 @@ export class CombatSim implements RegionSim {
       hero.health = Math.max(1, Math.round(hero.maxHealth * c.health));
       hero.will = Math.round(hero.maxWill * c.will);
     }
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null, calmMs: 0 });
+    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null, queuedMs: 0, calmMs: 0 });
     this.combat.add(hero);
   }
 
@@ -488,9 +490,13 @@ export class CombatSim implements RegionSim {
       this.charging.delete(heroId);
       const kind = h.weapon?.class === 'ranged' ? 'ranged' : h.chargeMs >= BALANCE.flourishChargeMs ? 'flourish' : 'light';
       const r = this.combat.attack(heroId, null, kind);
-      // Fable queues a press made late in a swing; dropping it made most presses do nothing.
-      if (!r.ok && r.reason === 'cooldown' && h.attackCooldownMs <= BALANCE.swingBufferMs) slot.queued = kind === 'flourish' ? 'light' : kind;
-      else this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+      if (r.ok) this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+      // Fable queues a press made late in a swing or a flinch; dropping it made most presses
+      // do nothing. One press is held at most, and it is shown only when it fires.
+      else if ((r.reason === 'cooldown' || r.reason === 'stunned') && Math.max(h.attackCooldownMs, h.stunnedMs) <= BALANCE.swingBufferMs) {
+        slot.queued = kind === 'flourish' ? 'light' : kind;
+        slot.queuedMs = BALANCE.swingBufferMs;
+      }
     }
     if (b & BUTTONS.CAST && !(prev & BUTTONS.CAST)) {
       const spell = SPELL_SLOTS[((b >> SPELL_SHIFT) & 0xf) - 1];
@@ -527,7 +533,7 @@ export class CombatSim implements RegionSim {
     for (const [id, slot] of this.heroes) {
       const h = slot.hero;
       if (!slot.queued) continue;
-      if (!h.alive || h.blocking) slot.queued = null;
+      if (!h.alive || h.blocking || (slot.queuedMs -= dtMs) < 0) slot.queued = null;
       else if (h.attackCooldownMs <= 0 && h.stunnedMs <= 0) {
         this.combat.attack(id, null, slot.queued);
         this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
