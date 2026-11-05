@@ -157,6 +157,12 @@ export interface ServerConfig {
   townDataPath: string;
   /** Run villagers and shopkeepers in regions that have villages. */
   town: boolean;
+  /**
+   * Send the server's villagers and shopkeepers to clients (FO_TOWN_FOLK=1). Off by default:
+   * the mod doesn't stop Fable populating its own villages yet, so they would show twice.
+   * Guards are always sent; the server's town folk still witness crimes either way.
+   */
+  townFolk: boolean;
   /** Real minutes in one game day. */
   dayMinutes: number;
   /** Real minutes each weather state lasts. */
@@ -246,6 +252,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     monsterDensity: num('FO_MONSTER_DENSITY', 1.5),
     townDataPath: str('FO_TOWN_DATA', 'data/town-data.json'),
     town: str('FO_TOWN', '1') !== '0',
+    townFolk: str('FO_TOWN_FOLK', '0') === '1',
     dayMinutes: num('FO_DAY_MINUTES', 48),
     weatherMinutes: num('FO_WEATHER_MINUTES', 12),
     weatherSeed: num('FO_WEATHER_SEED', 1),

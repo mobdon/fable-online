@@ -110,7 +110,7 @@ test('game socket: sky on entry, villagers in ticks, and a shop visit through th
   const sink = new MemorySink();
   const clock = new WorldClock({ dayMs: 60 * 60_000, epoch: Date.now(), startFraction: 0.5 });
   const app = createApp(
-    { dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', gameDataPath: '', spawnsPath: '', questsPath: '', contentDir: '', townDataPath: '', tickRate: 50 },
+    { dbPath: ':memory:', eventsPath: '', regionsPath: '/nonexistent', gameDataPath: '', spawnsPath: '', questsPath: '', contentDir: '', townDataPath: '', tickRate: 50, townFolk: true },
     { events: sink, town, clock },
   );
   const server = await listen(app, 0);
