@@ -16,12 +16,28 @@ test('first report imports renown once, capped', () => {
     const r = app.renown.report(hero.id, 4_000);
     assert.deepEqual(r, { ok: true, renown: 1_000, gained: 1_000, kind: 'import', capped: true });
     assert.equal(app.heroes.get(hero.id)!.renown, 1_000);
-    // The import is spent: the same number again only gets the daily allowance.
+    // The import is spent, and what it cut stays cut: the same number again adds nothing.
     const r2 = app.renown.report(hero.id, 4_000);
-    assert.deepEqual(r2, { ok: true, renown: 1_300, gained: 300, kind: 'daily', capped: true });
-    assert.equal(app.renown.report(hero.id, 4_000).ok && app.heroes.get(hero.id)!.renown, 1_300);
+    assert.deepEqual(r2, { ok: true, renown: 1_000, gained: 0, kind: 'daily', capped: false });
+    assert.equal(app.renown.report(hero.id, 4_000).ok && app.heroes.get(hero.id)!.renown, 1_000);
     const ev = app.sink.events.filter((e) => e.type === 'renown_report');
-    assert.equal(ev.length, 3);
+    assert.equal(ev.length, 1);
+  } finally {
+    app.close();
+  }
+});
+
+test('renown cut at the import does not leak back in through the daily cap', () => {
+  const app = testApp({ renownImportMax: 1_000, renownDailyMax: 300 });
+  try {
+    const { hero } = makeHero(app);
+    const t0 = Date.UTC(2026, 10, 4, 12);
+    app.renown.report(hero.id, 4_000, t0);
+    for (let d = 1; d <= 12; d++) app.renown.report(hero.id, 4_000, t0 + d * DAY);
+    assert.equal(app.heroes.get(hero.id)!.renown, 1_000);
+    // Renown earned in Fable after the import still counts, within the daily cap.
+    const r = app.renown.report(hero.id, 4_150, t0 + 13 * DAY);
+    assert.deepEqual(r, { ok: true, renown: 1_150, gained: 150, kind: 'daily', capped: false });
   } finally {
     app.close();
   }

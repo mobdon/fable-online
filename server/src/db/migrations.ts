@@ -285,4 +285,9 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX hero_xp_log_hero ON hero_xp_log(hero_id, at);
   `,
+  /* 8: renown cut by the import cap */ `
+  -- Renown the one-off import cut off the reported total. Later reports subtract it, so the
+  -- cut amount can't come back in through the daily allowance.
+  ALTER TABLE heroes ADD COLUMN renown_import_cut INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
