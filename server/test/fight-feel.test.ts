@@ -39,6 +39,20 @@ test('a test spawn comes straight for the hero who made it', () => {
   assert.ok(Math.hypot(b.pos.x, b.pos.y) < 3);
 });
 
+test('a test bandit chases the hero, lands hits within seconds, each taking the share of health it takes in Fable', () => {
+  const sim = arena();
+  sim.devSpawn(1, BANDIT, 12);
+  const h = hero(sim);
+  let t = 0;
+  for (; t < 10_000 && h.health === h.maxHealth; t += TICK) sim.step(TICK);
+  assert.ok(t < 8000, `first hit after ${t} ms`);
+  // Fable units: weapon damage times the creature's power, against a 35-health starting hero.
+  const def = FALLBACK_DATA.creatures[BANDIT]!;
+  const fableShare = (FALLBACK_DATA.items[def.weapon!]!.weapon!.damage * def.attackScale) / 35;
+  const share = (h.maxHealth - h.health) / h.maxHealth;
+  assert.ok(Math.abs(share - fableShare) <= 0.5 / h.maxHealth + 1e-9, `one hit took ${share}, Fable's is ${fableShare}`);
+});
+
 test('a bandit winds up before each hit, swings in short flurries and pauses between them', () => {
   const sim = arena();
   sim.devSpawn(1, BANDIT, 3);
