@@ -1,5 +1,7 @@
 #include "puppet.h"
 
+#include <cmath>
+
 #include <windows.h>
 
 #include <cstdio>
@@ -33,6 +35,15 @@ constexpr float kParkAway = 3000.0f;
 constexpr uint32_t kParkedHoldEveryMs = 1000;
 /** After the engine freed a puppet (an area load), wait this long before making any. */
 constexpr uint32_t kHoldAfterLossMs = 5000;
+/**
+ * A dead stand-in that has not taken its death animation by then is hidden, so a kill
+ * always shows: Fable can refuse ST_DIE for a creature in a stagger or its own attack.
+ */
+constexpr uint32_t kDeathRefusedHideMs = 1200;
+/** A corpse is hidden this long after its death, whether or not the fall played. */
+constexpr uint32_t kCorpseShownMs = 8000;
+/** A corpse moved further than this from where it fell (its own AI walking it) is put back. */
+constexpr float kCorpseDriftM = 0.5f;
 /** Fewest milliseconds between two new puppets, so a crowd does not arrive in one frame. */
 constexpr uint32_t kSpawnEveryMs = 250;
 /**
@@ -117,6 +128,7 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             p.gait = p.wanted = Gait::None;
             p.lastCommandsMs = 0;
             p.createdMs = nowMs;
+            p.deadSinceMs = 0;
             live_.emplace(s.id, std::move(p));
             ++stats_.reused;
             return true;
@@ -240,7 +252,26 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     // A dead creature is left where it fell, playing its death and then lying still; the
     // server will stop sending it when the corpse is gone.
     if (pose.anim == world::Anim::Death) {
+        if (!p.deadSinceMs) {
+            p.deadSinceMs = nowMs ? nowMs : 1;
+            p.diedAt = Pos{pose.x, pose.y, pose.z};
+            fo::log("puppet: %s died on the server", p.scriptName.c_str());
+        }
+        // Its own AI may still try to walk it off or swing: keep it where it fell.
+        Pos at;
+        if (read_pos(thing, at) && std::hypot(at.x - p.diedAt.x, at.y - p.diedAt.y) > kCorpseDriftM)
+            write_pos(thing, p.diedAt, false, 0);
+        if (p.hidden) return;
         if (animate_) animate(p, pose, nowMs);
+        uint32_t dead = nowMs - p.deadSinceMs;
+        bool fell = p.gait == Gait::Death;
+        if ((!fell && dead >= kDeathRefusedHideMs) || dead >= kCorpseShownMs) {
+            script::clear_commands(p.ref);
+            script::set_drawable(p.ref, false);
+            p.hidden = true;
+            fo::log("puppet: %s hidden %u ms after its death (%s)", p.scriptName.c_str(), dead,
+                    fell ? "corpse removed" : "the death animation never played");
+        }
         return;
     }
 

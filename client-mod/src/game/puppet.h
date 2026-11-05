@@ -87,6 +87,8 @@ class PuppetPool {
         uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
         Pos parkedAt;             // where a parked puppet is held, far from everyone
         bool parkedAway = false;
+        uint32_t deadSinceMs = 0;  // the server said it died at this time (0: alive)
+        Pos diedAt;                // where it fell; it is kept there
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);
