@@ -221,8 +221,11 @@ void session(SOCKET s) {
     fo::log("world: connected to %s:%u", g_cfg.host.c_str(), g_cfg.port);
 
     // One thread writes, this one reads: the writer only exists for as long as the socket.
+    // The reader also answers pings, so every frame sent on this socket takes sendMu: two
+    // threads in send() at once could interleave their bytes and corrupt the stream.
     std::atomic<bool> writing{true};
-    std::thread writer([s, &writing]() {
+    std::mutex sendMu;
+    std::thread writer([s, &writing, &sendMu]() {
         while (writing.load() && g_running.load()) {
             std::string frame;
             {
@@ -236,7 +239,12 @@ void session(SOCKET s) {
                 Sleep(5);
                 continue;
             }
-            if (!send_frame(s, 0x1, frame)) break;
+            bool sent;
+            {
+                std::lock_guard<std::mutex> lock(sendMu);
+                sent = send_frame(s, 0x1, frame);
+            }
+            if (!sent) break;
             ++g_sent;
         }
     });
@@ -256,7 +264,11 @@ void session(SOCKET s) {
             }
             break;
         }
-        if (opcode == 0x9) { send_frame(s, 0xA, payload); continue; }  // ping -> pong
+        if (opcode == 0x9) {  // ping -> pong
+            std::lock_guard<std::mutex> lock(sendMu);
+            send_frame(s, 0xA, payload);
+            continue;
+        }
         if (opcode == 0xA) continue;                            // pong
         if (opcode != 0x1 && opcode != 0x0) continue;           // binary and fragments unused
         ++g_received;
