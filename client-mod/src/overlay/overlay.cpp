@@ -858,6 +858,9 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             }
             if (!g_chat.is_open()) {
                 if (static_cast<int>(w) == cfg.open_key && !(GetKeyState(VK_MENU) & 0x8000)) {
+                    // Only over the world: on a loading screen or in Fable's pause screen or
+                    // in-game menu the key is Fable's (Enter picks a menu row there).
+                    if (!sync::world_shown() || modsettings::fable_menu_open()) break;
                     g_chat.open();
                     flush_outbox();
                     return 0;

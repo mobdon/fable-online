@@ -492,6 +492,8 @@ bool fable_menu_up() {
     return game::pause_menu::open() || game::player_modes::running(kInGameMenuMode);
 }
 
+bool fable_menu_open() { return game::pause_menu::open() || game::player_modes::running(kInGameMenuMode); }
+
 bool button_wanted() { return !g_open && g_window && fable_menu_up(); }
 
 void draw_pause_button(Renderer& r, bool) {
