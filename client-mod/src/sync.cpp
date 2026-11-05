@@ -63,6 +63,14 @@ bool env_flag(const char* name, bool fallback) {
     return v != "0" && v != "false" && v != "off";
 }
 
+/** One kind of precipitation the mod drives through Fable's override. */
+struct PrecipState {
+    bool set = false;       // the mod turned the override on
+    float logged = -2;      // the amount last written to the log
+    uint32_t rewrites = 0;  // times the override was found changed and written again
+    uint32_t lastLogMs = 0;
+};
+
 struct State {
     world::EntityTable table;
     /** Doors, chests, items on the ground and the region-change handshake. */
@@ -137,8 +145,8 @@ struct State {
     bool clockHeld = false;
     /** Rain and snow follow the realm's weather (FABLE_ONLINE_SYNC_WEATHER=0 leaves them alone). */
     bool syncWeather = true;
-    /** The mod turned Fable's rain or snow override on, so it has to turn it off again. */
-    bool rainSet = false, snowSet = false;
+    /** Rain and snow the mod drives through Fable's override (it turns them off again offline). */
+    PrecipState rain, snow;
     /** Hero experience kept in step with the server (only when its welcome offers it). */
     world::XpSync xp;
     bool serverXp = false;
@@ -335,20 +343,34 @@ void sync_clock(uint32_t nowMs) {
     }
 }
 
-/** One kind of precipitation: put the override where the realm wants it, or hand it back. */
-void apply_precip(const char* what, float want, bool& set, bool (*write)(float), float current) {
+/** Put the override where the realm wants it, or hand it back; logs only changes. */
+void apply_precip(const char* what, float want, PrecipState& ps, bool (*write)(float), bool on, float current, float most,
+                  uint32_t nowMs) {
     if (want < 0) {
         // Only an override the mod made is turned off; a quest's own rain is left alone.
-        if (set && write(-1.0f)) {
-            set = false;
+        if (ps.set && write(-1.0f)) {
+            ps.set = false;
+            ps.logged = -2;
             fo::log("sync: %s back to the area's own", what);
         }
         return;
     }
-    if (set && std::fabs(current - want) < 0.005f) return;
-    if (write(want)) {
-        if (!set || std::fabs(current - want) >= 0.05f) fo::log("sync: %s at %.0f%%", what, want * 100.0f);
-        set = true;
+    // The renderer caps an override at its maximum, so compare with what it will hold.
+    float target = want > most ? most : want;
+    if (ps.set && on && std::fabs(current - target) < 0.005f) return;
+    if (ps.set) {
+        // Written before, and something changed it since (an area load, or Fable itself).
+        if (++ps.rewrites == 1 || nowMs - ps.lastLogMs > 30000) {
+            ps.lastLogMs = nowMs;
+            fo::log("sync: %s override found %s at %.2f (wanted %.2f), set again; %u times so far", what, on ? "on" : "off",
+                    current, target, ps.rewrites);
+        }
+    }
+    if (!write(want)) return;
+    ps.set = true;
+    if (std::fabs(ps.logged - want) >= 0.005f) {
+        ps.logged = want;
+        fo::log("sync: %s at %.0f%%", what, want * 100.0f);
     }
 }
 
@@ -362,8 +384,9 @@ void sync_weather() {
     game::weather::State w;
     if (!game::weather::read(w)) return;
     world::Precip p = world::precip_for(s.sky);
-    apply_precip("rain", p.rain, s.rainSet, game::weather::set_rain, w.rainOverride);
-    apply_precip("snow", p.snow, s.snowSet, game::weather::set_snow, w.snowOverride);
+    uint32_t now = GetTickCount();
+    apply_precip("rain", p.rain, s.rain, game::weather::set_rain, w.rainOn, w.rainOverride, w.most, now);
+    apply_precip("snow", p.snow, s.snow, game::weather::set_snow, w.snowOn, w.snowOverride, w.most, now);
 }
 
 /** Offline: Fable's clock runs at its own speed again (the time of day stays where it is). */
@@ -371,8 +394,8 @@ void restore_clock() {
     if (!g_state) return;
     State& s = *g_state;
     s.sky = world::Sky{};
-    if (s.rainSet && game::weather::set_rain(-1.0f)) s.rainSet = false;
-    if (s.snowSet && game::weather::set_snow(-1.0f)) s.snowSet = false;
+    if (s.rain.set && game::weather::set_rain(-1.0f)) s.rain = PrecipState{};
+    if (s.snow.set && game::weather::set_snow(-1.0f)) s.snow = PrecipState{};
     if (s.fableSpeed < 0) return;
     game::world_time::Clock c;
     if (game::world_time::read(c)) game::world_time::write_speed(c, s.fableSpeed);
@@ -1203,7 +1226,9 @@ void dev_key(int vk) {
         game::weather::State w;
         if (game::weather::read(w))
             fo::log("sync: Fable draws rain %.2f snow %.2f; overrides rain %.2f snow %.2f (-1 = the area's own)%s%s", w.rain,
-                    w.snow, w.rainOverride, w.snowOverride, s.rainSet ? ", rain set by the mod" : "", s.snowSet ? ", snow set by the mod" : "");
+                    w.snow, w.rainOverride, w.snowOverride, s.rain.set ? ", rain set by the mod" : "", s.snow.set ? ", snow set by the mod" : "");
+        if (s.rain.rewrites || s.snow.rewrites)
+            fo::log("sync: overrides set again after being changed: rain %u, snow %u", s.rain.rewrites, s.snow.rewrites);
         else
             fo::log("sync: Fable's weather renderer not found");
         return;

@@ -11,6 +11,9 @@ struct State {
     float rain = 0, snow = 0;
     /** The override, when one is on (-1 = Fable's own weather for the area). */
     float rainOverride = -1, snowOverride = -1;
+    /** Whether each override flag is on, and the most the renderer draws (it caps overrides at this). */
+    bool rainOn = false, snowOn = false;
+    float most = 1.0f;
 };
 
 bool read(State& out);
