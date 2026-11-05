@@ -154,8 +154,9 @@ struct State {
     bool xpOn = true;
     uint32_t lastXpMs = 0;
     uint32_t xpWrites = 0;
-    /** The hero object whose experience components were last missing, so that is logged once. */
-    uintptr_t xpMissingLogged = 0;
+    /** Why the hero's experience last couldn't be read (logged when it changes), and whether it has been read. */
+    std::string xpWhy;
+    uintptr_t xpReadHero = 0;
 };
 
 State* g_state = nullptr;
@@ -431,11 +432,18 @@ void sync_xp(uint32_t nowMs) {
     if (!hero) return;
     world::XpSnapshot local;
     if (!game::read_xp(hero, local)) {
-        if (s.xpMissingLogged != hero) {
-            s.xpMissingLogged = hero;
-            fo::log("sync: xp: can't read the hero's experience yet (%s not found)", game::xp_missing(hero));
+        std::string why = game::xp_why();
+        if (why != s.xpWhy) {
+            s.xpWhy = why;
+            fo::log("sync: xp: can't read the hero's experience yet (%s)", why.c_str());
         }
         return;
+    }
+    if (s.xpReadHero != hero) {
+        s.xpReadHero = hero;
+        s.xpWhy.clear();
+        fo::log("sync: xp: read the hero's experience: total %d, general %d, strength %d, skill %d, will %d", local.total,
+                local.pools[0], local.pools[1], local.pools[2], local.pools[3]);
     }
     std::string frame;
     if (s.xp.step(local, nowMs, frame)) {
