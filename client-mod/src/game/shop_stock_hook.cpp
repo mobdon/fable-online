@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cwctype>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -30,6 +31,8 @@ std::mutex g_mu;
 bool g_tried = false;
 std::wstring g_filtered;  // path of the filtered copy; empty = serve the original
 bool g_load_patched = false;
+std::set<int> g_banned;   // game.bin entry indexes of banned item defs
+std::mutex g_banned_mu;
 std::atomic<bool> g_menu_row{false};  // the served game.bin lists the Mod Settings row
 
 bool is_game_bin(std::wstring p) {
@@ -84,6 +87,15 @@ std::wstring build(const std::wstring& original) {
     }
     char stamp[96];
     std::snprintf(stamp, sizeof(stamp), "v%d %zu %08lX%08lX\n", kRulesVersion, game.size(), mt.dwHighDateTime, mt.dwLowDateTime);
+
+    if (config().shop_filter) {
+        std::vector<uint8_t> scratch;
+        Report rb = filter(game, names, scratch);
+        std::lock_guard<std::mutex> lock(g_banned_mu);
+        g_banned.clear();
+        for (uint32_t i : rb.banned) g_banned.insert(static_cast<int>(i));
+        fo::log("shops: %zu banned item def indexes known", g_banned.size());
+    }
 
     std::vector<uint8_t> old_stamp, cached;
     if (read_all(stamp_path, old_stamp) && std::string(old_stamp.begin(), old_stamp.end()) == stamp &&
@@ -179,34 +191,60 @@ HANDLE WINAPI hook_CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURI
 // a row the filter emptied (Quantity and MaxStock both 0) counts as "not stocked", which is
 // the same branch Fable takes for an item the shop no longer lists.
 constexpr uintptr_t kFindStockRow = 0x772250;
-constexpr uintptr_t kLoadCheckCall = 0x776024;
 using FindStockRow = const uint32_t*(__thiscall*)(void*, int);
-std::atomic<unsigned> g_dropped{0};
 
-const uint32_t* __fastcall find_stock_row_on_load(void* shop, void*, int def) {
+// online-19 showed the check above never firing while the shop still sold phials, so every
+// call site of 0x772250 that tests the result for null goes through here: 0x776024 (save
+// load), 0x774D4D and 0x775A75. A row is "not stocked" when its def is a banned item (game.bin
+// entry index, the same index space Fable passes here, if the log confirms it) or when the
+// filter emptied it. The first calls at each site are logged so the next log shows the truth.
+struct Site { uintptr_t at; const char* name; std::atomic<unsigned> calls{0}; std::atomic<unsigned> dropped{0}; bool patched = false; };
+Site g_sites[] = {{0x776024, "save-load"}, {0x774D4D, "site-4d4d"}, {0x775A75, "site-5a75"}};
+
+template <int I>
+const uint32_t* __fastcall find_stock_row(void* shop, void*, int def) {
+    Site& s = g_sites[I];
     const uint32_t* row = reinterpret_cast<FindStockRow>(kFindStockRow)(shop, def);
-    if (row && row[1] == 0 && row[3] == 0) {
-        unsigned n = ++g_dropped;
-        if (n <= 20) fo::log("shops: saved stock of item def %d dropped (the shop no longer sells it)", def);
+    bool banned;
+    {
+        std::lock_guard<std::mutex> lock(g_banned_mu);
+        banned = g_banned.count(def) != 0;
+    }
+    bool emptied = row && row[1] == 0 && row[3] == 0;
+    unsigned n = ++s.calls;
+    if (n <= 40) {
+        if (row) fo::log("shops: %s lookup def %d%s: %08X %08X %08X %08X %08X %08X %08X", s.name, def, banned ? " (banned)" : "",
+                         row[0], row[1], row[2], row[3], row[4], row[5], row[6]);
+        else fo::log("shops: %s lookup def %d%s: not in the shop's def", s.name, def, banned ? " (banned)" : "");
+    }
+    if (row && (banned || emptied)) {
+        if (++s.dropped <= 20) fo::log("shops: %s: def %d treated as not stocked", s.name, def);
         return nullptr;
     }
     return row;
 }
 
-bool patch_load_check() {
-    auto at = reinterpret_cast<uint8_t*>(kLoadCheckCall);
-    // push esi; mov ecx, edi; call 0x772250
-    const uint8_t want[3] = {0x56, 0x8B, 0xCF};
+using Wrapper = const uint32_t*(__fastcall*)(void*, void*, int);
+const Wrapper g_wrappers[] = {&find_stock_row<0>, &find_stock_row<1>, &find_stock_row<2>};
+
+bool patch_call(uintptr_t site, Wrapper to_fn) {
+    auto at = reinterpret_cast<uint8_t*>(site);
     int32_t rel;
     std::memcpy(&rel, at + 1, 4);
-    if (std::memcmp(at - 3, want, 3) != 0 || at[0] != 0xE8 || reinterpret_cast<uintptr_t>(at + 5) + rel != kFindStockRow) return false;
-    int32_t to = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&find_stock_row_on_load) - reinterpret_cast<uintptr_t>(at + 5));
+    if (at[0] != 0xE8 || reinterpret_cast<uintptr_t>(at + 5) + rel != kFindStockRow) return false;
+    int32_t to = static_cast<int32_t>(reinterpret_cast<uintptr_t>(to_fn) - reinterpret_cast<uintptr_t>(at + 5));
     DWORD old;
     if (!VirtualProtect(at + 1, 4, PAGE_EXECUTE_READWRITE, &old)) return false;
     std::memcpy(at + 1, &to, 4);
     VirtualProtect(at + 1, 4, old, &old);
     FlushInstructionCache(GetCurrentProcess(), at, 5);
     return true;
+}
+
+bool patch_load_check() {
+    bool all = true;
+    for (int i = 0; i < 3; ++i) all &= (g_sites[i].patched = patch_call(g_sites[i].at, g_wrappers[i]));
+    return all;
 }
 
 // Swaps one kernel32 import slot of Fable.exe and returns what it held, so hooks chain.
@@ -250,8 +288,10 @@ void install(HMODULE self) {
 bool menu_row_served() { return g_menu_row.load() && g_tried && !g_filtered.empty(); }
 
 void log_status() {
-    fo::log("shops: filter %s; saved-stock check %s", g_tried ? (g_filtered.empty() ? "NOT applied (see above)" : "applied") : "not reached yet (game.bin not opened through CreateFile)",
-            g_load_patched ? "patched" : "NOT patched (code at 0x776024 differs)");
+    fo::log("shops: filter %s; stock lookups %s (save-load %s, 4d4d %s, 5a75 %s); calls so far %u/%u/%u",
+            g_tried ? (g_filtered.empty() ? "NOT applied (see above)" : "applied") : "not reached yet (game.bin not opened through CreateFile)",
+            g_load_patched ? "patched" : "NOT all patched", g_sites[0].patched ? "yes" : "no", g_sites[1].patched ? "yes" : "no",
+            g_sites[2].patched ? "yes" : "no", g_sites[0].calls.load(), g_sites[1].calls.load(), g_sites[2].calls.load());
 }
 
 }  // namespace fo::game::shop_stock
