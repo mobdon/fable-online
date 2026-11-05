@@ -25,7 +25,15 @@ export interface TownServices {
    * (old extracts). New extracts carry Fable's own count (CVillagePeopleDef NumGuards).
    */
   guardsPerVillage?: number;
+  /** Put villagers and shopkeepers in the snapshot clients get (default true; the app turns it off until the mod hides Fable's own). */
+  showFolk?: boolean;
 }
+
+/**
+ * Villages the server posts no guards at: the Guild's grounds, where players arrive and
+ * Fable keeps its own scripted guards.
+ */
+export const NO_WATCH_VILLAGE = /^VILLAGE_GUILD/;
 
 /**
  * Adds town life to any region sim without touching it: the inner sim keeps heroes, combat and
@@ -36,6 +44,7 @@ export class TownSim implements RegionSim {
   readonly town: TownLife;
   private heroes = new Map<number, { buttons: number }>();
   private last: EntityState[] = [];
+  private showFolk: boolean;
 
   constructor(
     readonly inner: RegionSim,
@@ -43,6 +52,7 @@ export class TownSim implements RegionSim {
     s: TownServices,
   ) {
     this.town = new TownLife(region.name, s.data, s.clock, s.ground?.(region), s.options);
+    this.showFolk = s.showFolk ?? true;
     const villages = s.data.regions[region.name]?.villages ?? [];
     // The towns' ground, from the level files: where guards fight monsters and mind weapons.
     const zones: TownZone[] = villages.filter((v) => v.zone && v.zone.length >= 3).map((v) => ({ village: v.uid, points: v.zone! }));
@@ -52,7 +62,7 @@ export class TownSim implements RegionSim {
       for (const v of villages) {
         const people = s.data.villages[v.def];
         const def = people?.guard;
-        if (!def) continue;
+        if (!def || NO_WATCH_VILLAGE.test(v.def)) continue;
         const per = people.numGuards ?? s.guardsPerVillage ?? 2;
         const routes = v.guardRoutes ?? [];
         for (let i = 0; i < per; i++) {
@@ -117,7 +127,7 @@ export class TownSim implements RegionSim {
   }
 
   snapshot(): EntityState[] {
-    return [...this.last, ...this.town.snapshot()];
+    return this.showFolk ? [...this.last, ...this.town.snapshot()] : this.last;
   }
 
   position(heroId: number): Vec3 | undefined {

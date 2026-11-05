@@ -195,7 +195,7 @@ export function createApp(
       : cfg.navDir
         ? navSimFactory(navs!, lawServices)
         : stubSimFactory);
-  const sim = cfg.town ? withTown(baseSim, { data: town, clock, ...(navs ? { ground: (r) => navs.get(r.name) } : {}) }) : baseSim;
+  const sim = cfg.town ? withTown(baseSim, { data: town, clock, showFolk: cfg.townFolk, ...(navs ? { ground: (r) => navs.get(r.name) } : {}) }) : baseSim;
   director = new Director(
     cfg,
     regions,
