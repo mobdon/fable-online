@@ -253,13 +253,35 @@ void draw_party_list() {
 }
 
 bool g_logged_frame_camera = false;
+const char* g_tag_gate = "not drawn yet";
+uint32_t g_tag_gate_ms = 0;
+void note_tag_gate(const char* why) {
+    if (why == g_tag_gate) return;
+    // Loads flip it briefly; log a change only once it has held for half a second.
+    static const char* pending = nullptr;
+    static uint32_t since = 0;
+    const uint32_t now = GetTickCount();
+    if (why != pending) { pending = why; since = now; return; }
+    if (now - since < 500) return;
+    fo::log("tags: %s (was: %s for %u s)", why, g_tag_gate, (now - g_tag_gate_ms) / 1000);
+    g_tag_gate = why;
+    g_tag_gate_ms = now;
+}
 constexpr uint32_t kTagGold = 0xFFFFD84A;      // own tag: Fable's pewter bar tinted gold
 constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
 
 void draw_tags(const Config& cfg) {
-    if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
-    // Not over loading screens, teleports and their fades, nor while the hero is lost.
-    if (!sync::world_shown() || !g_hero.valid) return;
+    // Why tags are (not) drawn, logged when it changes: tags that silently never show have
+    // cost several test builds.
+    const char* gate = !cfg.tags_enabled ? "off in fable_online.ini / Mod settings"
+                       : !g_chat.tags_enabled() ? "off in Realm chat (/tags)"
+                       : !g_have_view ? "no camera view matrix seen"
+                       : !g_have_proj ? "no perspective projection seen"
+                       : !sync::world_shown() ? sync::world_hidden_reason()
+                       : !g_hero.valid ? "no hero position"
+                       : nullptr;
+    note_tag_gate(gate ? gate : "drawing");
+    if (gate) return;
     float vp[16];
     mul(g_view, g_proj, vp);
     // Place tags with the camera the engine drew this frame with (after camera smoothing and
@@ -1133,8 +1155,8 @@ void log_stats() {
     // Racy reads of render-thread counters; fine for a log line.
     size_t tags;
     { std::lock_guard<std::mutex> lock(g_mu); tags = g_tags.size(); }
-    fo::log("overlay: %u frames, camera view sets %u, perspective sets %u, %u name tags in range%s",
-            g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags),
+    fo::log("overlay: %u frames, camera view sets %u, perspective sets %u, %u name tags in range, tags %s%s",
+            g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags), g_tag_gate,
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
 bool input_blocked_now() { return input_blocked(); }
