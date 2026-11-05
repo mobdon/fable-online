@@ -82,7 +82,7 @@ export function createHttpHandler(app: App) {
     const wanted = b.hero_id === undefined ? undefined : Number(b.hero_id);
     const hero =
       wanted === undefined && cfg.autoHero && heroes.listForAccount(acct.id).length === 0
-        ? heroes.create(acct.id, heroNameFor(acct.username))
+        ? heroes.create(acct.id, heroNameFor(acct.username, (name) => !!app.db.get('SELECT 1 FROM heroes WHERE name = ?', name)))
         : heroes.pick(acct.id, wanted);
     if (director.online >= director.capacity) throw new GameError('region_full', 'The server is full', 503);
     return {
@@ -240,10 +240,21 @@ export function versionLess(a: string, b: string): boolean {
   return false;
 }
 
-/** "mob_99" -> "Mob": the letters of a username, as a Fable-style hero name. */
-export function heroNameFor(username: string): string {
+/**
+ * "mob_99" -> "Mob": the letters of a username, as a Fable-style hero name. Hero names are
+ * letters only, so when the name is taken ("mob" and "mob_99") a letter suffix tells them
+ * apart: "Moba", "Mobb", ... then two letters.
+ */
+export function heroNameFor(username: string, taken: (name: string) => boolean = () => false): string {
   const letters = username.replace(/[^A-Za-z]/g, '').slice(0, 16).toLowerCase();
   const name = letters.charAt(0).toUpperCase() + letters.slice(1);
   if (name.length < 3) throw new GameError('no_hero', 'Make a hero first: the account name has too few letters to name one after', 404);
-  return name;
+  if (!taken(name)) return name;
+  const letter = (i: number) => String.fromCharCode(97 + i);
+  for (let n = 0; n < 26 + 26 * 26; n++) {
+    const suffix = n < 26 ? letter(n) : letter(Math.floor(n / 26) - 1) + letter(n % 26);
+    const candidate = name.slice(0, 16 - suffix.length) + suffix;
+    if (!taken(candidate)) return candidate;
+  }
+  throw new GameError('name_taken', 'Make a hero first: no free name was found for this account', 409);
 }
