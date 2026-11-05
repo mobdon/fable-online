@@ -337,9 +337,13 @@ uintptr_t scripted_control(ThingRef& t) {
     if (flags >= 0) return 0;
     uintptr_t begin = read_ptr(thing + kThingComponents);
     uintptr_t end = read_ptr(thing + kThingComponents + 4);
-    if (!begin || end < begin || end - begin > 0x100 * 8 || !readable(begin, end - begin)) return 0;
+    // A creature can hold more than 256 components; allow the same 512 as add_scripted_mode.
+    // The list is sorted by id, so the walk stops once it is past the one wanted.
+    if (!begin || end <= begin || (end - begin) % 8 || end - begin > 512 * 8 || !readable(begin, 8)) return 0;
     for (uintptr_t p = begin; p < end; p += 8) {
+        if (!readable(p, 8)) return 0;
         uint32_t id = read_ptr(p);
+        if (id > kScriptedControlId) return 0;
         if (id != kScriptedControlId) continue;
         uintptr_t comp = read_ptr(p + 4);
         if (comp && readable(comp, 0x20) && read_ptr(comp) == kScriptedControlVtable) return comp;
