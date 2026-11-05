@@ -112,7 +112,12 @@ interface HeroSlot {
   actAnim: number;
   /** A swing pressed just before the last one finished, fired when it does. */
   queued: AttackKind | null;
+  /** ms since the hero last dealt or took a hit (sim time), for health regeneration. */
+  calmMs: number;
 }
+
+/** Health comes back slowly out of combat: after calmMs without a hit, sharePerSec of max per second. */
+export const HEALTH_REGEN = { calmMs: 10_000, sharePerSec: 0.02 };
 
 /** A hero's health and Will as shares of their maxima, kept from one channel to the next. */
 export interface CarriedVitals {
@@ -175,7 +180,10 @@ export class CombatSim implements RegionSim {
       const now = Date.now();
       if (a.kind === 'hero') this.lastHit.set(a.id, now);
       if (t.kind === 'hero') this.lastHit.set(t.id, now);
+      const by = a.kind === 'hero' ? this.heroes.get(a.id) : undefined;
+      if (by) by.calmMs = 0;
       const slot = t.kind === 'hero' ? this.heroes.get(t.id) : undefined;
+      if (slot) slot.calmMs = 0;
       if (slot && !killed && slot.actAnim !== Anim.Attack) this.showAct(slot, Anim.Hit, FLINCH_SHOW_MS);
     });
     this.spawns = new SpawnManager(s.spawns.regions[region.name], s.data, this.combat, hooks, s.spawnOptions);
@@ -392,7 +400,7 @@ export class CombatSim implements RegionSim {
       hero.health = Math.max(1, Math.round(hero.maxHealth * c.health));
       hero.will = Math.round(hero.maxWill * c.will);
     }
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null });
+    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null, calmMs: 0 });
     this.combat.add(hero);
   }
 
@@ -497,6 +505,9 @@ export class CombatSim implements RegionSim {
       if (!h.alive) {
         if (slot.downMs !== null && (slot.downMs -= dtMs) <= 0) this.respawn(slot);
         continue;
+      }
+      if ((slot.calmMs += dtMs) >= HEALTH_REGEN.calmMs && h.health < h.maxHealth) {
+        h.health = Math.min(h.maxHealth, h.health + (h.maxHealth * HEALTH_REGEN.sharePerSec * dtMs) / 1000);
       }
       if (slot.actMs > 0 && (slot.actMs -= dtMs) <= 0) slot.actAnim = 0;
       const [mx, my] = slot.move;
