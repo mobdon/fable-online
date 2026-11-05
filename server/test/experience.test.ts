@@ -115,8 +115,7 @@ test('xp: experience the local game adds is taken up to the daily cap, and only 
   const r = xp.sync(hero.id, same(s, { general: 1200 }));
   assert.equal(r.gained.general, 1200);
   assert.equal(r.state.general, 1200);
-  // The mod sends the same numbers again before it wrote the new state: base is the old seq,
-  // so it would count twice... unless the base is the new state. With the new base, no gain.
+  // The same numbers against the new state as base: no gain.
   assert.equal(xp.sync(hero.id, same(r.state)).gained.general, 0);
   // Over the cap (5000 a day): the rest is dropped.
   const big = xp.sync(hero.id, same(r.state, { general: r.state.general + 10_000 }));
@@ -128,6 +127,21 @@ test('xp: experience the local game adds is taken up to the daily cap, and only 
   assert.equal(next.gained.general, 500);
   // A report from an unknown base (an earlier server run) takes no gains, only purchases.
   assert.equal(xp.sync(hero.id, same(next.state, { base: 12345, general: next.state.general + 999 })).gained.general, 0);
+  app.close();
+});
+
+test('xp: a report resent against the same old base pays its local gain once', () => {
+  const { app, hero, xp } = setup();
+  const s = xp.state(hero.id);
+  assert.equal(xp.sync(hero.id, same(s, { general: 1200 })).gained.general, 1200);
+  // The answer was lost or not yet written: the mod resends against the same base.
+  const again = xp.sync(hero.id, same(s, { general: 1200 }));
+  assert.equal(again.gained.general, 0);
+  assert.equal(again.state.general, 1200);
+  // More gained locally since: only the new part counts.
+  const more = xp.sync(hero.id, same(s, { general: 1500, strength: 40 }));
+  assert.deepEqual([more.gained.general, more.gained.strength], [300, 40]);
+  assert.equal(more.state.general, 1500);
   app.close();
 });
 

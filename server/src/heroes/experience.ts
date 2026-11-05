@@ -105,6 +105,8 @@ export class Experience {
 
   private seq: number;
   private history = new Map<number, XpState[]>();
+  /** Local gain already taken against each remembered state, so a resent report pays once. */
+  private paidOnBase = new WeakMap<XpState, Pools>();
   private recentKills = new Map<number, { at: number; xp: number }[]>();
 
   constructor(
@@ -220,7 +222,11 @@ export class Experience {
         for (let i = 0; i < STAT_SLOTS; i++) expected = this.fableCharge(expected, 'stat', i, base.stats[i] ?? 0, kept(r.stats[i] ?? 0, stats[i]!));
         for (let i = 0; i < ABILITY_SLOTS; i++) expected = this.fableCharge(expected, 'ability', i, base.abilities[i] ?? 0, kept(r.abilities[i] ?? 0, abilities[i]!));
         const gain: Pools = { ...ZERO };
-        for (const p of POOLS) gain[p] = Math.max(0, Math.floor(r[p]) - expected[p]);
+        const paid = this.paidOnBase.get(base) ?? { ...ZERO };
+        for (const p of POOLS) gain[p] = Math.max(0, Math.floor(r[p]) - expected[p] - paid[p]);
+        // What the cap drops is spent too: a resend must not bring it back on a later day.
+        for (const p of POOLS) paid[p] += gain[p];
+        this.paidOnBase.set(base, paid);
         const taken = this.capLocal(heroId, row, gain);
         out.dropped = sumOf(gain) - sumOf(taken);
         out.gained = taken;
