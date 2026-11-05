@@ -28,6 +28,7 @@ constexpr unsigned kAttackable = 0x728;      // (reference*, bool)
 constexpr unsigned kDamageable = 0x810;      // (reference*, bool)
 constexpr unsigned kSetFree = 0x7BC;         // (reference*)
 constexpr unsigned kLookInDirection = 0x768; // (reference*, float yaw, bool)
+constexpr unsigned kGiveGold = 0x1F8;        // (int amount)
 constexpr unsigned kHeroHealth = 0x404;      // () -> float
 constexpr unsigned kHeroMaxHealth = 0x408;   // () -> float
 // .AddScriptedMode (ref*, CCharString* label): pushes a CModeScripted (vtable 0x01267670) on the
@@ -536,6 +537,15 @@ bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_firs
 
 bool play_anim_once(ThingRef& t, const char* anim, bool clear_first, uint32_t sequence) {
     return queue_anim(t, anim, false, -1, clear_first, sequence);
+}
+
+bool give_gold(int amount) {
+    uintptr_t obj = iface();
+    if (!obj) return false;
+    void* fn = slot(obj, kGiveGold);
+    if (!fn) return false;
+    as<void(__thiscall*)(void*, int)>(fn)(reinterpret_cast<void*>(obj), amount);
+    return true;
 }
 
 bool hero_health(float& current, float& max) {

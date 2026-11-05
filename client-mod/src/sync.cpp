@@ -133,6 +133,9 @@ struct State {
     /** Renown: last read from Fable, last sent to the server, and when it was last read. */
     int32_t fableRenown = -1;
     int32_t sentRenown = -1;
+    /** The purse the server last sent ({"t":"gold"}), not yet put into Fable (-1: none). */
+    int64_t goldWant = -1;
+    std::string goldWhy;
     std::string renownWhy;
     uint32_t lastRenownMs = 0;
     /** The realm's time of day and weather (server `sky` frames) and Fable's clock kept on it. */
@@ -587,6 +590,14 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
             fo::log("sync: server answered the gear report: %s", json.c_str());
         if (json.rfind("{\"t\":\"quest_reward\"", 0) == 0) return on_quest_reward(json);
         if (json.rfind("{\"t\":\"sky\"", 0) == 0) return on_sky_frame(json, nowMs);
+        if (json.rfind("{\"t\":\"gold\"", 0) == 0) {
+            // The server's ledger is the purse: kill loot, death penalty, phials, quest rewards.
+            json::Value v;
+            const double g = json::parse(json, v) ? v.num("gold") : -1;
+            if (std::isfinite(g) && g >= 0 && g <= 1.0e9) s.goldWant = static_cast<int64_t>(g);
+            else fo::log("sync: gold frame without a usable balance: %s", json.c_str());
+            return;
+        }
         if (json.rfind("{\"t\":\"xp_state\"", 0) == 0) return on_xp_state(json);
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
@@ -598,6 +609,32 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         }
         return;
     }
+}
+
+/**
+ * Puts the server's purse into Fable once the hero is there and no region is loading. The
+ * difference goes through GiveGold (script interface), so Fable updates its purse its own way.
+ */
+void apply_gold() {
+    State& s = *g_state;
+    if (s.goldWant < 0 || s.objects.loading()) return;
+    uintptr_t hero = game::local_hero();
+    if (!hero) return;
+    int32_t have = 0;
+    std::string why;
+    if (!game::read_gold(hero, have, &why)) {
+        if (why != s.goldWhy) fo::log("sync: can't read the hero's gold: %s", why.c_str());
+        s.goldWhy = why;
+        return;
+    }
+    s.goldWhy.clear();
+    const int64_t want = s.goldWant;
+    if (want != have && !game::script::give_gold(static_cast<int>(want - have))) return;  // not ready: next tick
+    s.goldWant = -1;
+    if (want == have) return;
+    int32_t now = have;
+    game::read_gold(hero, now);
+    fo::log("sync: purse set to %lld by the server (was %d, Fable now shows %d)", static_cast<long long>(want), have, now);
 }
 
 /**
@@ -1060,6 +1097,7 @@ void tick() {
     apply_health(now);
     show_death(now);
     report_renown(now);
+    apply_gold();
     report_gear(now);
     sync_clock(now);
     sync_xp(now);

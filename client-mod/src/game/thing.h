@@ -39,9 +39,12 @@ constexpr uint32_t kHeroStatsType = 4;
 constexpr uint32_t kHeroStatsVtable = 0x0124F70C;
 constexpr uint32_t kStatsRenownLevel = 0x070;  // int, "RenownLevel"
 constexpr uint32_t kStatsRenownTotal = 0x07C;  // int, "RenownTotal": what the hero's stats screen counts
+constexpr uint32_t kStatsGold = 0x03C;  // int: the purse, what GiveGold's 0x0057B327 adds to (clamped at 0)
 
 /** The hero's total renown in Fable (CTCHeroStats RenownTotal). False when it can't be read. */
 bool read_renown(uintptr_t thing, int32_t& total, std::string* why = nullptr);
+/** The hero's gold in Fable (CTCHeroStats +0x3C). False when it can't be read. */
+bool read_gold(uintptr_t thing, int32_t& gold, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();

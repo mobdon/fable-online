@@ -77,8 +77,10 @@ void each_region(Fn&& fn) {
 
 }  // namespace
 
-bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
-    auto fail = [&](const char* w) { if (why) *why = w; return false; };
+namespace {
+/** The thing's CTCHeroStats (component type 4, vtable checked), or 0 with the reason in `why`. */
+uintptr_t hero_stats(uintptr_t thing, std::string* why) {
+    auto fail = [&](const char* w) -> uintptr_t { if (why) *why = w; return 0; };
     uint8_t flags = 0;
     uint32_t range[2] = {};  // begin, end of the {type, component} pairs
     if (!read(thing + kFlags91, &flags, 1) || (flags & 1)) return fail("hero being removed");
@@ -93,14 +95,36 @@ bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
         if (pairs[i * 2] > kHeroStatsType) break;
         if (pairs[i * 2] != kHeroStatsType) continue;
         uint32_t comp = pairs[i * 2 + 1], vt = 0;
-        int32_t v = 0;
         if (!read(comp, &vt, 4)) return fail("stats component unreadable");
         if (vt != kHeroStatsVtable) return fail("type 4 is not CTCHeroStats");
-        if (!read(comp + kStatsRenownTotal, &v, 4) || v < 0 || v > 10000000) return fail("renown out of range");
-        total = v;
-        return true;
+        return comp;
     }
     return fail("no stats component");
+}
+}  // namespace
+
+bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
+    uintptr_t comp = hero_stats(thing, why);
+    int32_t v = 0;
+    if (!comp) return false;
+    if (!read(comp + kStatsRenownTotal, &v, 4) || v < 0 || v > 10000000) {
+        if (why) *why = "renown out of range";
+        return false;
+    }
+    total = v;
+    return true;
+}
+
+bool read_gold(uintptr_t thing, int32_t& gold, std::string* why) {
+    uintptr_t comp = hero_stats(thing, why);
+    int32_t v = 0;
+    if (!comp) return false;
+    if (!read(comp + kStatsGold, &v, 4) || v < 0) {
+        if (why) *why = "gold unreadable or negative";
+        return false;
+    }
+    gold = v;
+    return true;
 }
 
 bool read_health(uintptr_t thing, float& health, float& maxHealth) {
