@@ -182,6 +182,8 @@ void PuppetPool::park(uint32_t id) {
     Puppet p = std::move(it->second);
     live_.erase(it);
     if (!p.ref.alive()) {
+        // The engine freed it: its address may be reused by any new thing, even a hero.
+        mark_stand_in(p.thingAddr, false);
         ++stats_.lost;
         return;
     }
@@ -245,6 +247,9 @@ void PuppetPool::retire(Puppet& p) {
         script::set_attackable(p.ref, false);
         send_away(p);
     }
+    // Let go of the mark with the thing: a hero later made at that address must be found.
+    mark_stand_in(p.thingAddr, false);
+    p.thingAddr = 0;
     p.ref.release();
 }
 
