@@ -6,6 +6,7 @@
 #include <cstring>
 #include "../config.h"
 #include "../log.h"
+#include "../game/hero.h"
 
 namespace fo::display::camera_latch {
 namespace {
@@ -97,12 +98,11 @@ double lead(double now) {
 // Smoothing. Fable sets its camera every frame, but the heading only steps when the game's
 // camera update runs (15 times a second), and the camera's height follows the hero's feet, so
 // every bump in the ground under the hero shakes the view up and down. The camera is eased as
-// an orbit around the point it looks at near the hero: the direction over kDirTau (hides the
-// turn steps), the look-at point across the ground over kFlatTau and in height over
-// kHeightTau (small bumps don't reach the view, hills and stairs still do), and the distance
-// over kDistTau. Turning then swings the camera rigidly round the hero, so the hero keeps
-// their place on screen instead of sliding from side to side.
-constexpr double kDirTau = 0.05, kFlatTau = 0.06, kHeightTau = 0.3, kDistTau = 0.3;
+// an orbit around the point on the view nearest the hero: the direction eases over kDirTau
+// (hides the turn steps) and that point's height over kHeightTau (small bumps don't reach the
+// view, hills and stairs still do). Across the ground the point follows the hero exactly, so
+// the hero never drifts sideways in the view while running or turning.
+constexpr double kDirTau = 0.05, kHeightTau = 0.3;
 struct Smooth {
     bool have = false;
     float target[3] = {}, dir[6] = {};   // look-at point; forward and up
@@ -136,10 +136,20 @@ void ease(float* v, double to, double k) {
     *v = static_cast<float>(*v + (to - *v) * k);
 }
 
-// Distance from the camera to the hero along its view, or `fallback` when that makes no sense.
-double hero_distance(const float* desc, double fallback) {
-    const double d = (g.focus[0] - desc[0]) * desc[3] + (g.focus[1] - desc[1]) * desc[4] + (g.focus[2] - desc[2]) * desc[5];
-    return d > 0.5 && d < 30.0 ? d : fallback;
+// Distance from the camera to the hero's chest along its view, or -1 when the hero isn't known.
+// The hero is read at most every 2 ms (the camera is set twice a frame).
+double hero_distance(const float* desc) {
+    static double read_at = -1;
+    static bool have = false;
+    static float hero[3];
+    const double now = now_s();
+    if (now - read_at > 0.002 || now < read_at) {
+        read_at = now;
+        have = fo::game::hero_pos_now(hero);
+    }
+    if (!have) return -1;
+    const double d = (hero[0] - desc[0]) * desc[3] + (hero[1] - desc[1]) * desc[4] + (hero[2] + 1.5 - desc[2]) * desc[5];
+    return d > 0.5 && d < 40.0 ? d : -1;
 }
 
 // Writes the camera to show this frame into out[9]; false = show Fable's as it is.
@@ -154,8 +164,15 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
             ++sm.snaps;
         }
     }
+    // The camera turns round the hero, so the eased camera has to turn round the same point,
+    // or the hero swings across the view while turning. No hero, no smoothing.
+    const double hd = hero_distance(desc);
+    if (hd < 0) {
+        sm.have = false;
+        return false;
+    }
     if (!sm.have) {
-        sm.dist = hero_distance(desc, 4.0);
+        sm.dist = hd;
         for (int i = 0; i < 3; ++i) sm.target[i] = static_cast<float>(desc[i] + desc[3 + i] * sm.dist);
         std::memcpy(sm.dir, desc + 3, sizeof sm.dir);
         std::memcpy(sm.shown_pos, desc, sizeof sm.shown_pos);
@@ -166,9 +183,9 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
     }
     const double dt = now - sm.at;
     sm.at = now;
-    const double kd = 1.0 - std::exp(-dt / kDirTau), kf = 1.0 - std::exp(-dt / kFlatTau),
-                 kh = 1.0 - std::exp(-dt / kHeightTau), kr = 1.0 - std::exp(-dt / kDistTau);
-    sm.dist += (hero_distance(desc, sm.dist) - sm.dist) * kr;
+    const double kd = 1.0 - std::exp(-dt / kDirTau), kf = 1.0,
+                 kh = 1.0 - std::exp(-dt / kHeightTau);
+    sm.dist = hd;   // the hero's own distance this frame: the point the camera turns round
     // Where Fable's camera looks this frame, at the eased distance.
     const double tx = desc[0] + desc[3] * sm.dist, ty = desc[1] + desc[4] * sm.dist, tz = desc[2] + desc[5] * sm.dist;
     const float old_z = sm.target[2];
@@ -318,7 +335,9 @@ void log_stats() {
     double raw_dz = 0, shown_dz = 0;
     for (Smooth& sm : g_sm) {
         if (!sm.site) continue;
-        if (n < 260) n += std::snprintf(sites + n, sizeof sites - n, " %08X:%u/%u", static_cast<unsigned>(sm.site), sm.frames, sm.calls);
+        if (n < 260)
+            n += std::snprintf(sites + n, sizeof sites - n, " %08X:%u/%u (hero %.1f ahead)", static_cast<unsigned>(sm.site), sm.frames,
+                               sm.calls, sm.dist);
         frames += sm.frames;
         snaps += sm.snaps;
         raw_dz += sm.raw_dz;

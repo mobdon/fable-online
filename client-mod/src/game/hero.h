@@ -11,4 +11,7 @@ struct HeroPos {
 };
 // Call from a background thread a few times a second. Scans for the hero when it's lost.
 HeroPos hero_read();
+// The hero's feet (x, y, z) right now, from the game thread; false until hero_read() has found
+// the hero. Cheap enough for every frame (a few checked reads, no scan).
+bool hero_pos_now(float out[3]);
 }  // namespace fo::game
