@@ -121,3 +121,17 @@ test('hero swings: a press late in the last swing is kept, and aim is as forgivi
   }
   assert.ok(b.health < afterFirst, 'the queued swing landed');
 });
+
+test("a circling bandit stays inside a bare-handed hero's reach", () => {
+  const sim = arena();
+  sim.devSpawn(1, BANDIT, 3);
+  const b = bandit(sim);
+  b.maxHealth = b.health = 10_000;
+  const reach = BALANCE.reach.unarmed! + BALANCE.bodyRadius + BALANCE.heroReachSlack;
+  let furthest = 0;
+  for (let t = 0; t < 20_000; t += TICK) {
+    sim.step(TICK);
+    if (t > 3000) furthest = Math.max(furthest, Math.hypot(b.pos.x, b.pos.y));
+  }
+  assert.ok(furthest <= reach, `circled out to ${furthest.toFixed(2)} m, reach is ${reach} m`);
+});

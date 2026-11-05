@@ -70,6 +70,8 @@ const FOLLOW_THROUGH_MS = 300;
  * group circles close by, waiting for an opening, so a crowd doesn't land every hit at once.
  */
 const MAX_SWINGING = 2;
+/** Furthest a creature circles from its target, inside a bare-handed hero's reach. */
+const CIRCLE_MAX = 2.6;
 
 /**
  * Runs every creature in one channel. Decides where creatures go and when they swing;
@@ -419,7 +421,7 @@ export class AiDirector implements AiHooks {
     const canHit = d <= p.attackRange && (p.preferredRange === 0 || !nav || nav.clearLine(b.c.pos, t.pos));
 
     if (b.state === 'strafe') {
-      if (this.now < b.stateUntil && d < p.attackRange + 4) {
+      if (this.now < b.stateUntil && d < CIRCLE_MAX + 3) {
         this.circle(b, t.pos);
         this.maybeBlock(b, t);
         return;
@@ -693,7 +695,9 @@ export class AiDirector implements AiHooks {
   }
 
   private circle(b: Brain, target: Point2): void {
-    const r = b.p.attackRange + 1.5;
+    // Close enough that the hero can still reach it (bare hands reach 3 m): circling further
+    // out made a recovering bandit untouchable, so fights stalled with it nearly dead.
+    const r = Math.min(b.p.attackRange + 0.4, CIRCLE_MAX);
     const ang = Math.atan2(b.c.pos.y - target.y, b.c.pos.x - target.x) + b.strafeDir * 0.7;
     const p = { x: target.x + Math.cos(ang) * r, y: target.y + Math.sin(ang) * r };
     if (this.world.nav && !this.world.nav.walkable(p.x, p.y)) {
