@@ -73,6 +73,19 @@ claude plugin uninstall caveman@caveman >/dev/null 2>&1 || true; claude plugin m
 # Serena: symbol-level code navigation/editing over language servers (find_symbol, find_referencing_symbols,
 # replace_symbol_body). MCP server, loads next session. Pinned to the local clone of the shared repo when there is one, else the session cwd.
 uv tool install -q git+https://github.com/oraios/serena
+# fable-online is TypeScript (server, tools) and C++ (client-mod, launcher): make sure Serena runs both language servers
+serena_langs() { python3 - "$1/.serena/project.yml" ${SERENA_LANGUAGES:-typescript cpp} <<'PY'
+import re, sys
+p, want = sys.argv[1], sys.argv[2:]
+try: s = open(p).read()
+except OSError: sys.exit(0)
+m = re.search(r'^language_servers:\n((?:- .*\n)*)', s, re.M)
+if not m: sys.exit(0)
+have = [l[2:].strip() for l in m.group(1).splitlines()]
+new = have + [w for w in want if w not in have]
+if new != have: open(p, 'w').write(s[:m.start()] + 'language_servers:\n' + ''.join('- %s\n' % l for l in new) + s[m.end():])
+PY
+}
 # Work happens in a local clone (REPO_DIR, default ~/<repo name>); Serena and graphify are pinned there.
 # Set REPO_URL to have it cloned here; with neither set, Serena follows the folder the session starts in.
 serena_proj=${REPO_DIR:-$(git -C "$KIT_DIR" rev-parse --show-toplevel 2>/dev/null)}   # fable-online: default to the repo that carries this kit
@@ -82,6 +95,7 @@ if [ -n "${REPO_URL:-}" ]; then
 fi
 if [ -n "$serena_proj" ] && [ -d "$serena_proj/.git" ]; then
   [ -f "$serena_proj/.serena/project.yml" ] || yes n | serena project create "$serena_proj"   # main language inferred; "n" answers the extra-server prompts, which abort without a terminal
+  serena_langs "$serena_proj"
   grep -qx '.serena/' "$serena_proj/.git/info/exclude" || echo '.serena/' >> "$serena_proj/.git/info/exclude"   # never committed
   serena_where="--project $serena_proj"
 else

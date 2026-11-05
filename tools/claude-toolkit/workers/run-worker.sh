@@ -19,7 +19,21 @@ left=$(grep -oE '<(the hand-off doc|project rules:|the session.s attribution lin
 INBOX="$OUT/inbox-$NAME.md"; [ -f "$INBOX" ] || printf '# Inbox for worker %s: the controller appends late owner changes here.\n' "$NAME" > "$INBOX"
 echo $$ > "$OUT/$NAME.pid"; trap 'rm -f "$OUT/$NAME.pid"' EXIT
 pgrep -x graphify >/dev/null || rm -f graphify-out/.rebuild.lock   # a stopped worker can leave a stale lock
+# fable-online is TypeScript (server, tools) and C++ (client-mod, launcher): make sure Serena runs both language servers
+serena_langs() { python3 - "$1/.serena/project.yml" ${SERENA_LANGUAGES:-typescript cpp} <<'PY'
+import re, sys
+p, want = sys.argv[1], sys.argv[2:]
+try: s = open(p).read()
+except OSError: sys.exit(0)
+m = re.search(r'^language_servers:\n((?:- .*\n)*)', s, re.M)
+if not m: sys.exit(0)
+have = [l[2:].strip() for l in m.group(1).splitlines()]
+new = have + [w for w in want if w not in have]
+if new != have: open(p, 'w').write(s[:m.start()] + 'language_servers:\n' + ''.join('- %s\n' % l for l in new) + s[m.end():])
+PY
+}
 [ -f .serena/project.yml ] || yes n | serena project create --name "$NAME" "$WT" >/dev/null 2>&1   # "n": extra-server prompts abort without a terminal
+serena_langs "$WT"
 G=$(git rev-parse --git-common-dir); grep -qx '.serena/' "$G/info/exclude" 2>/dev/null || echo '.serena/' >> "$G/info/exclude"
 MEM=$(ls -d /root/.claude/plugins/cache/thedotmack/claude-mem/*/ 2>/dev/null | sort -V | tail -1)
 curl -s --noproxy '*' --max-time 2 http://127.0.0.1:8787/health >/dev/null || \
