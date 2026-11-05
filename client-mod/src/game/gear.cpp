@@ -2,6 +2,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cstdio>
+
 namespace fo::game {
 namespace {
 
@@ -75,29 +78,59 @@ bool weapon_at(uintptr_t comp, uint32_t handle, std::string& out) {
     return def_name(index, out);
 }
 
-uintptr_t component(uintptr_t hero, uint32_t vtable) {
+// Why the last read failed, for the log (gear is read from the game thread only).
+char g_why[200] = "";
+constexpr size_t kMaxComponents = 512;  // a hero has well over 64
+uint32_t g_pairs[kMaxComponents * 2];
+size_t g_pairCount = 0;
+
+/**
+ * The hero's component with this vtable, or 0. The list is read in full (Fable's own lookup is
+ * by type id; the ids of these two are not mapped, so the vtable decides). One whose owner field
+ * points back at the hero wins over one that doesn't.
+ */
+uintptr_t component(uintptr_t hero, uint32_t vtable, const char* name) {
     uint32_t range[2] = {};
-    if (!read(hero + kComponentsBegin, range, sizeof(range))) return 0;
-    if (range[1] < range[0] || range[1] - range[0] > 64 * 8 || (range[1] - range[0]) % 8) return 0;
-    uint32_t pairs[64 * 2];
-    const size_t n = (range[1] - range[0]) / 8;
-    if (!n || !read(range[0], pairs, n * 8)) return 0;
-    for (size_t i = 0; i < n; ++i) {
-        uint32_t comp = pairs[i * 2 + 1], vt = 0, owner = 0;
-        if (comp && u32(comp, vt) && vt == vtable && u32(comp + kCompOwner, owner) && owner == hero) return comp;
+    if (!read(hero + kComponentsBegin, range, sizeof(range)) || range[1] <= range[0] || (range[1] - range[0]) % 8) {
+        std::snprintf(g_why, sizeof g_why, "%s: the hero's component list is unreadable", name);
+        return 0;
     }
-    return 0;
+    const size_t n = (range[1] - range[0]) / 8;
+    if (n > kMaxComponents) {
+        std::snprintf(g_why, sizeof g_why, "%s: the hero has %u components", name, static_cast<unsigned>(n));
+        return 0;
+    }
+    if (!read(range[0], g_pairs, n * 8)) {
+        std::snprintf(g_why, sizeof g_why, "%s: the hero's component list is unreadable", name);
+        return 0;
+    }
+    g_pairCount = n;
+    uintptr_t loose = 0;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t comp = g_pairs[i * 2 + 1], vt = 0, owner = 0;
+        if (!comp || !u32(comp, vt) || vt != vtable) continue;
+        if (u32(comp + kCompOwner, owner) && owner == hero) return comp;
+        if (!loose) loose = comp;
+    }
+    if (!loose) std::snprintf(g_why, sizeof g_why, "%s: not among the hero's %u components", name, static_cast<unsigned>(n));
+    return loose;
 }
 
 }  // namespace
 
 bool worn_clothing(uintptr_t hero, std::vector<std::string>& out) {
     out.clear();
-    const uintptr_t comp = component(hero, kAppearanceVtable);
+    const uintptr_t comp = component(hero, kAppearanceVtable, "appearance component");
     uint32_t lists = 0, range[2] = {};
-    if (!comp || !u32(comp + kModifierLists, lists) || !lists) return false;
-    if (!read(lists + kClothingCategory * 12, range, sizeof(range))) return false;
-    if (range[1] < range[0] || (range[1] - range[0]) % 8 || (range[1] - range[0]) / 8 > 32) return false;
+    if (!comp) return false;
+    if (!u32(comp + kModifierLists, lists) || !lists || !read(lists + kClothingCategory * 12, range, sizeof(range))) {
+        std::snprintf(g_why, sizeof g_why, "appearance component: no modifier lists at +0x30 (%08X)", lists);
+        return false;
+    }
+    if (range[1] < range[0] || (range[1] - range[0]) % 8 || (range[1] - range[0]) / 8 > 32) {
+        std::snprintf(g_why, sizeof g_why, "appearance component: clothing list %08X..%08X looks wrong", range[0], range[1]);
+        return false;
+    }
     const size_t n = (range[1] - range[0]) / 8;
     uint32_t items[32 * 2];
     if (n && !read(range[0], items, n * 8)) return false;
@@ -109,16 +142,42 @@ bool worn_clothing(uintptr_t hero, std::vector<std::string>& out) {
 }
 
 bool read_gear(uintptr_t hero, HeroGear& out) {
+    g_why[0] = 0;
     uint8_t flags = 0;
-    if (!hero || !read(hero + kFlags91, &flags, 1) || (flags & 1)) return false;
-    const uintptr_t comp = component(hero, kInvWeaponsVtable);
+    if (!hero || !read(hero + kFlags91, &flags, 1) || (flags & 1)) {
+        std::snprintf(g_why, sizeof g_why, "no hero");
+        return false;
+    }
+    const uintptr_t comp = component(hero, kInvWeaponsVtable, "weapons component");
     if (!comp) return false;
     HeroGear g;
-    if (!weapon_at(comp, kMeleeHandle, g.melee) || !weapon_at(comp, kRangedHandle, g.ranged)) return false;
+    if (!weapon_at(comp, kMeleeHandle, g.melee) || !weapon_at(comp, kRangedHandle, g.ranged)) {
+        std::snprintf(g_why, sizeof g_why, "weapons component %08X: a weapon slot points at something unreadable", static_cast<unsigned>(comp));
+        return false;
+    }
     // Clothing that can't be read is left out of the report: the server then keeps the ledger's.
     g.armourKnown = worn_clothing(hero, g.armour);
+    g.armourWhy = g.armourKnown ? "" : g_why;
     out = g;
     return true;
+}
+
+const char* gear_why() { return g_why; }
+
+std::string component_list(uintptr_t hero) {
+    std::string out;
+    uint32_t range[2] = {};
+    if (!hero || !read(hero + kComponentsBegin, range, sizeof(range)) || range[1] <= range[0] || (range[1] - range[0]) % 8) return out;
+    const size_t n = std::min<size_t>((range[1] - range[0]) / 8, kMaxComponents);
+    if (!read(range[0], g_pairs, n * 8)) return out;
+    char buf[32];
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t vt = 0;
+        u32(g_pairs[i * 2 + 1], vt);
+        std::snprintf(buf, sizeof buf, "%s%X:%08X", i ? " " : "", g_pairs[i * 2], vt);
+        out += buf;
+    }
+    return out;
 }
 
 }  // namespace fo::game

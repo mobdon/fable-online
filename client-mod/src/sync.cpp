@@ -88,6 +88,8 @@ struct State {
     uint32_t lastGearReadMs = 0;
     game::HeroGear lastGear;
     bool gearLogged = false;
+    std::string gearWhy;
+    bool gearListLogged = false;
     uint32_t healSeq = 0;
     uint32_t lastCorrectionLogMs = 0;
     bool suppressSpawns = true;
@@ -386,7 +388,27 @@ void report_gear(uint32_t nowMs) {
     s.lastGearReadMs = nowMs;
     uintptr_t hero = game::local_hero();
     game::HeroGear g;
-    if (!hero || !game::read_gear(hero, g)) return;
+    if (!hero) return;
+    if (!game::read_gear(hero, g)) {
+        // Said once per reason, with the hero's component list the first time, so a log shows
+        // why no gear went out.
+        const std::string why = game::gear_why();
+        if (why != s.gearWhy) {
+            s.gearWhy = why;
+            fo::log("sync: can't read the hero's gear: %s", why.c_str());
+            if (!s.gearListLogged && why != "no hero") {
+                s.gearListLogged = true;
+                fo::log("sync: hero components (type:vtable): %s", game::component_list(hero).c_str());
+            }
+        }
+        return;
+    }
+    if (!g.armourKnown && g.armourWhy != s.gearWhy) {
+        s.gearWhy = g.armourWhy;
+        fo::log("sync: can't read the hero's clothing: %s", g.armourWhy.c_str());
+    } else if (g.armourKnown) {
+        s.gearWhy.clear();
+    }
     std::string worn;
     for (const std::string& a : g.armour) worn += (worn.empty() ? "" : ", ") + a;
     if (!s.gearLogged || g.melee != s.lastGear.melee || g.ranged != s.lastGear.ranged || g.armour != s.lastGear.armour ||
