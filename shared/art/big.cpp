@@ -43,7 +43,27 @@ bool Bank::read_at(uint32_t off, void* dst, size_t n) {
 void Bank::read_entries(uint32_t count, uint32_t eoff, uint32_t esize) {
     std::vector<uint8_t> e(esize);
     if (!read_at(eoff, e.data(), esize)) return;
-    size_t q = 12;  // three u32s before the first entry
+    // The table opens with u32 n and n pairs of u32s (frontend.big has n = 1, so 12 bytes);
+    // textures.big has more. Take the first start whose first entry reads as a sane name.
+    size_t q = 12;
+    auto sane_at = [&](size_t at) {
+        if (at + 28 > e.size()) return false;
+        uint32_t nl = u32(&e[at + 24]);
+        if (nl == 0 || nl > 256 || at + 28 + nl > e.size()) return false;
+        for (uint32_t k = 0; k < nl; ++k) {
+            uint8_t c = e[at + 28 + k];
+            if (c < 0x20 || c > 0x7E) return false;
+        }
+        return true;
+    };
+    if (e.size() >= 4) {
+        uint64_t n = u32(&e[0]);
+        if (n < 100000 && sane_at(static_cast<size_t>(4 + n * 8))) q = static_cast<size_t>(4 + n * 8);
+        else if (!sane_at(12)) {
+            for (size_t at = 4; at + 28 < e.size() && at < 65536; at += 4)
+                if (sane_at(at) && e[at + 28] == 'T') { q = at; break; }
+        }
+    }
     auto need = [&](size_t n) { return q + n <= e.size(); };
     for (uint32_t i = 0; i < count; ++i) {
         // u32 magic, id, type, size, offset, crc, name_len; name; u32 crc, source_count; sources; u32 sub_len; sub
@@ -99,7 +119,19 @@ bool Bank::read_index() {
         if (eoff + static_cast<uint64_t>(esize) > static_cast<uint64_t>(file_size)) { error_ = "bad entry table"; continue; }
         read_entries(count, eoff, esize);
     }
-    if (index_.empty()) { error_ = "no entries"; return false; }
+    if (index_.empty()) {
+        // Say what the bank index held, so a log shows why.
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "no entries (%u banks; index at 0x%X; file %ld bytes; first:",
+                      banks, bank_index, file_size);
+        error_ = buf;
+        for (size_t k = 4; k < bn && k < 4 + 48; ++k) {
+            std::snprintf(buf, sizeof buf, " %02X", bi[k]);
+            error_ += buf;
+        }
+        error_ += ")";
+        return false;
+    }
     return true;
 }
 
