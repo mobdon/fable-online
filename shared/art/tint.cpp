@@ -81,22 +81,12 @@ void tint_block(uint8_t* b, bool dxt1, const Tint& t) {
 
 }  // namespace
 
-Tint tint_preset(const char* name) {
-    Tint t;
-    if (name && std::strcmp(name, "black") == 0) {
-        t.metal_hue = 220.0f; t.metal_sat = 0.07f;
-        t.dark_hue = 220.0f; t.dark_sat = 0.04f;
-        t.lightness_scale = 0.45f;
-    }
-    return t;
-}
-
 uint32_t tint_pixel(uint32_t argb, const Tint& t) {
     float r = ((argb >> 16) & 255) / 255.0f, g = ((argb >> 8) & 255) / 255.0f, b = (argb & 255) / 255.0f;
     Hsl c = to_hsl(r, g, b);
     if (c.s > t.keep_sat_above) return argb;
     Hsl n{};
-    n.l = c.l * t.lightness_scale;
+    n.l = c.l;
     if (c.l < t.dark_below) {
         n.h = t.dark_hue;
         n.s = t.dark_sat;

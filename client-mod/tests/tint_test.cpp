@@ -19,12 +19,6 @@ int main() {
     CHECK((d & 255) > ((d >> 16) & 255));
     CHECK((fo::art::tint_pixel(0x40808080u, t) >> 24) == 0x40);
 
-    // The black finish darkens grey steel and keeps leather.
-    fo::art::Tint k = fo::art::tint_preset("black");
-    unsigned kb = fo::art::tint_pixel(0xFF808080u, k);
-    CHECK(((kb >> 16) & 255) < 0x50 && ((kb >> 8) & 255) < 0x50 && (kb & 255) < 0x50);
-    CHECK(fo::art::tint_pixel(0xFF8B4A1Eu, k) == 0xFF8B4A1Eu);
-
     // Random DXT1 blocks: mode (c0 > c1) must survive, and so must transparent pixels.
     std::srand(7);
     for (int i = 0; i < 20000; ++i) {

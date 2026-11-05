@@ -15,12 +15,7 @@ struct Tint {
     float dark_below = 0.20f;                     // HSL lightness under which a grey counts as dark
     float keep_sat_above = 0.28f;                 // pixels more saturated than this stay as painted
     float highlight_above = 0.82f;                // brighter greys keep some of their sheen
-    float lightness_scale = 1.0f;                 // < 1 darkens recoloured pixels (a black finish)
 };
-
-// Named finishes: "green" (the default above) and "black" (a dark dev-only finish).
-// Unknown names give the default.
-Tint tint_preset(const char* name);
 
 // 0xAARRGGBB in, 0xAARRGGBB out (alpha unchanged).
 uint32_t tint_pixel(uint32_t argb, const Tint& t);

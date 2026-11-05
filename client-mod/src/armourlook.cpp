@@ -1,10 +1,9 @@
 // Test-only armour recolour.
 //
-// With FABLE_ONLINE_ARMOUR_LOOK=1 (or green) set, the hero's plate armour textures
+// With FABLE_ONLINE_ARMOUR_LOOK=1 set, the hero's plate armour textures
 // (TEXTURE_HERO_PLATEARMOUR_* and TEXTURE_HERO_PLATINUM_*) are recoloured as the game loads them: bare steel becomes a
 // green lacquer and dark steel a deep blue, while leather and brass stay as painted
-// (fo::art::Tint). FABLE_ONLINE_ARMOUR_LOOK=black gives a near-black finish instead, for the
-// dev and moderator set. The pixels come from the player's own data/graphics/pc/textures.big and
+// (fo::art::Tint). The pixels come from the player's own data/graphics/pc/textures.big and
 // never leave their machine.
 //
 // How: at start-up this file reads each plate texture's top mip, recolours it and keeps it in
@@ -49,7 +48,6 @@ struct Table {
     std::vector<uint8_t> data;  // the bank's entry table, with our entries rewritten
 };
 std::vector<Table> g_tables;
-const char* g_finish = "green";
 
 uint64_t g_file_size = 0;    // the real textures.big size
 uint64_t g_virt_base = 0;    // where our region starts (past the end of the file)
@@ -123,7 +121,7 @@ bool build(const std::wstring& big_path) {
     g_virt_base = (g_file_size + 0x10000) & ~uint64_t(0xFFFF);
     if (g_virt_base > 0xF0000000ull) { real_CloseHandle(f); fo::log("armourlook: textures.big too large"); return false; }
 
-    fo::art::Tint tint = fo::art::tint_preset(g_finish);
+    fo::art::Tint tint;
     std::map<std::string, Replacement> repl;
     for (const auto& name : bank.names()) {
         if (!wanted(name)) continue;
@@ -426,11 +424,9 @@ int patch_imports(const std::map<std::string, std::pair<void*, void**>>& hooks) 
 namespace fo::armourlook {
 
 void install() {
-    // 1 or green: the green finish. black: the dark dev-only finish.
-    char want[16] = {};
+    char want[8] = {};
     DWORD n = GetEnvironmentVariableA("FABLE_ONLINE_ARMOUR_LOOK", want, sizeof(want));
-    if (n == 0 || n >= sizeof(want) || want[0] == '0') return;
-    g_finish = (std::strcmp(want, "black") == 0) ? "black" : "green";
+    if (n == 0 || n >= sizeof(want) || want[0] != '1') return;
     fo::log_open();
 
     // For build(); replaced by the import-slot values below once the hooks go in.
@@ -443,7 +439,7 @@ void install() {
     real_GetFileSizeEx = reinterpret_cast<decltype(real_GetFileSizeEx)>(GetProcAddress(k32, "GetFileSizeEx"));
     real_CloseHandle = reinterpret_cast<decltype(real_CloseHandle)>(GetProcAddress(k32, "CloseHandle"));
 
-    fo::log("armourlook: recolouring the plate and platinum armour textures (%s finish)", g_finish);
+    fo::log("armourlook: recolouring the plate and platinum armour textures");
     if (!build(exe_dir() + L"\\data\\graphics\\pc\\textures.big")) { fo::log("armourlook: off"); return; }
 
     int hooked = patch_imports({
