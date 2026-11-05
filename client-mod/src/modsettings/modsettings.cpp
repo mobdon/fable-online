@@ -71,6 +71,10 @@ bool g_dinput_button = false;
 std::vector<int> g_pending;   // actions for the game thread
 std::string g_flash;          // a short note after an action
 DWORD g_flash_at = 0;
+// The HUD scale saved from the menu this session. Config::hud_scale is only read when the
+// game starts (and again on a device reset, where a mid-game change would be wrong), so it
+// is left alone and the row shows this instead. Below -1: nothing saved yet.
+float g_hud_scale_saved = -2;
 
 Row toggle(int id, const char* label, const char* help, bool restart = false) {
     Row r;
@@ -175,7 +179,7 @@ void sync_values() {   // caller holds g_mu
     g_model.set_value(kRedTarget, c.red_target);
     g_model.set_value(kCrosshair, static_cast<int>(c.crosshair));
     g_model.set_value(kNameTags, c.tags_enabled);
-    g_model.set_value(kHudScale, nearest(kHudScales, c.hud_scale));
+    g_model.set_value(kHudScale, nearest(kHudScales, g_hud_scale_saved >= -1 ? g_hud_scale_saved : c.hud_scale));
     g_model.set_value(kHudBottom, nearest(kBottomScales, c.hud_bottom_scale));
     g_model.set_value(kGod, c.god_mode);
     g_model.set_value(kSpawning, game::spawns::suppressed() ? 0 : 1);
@@ -229,6 +233,7 @@ void apply(int id, int v) {   // caller holds g_mu
     case kHudScale: {
         // Read when the game starts: only the ini changes now.
         const float s = kHudScales[v];
+        g_hud_scale_saved = s;
         config_write(L"display", L"hud_scale", s < 0 ? L"off" : s == 0 ? L"auto" : num(s));
         break;
     }
