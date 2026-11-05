@@ -1,4 +1,5 @@
 import { GameError } from '../errors.js';
+import { BLOCKED } from '../world/things/loot.js';
 
 /**
  * Server-side item rules. Prices live ONLY here: a client never sends a price.
@@ -53,7 +54,9 @@ export function catalogFromGameData(
 ): ItemDef[] {
   const out: ItemDef[] = [];
   for (const [id, it] of Object.entries(items)) {
-    const staffOnly = it.armour === staffArmour;
+    // By name as well as by armour reference, so platinum stays staff only if the extracted
+    // reference is missing or renamed.
+    const staffOnly = it.armour === staffArmour || /PLATINUM/.test(it.armour ?? '') || BLOCKED.some((r) => r.test(id));
     const gear = !!it.weapon || it.coverage !== undefined;
     const value = Math.max(0, Math.round(it.value));
     const closed = staffOnly || UNSHOPPABLE.has(id) || value === 0;

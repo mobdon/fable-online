@@ -24,6 +24,24 @@ test('catalog: vendors never sell plate, phials or platinum; plate can still be 
   assert.equal(c.get('OBJECT_HERO_SHIRT_CHAINMAIL').buy, 2000);
 });
 
+test('catalog: platinum hero gear is staff only by name, even when its armour reference does not resolve', () => {
+  const c = new ItemCatalog(
+    catalogFromGameData(
+      {
+        OBJECT_HERO_HELMET_PLATINUM: { value: 3000, coverage: 0.1 },
+        OBJECT_HERO_BOOTS_PLATINUM: { value: 3000, armour: 'ARMOUR_UNKNOWN', coverage: 0.1 },
+        OBJECT_HERO_GLOVES_STEEL: { value: 800, armour: 'ARMOUR_HERO_PLATINUM_ARMOUR_2', coverage: 0.1 },
+      },
+      BALANCE.staffArmour,
+    ),
+  );
+  for (const id of ['OBJECT_HERO_HELMET_PLATINUM', 'OBJECT_HERO_BOOTS_PLATINUM', 'OBJECT_HERO_GLOVES_STEEL']) {
+    const d = c.get(id);
+    assert.equal(d.staffOnly, true, id);
+    assert.deepEqual([d.buy, d.sell, d.tradeable], [null, null, false], id);
+  }
+});
+
 test('shops from town data leave out plate armour and Resurrection Phials', () => {
   const c = new ItemCatalog(catalogFromGameData(ITEMS, BALANCE.staffArmour));
   const row = (def: string) => ({ def, quantity: 1, maxStock: 1, priceMultiplier: 1, restockDays: 1 });
