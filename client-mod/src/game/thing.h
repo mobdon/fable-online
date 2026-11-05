@@ -70,6 +70,13 @@ uintptr_t physics_of(uintptr_t thing);
 /** A rough area id: a hash of the hero's area anchor, used until regions are mapped. */
 uint32_t area_id(uintptr_t thing);
 
+/**
+ * CThing::Remove(true) (0x004C9B80), the call Fable's own code and the level loader use to take
+ * a thing out of the world. The engine sets +0x91 bit 0 and frees it later; it ignores a thing
+ * already being removed. Game thread only. False when the thing is unreadable or already going.
+ */
+bool remove_thing(uintptr_t thing);
+
 /** Every live creature object in the process, by vtable. Slow: used by the spawn probe. */
 std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);
 

@@ -237,15 +237,31 @@ void PuppetPool::hold_parked(uint32_t nowMs) {
 }
 
 /**
+ * Removing a creature is only done the way Fable's own gameplay code does it: on the game
+ * thread, with the script interface up, a hero in the world and no area load under way
+ * (the same conditions under which new puppets are made).
+ */
+bool PuppetPool::may_remove() const {
+    return gameThread_ == static_cast<uint32_t>(GetCurrentThreadId()) && script::ready() && local_hero() != 0 && !holding(lastSyncMs_);
+}
+
+/**
  * Let go of a puppet for good. It is never handed to Fable's own AI (SetFree): a freed
- * bandit is an ordinary hostile creature and attacks the hero. It stays hidden, far away.
+ * bandit is an ordinary hostile creature and attacks the hero. It is taken out of the world
+ * when that is safe (otherwise a named FO_PUPPET_* creature would stay, and could come back
+ * with its own AI after a save and reload); if not, it stays hidden, far away.
  */
 void PuppetPool::retire(Puppet& p) {
     if (p.ref.alive()) {
         script::clear_commands(p.ref);
         script::set_drawable(p.ref, false);
         script::set_attackable(p.ref, false);
-        send_away(p);
+        uintptr_t thing = p.ref.thing();
+        if (thing && may_remove() && remove_thing(thing)) {
+            if (stats_.removed++ < 20) fo::log("puppet: %s removed from the world", p.scriptName.c_str());
+        } else {
+            send_away(p);
+        }
     }
     // Let go of the mark with the thing: a hero later made at that address must be found.
     mark_stand_in(p.thingAddr, false);
@@ -396,6 +412,8 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
 
 void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
                       const std::vector<world::Pose>& poses, uint32_t nowMs) {
+    gameThread_ = static_cast<uint32_t>(GetCurrentThreadId());
+    lastSyncMs_ = nowMs;
     for (uint32_t id : removed) {
         pending_.erase(id);
         park(id);

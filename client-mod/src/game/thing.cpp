@@ -132,6 +132,15 @@ uintptr_t physics_of(uintptr_t thing) {
     return phys;
 }
 
+bool remove_thing(uintptr_t thing) {
+    constexpr uintptr_t kThingRemove = 0x004C9B80;  // __thiscall (thing, bool), pops 4
+    using RemoveFn = void(__fastcall*)(uintptr_t thing, uintptr_t unused, int flag);
+    uint32_t vt = 0;
+    if (!read(thing, &vt, 4) || vt < 0x01200000 || vt >= 0x01400000 || being_removed(thing)) return false;
+    reinterpret_cast<RemoveFn>(kThingRemove)(thing, 0, 1);
+    return true;
+}
+
 uintptr_t local_hero() {
     if (g_hero && (!looks_like_hero(g_hero) || being_removed(g_hero))) {
         g_hero = 0;

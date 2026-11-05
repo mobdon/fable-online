@@ -22,6 +22,7 @@ struct PuppetStats {
     uint32_t reused = 0;
     uint32_t parked = 0;
     uint32_t lost = 0;  // the engine freed the thing under us
+    uint32_t removed = 0;  // retired puppets taken out of the world
     uint32_t live = 0;
     uint32_t animsPlayed = 0;
     uint32_t animsRefused = 0;  // the engine fields the animation code reads were not valid
@@ -99,6 +100,7 @@ class PuppetPool {
     void send_away(Puppet& p);
     void hold_parked(uint32_t nowMs);
     void retire(Puppet& p);
+    bool may_remove() const;
     void drive(const world::Pose& p, uint32_t nowMs);
     void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
     const std::string& def_for(const world::Spawn& s) const;
@@ -116,6 +118,8 @@ class PuppetPool {
     std::unordered_map<uint32_t, world::Spawn> pending_;
     uint32_t holdUntil_ = 0;
     uint32_t lastSpawnMs_ = 0;
+    uint32_t lastSyncMs_ = 0;
+    uint32_t gameThread_ = 0;  // the thread sync() runs on: the only one that may remove things
 };
 
 }  // namespace fo::game
