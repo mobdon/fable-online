@@ -42,6 +42,14 @@ test('catalog: platinum hero gear is staff only by name, even when its armour re
   }
 });
 
+test('catalog: every Resurrection Phial def is closed to vendors and trade, not only the one exact name', () => {
+  const c = new ItemCatalog(catalogFromGameData({ OBJECT_RESURRECTION_PHIAL_QUEST: { value: 1000 }, OBJECT_QUEST_RESURRECTION_PHIAL: { value: 900 } }, BALANCE.staffArmour));
+  for (const id of ['OBJECT_RESURRECTION_PHIAL_QUEST', 'OBJECT_QUEST_RESURRECTION_PHIAL']) {
+    const d = c.get(id);
+    assert.deepEqual([d.buy, d.sell, d.tradeable], [null, null, false], id);
+  }
+});
+
 test('shops from town data leave out plate armour and Resurrection Phials', () => {
   const c = new ItemCatalog(catalogFromGameData(ITEMS, BALANCE.staffArmour));
   const row = (def: string) => ({ def, quantity: 1, maxStock: 1, priceMultiplier: 1, restockDays: 1 });

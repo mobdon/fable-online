@@ -33,8 +33,8 @@ export const STARTER_ITEMS: ItemDef[] = [
 /** Vendors pay this share of an item's base value (armour balance design: flat 25%). */
 export const SELL_BACK = 0.25;
 
-/** Items that never come from shops or loot, whatever the game files say. */
-export const UNSHOPPABLE = new Set(['OBJECT_RESURRECTION_PHIAL']);
+/** Items that never come from shops or loot, whatever the game files say: any Resurrection Phial def. */
+export const UNSHOPPABLE = /RESURRECTION_PHIAL/;
 
 /**
  * Armour classes no vendor sells. Plate comes from drops and the Arena only; vendors still
@@ -59,14 +59,14 @@ export function catalogFromGameData(
     const staffOnly = it.armour === staffArmour || /PLATINUM/.test(it.armour ?? '') || BLOCKED.some((r) => r.test(id));
     const gear = !!it.weapon || it.coverage !== undefined;
     const value = Math.max(0, Math.round(it.value));
-    const closed = staffOnly || UNSHOPPABLE.has(id) || value === 0;
+    const closed = staffOnly || UNSHOPPABLE.test(id) || value === 0;
     const notSold = closed || (it.armour !== undefined && notSoldArmour.has(it.armour));
     out.push({
       id,
       maxStack: gear ? 1 : /POTION|FOOD|APPLE|BEER|MEAT|FISH|ARROW/.test(id) ? 20 : 1,
       buy: notSold ? null : value,
       sell: closed ? null : Math.floor(value * SELL_BACK),
-      tradeable: !staffOnly && !UNSHOPPABLE.has(id),
+      tradeable: !staffOnly && !UNSHOPPABLE.test(id),
       ...(staffOnly ? { staffOnly } : {}),
     });
   }
