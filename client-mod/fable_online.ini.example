@@ -17,7 +17,7 @@ hide_hud=1
 [tags]
 enabled=1
 ; 1 = also put a name tag on your own hero, to check placement when playing alone.
-self=0
+self=1
 ; How far above a hero's feet the tag floats, and which world axis is up (x, y or z).
 height=2.1
 up_axis=z
@@ -74,7 +74,7 @@ camera_assist=0
 camera_latch=0
 ; Over-the-shoulder camera: how far to move the view sideways (metres), so the crosshair
 ; isn't on the hero. Negative = over the left shoulder, positive = the right. 0 = Fable's own.
-camera_shoulder=-0.5
+camera_shoulder=0
 ; 1 = smooth the camera: turns, and bumps in the ground under the hero, no longer shake the
 ; view. 0 = Fable's own camera.
 camera_smooth=1
