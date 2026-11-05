@@ -114,6 +114,17 @@ interface HeroSlot {
   queued: AttackKind | null;
 }
 
+/** A hero's health and Will as shares of their maxima, kept from one channel to the next. */
+export interface CarriedVitals {
+  health: number;
+  will: number;
+  at: number;
+}
+/** A record older than this is dropped: a hero back after a long break starts fresh. */
+export const CARRY_EXPIRE_MS = 30 * 60_000;
+/** Health share a hero who left while down comes back with (the same as a respawn). */
+const RESPAWN_HEALTH_SHARE = 0.5;
+
 /** How long other players see a hero's swing and flinch. */
 const SWING_SHOW_MS = 450;
 const FLINCH_SHOW_MS = 350;
@@ -147,6 +158,8 @@ export class CombatSim implements RegionSim {
     readonly region: RegionDef,
     readonly channelId: string,
     private s: WorldServices,
+    /** Shared by every channel of one app: health and Will survive a channel change or reconnect. */
+    private carried: Map<number, CarriedVitals> = new Map(),
   ) {
     const hooks: AiHooks = {
       onSpawn: (c) => this.ai?.onSpawn?.(c),
@@ -373,6 +386,12 @@ export class CombatSim implements RegionSim {
     const hero = heroCombatant(heroId, at, this.s.data, l, (i) => {
       if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
     });
+    const c = this.carried.get(heroId);
+    this.carried.delete(heroId);
+    if (c && Date.now() - c.at <= CARRY_EXPIRE_MS) {
+      hero.health = Math.max(1, Math.round(hero.maxHealth * c.health));
+      hero.will = Math.round(hero.maxWill * c.will);
+    }
     this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null });
     this.combat.add(hero);
   }
@@ -417,6 +436,14 @@ export class CombatSim implements RegionSim {
 
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
+    if (h) {
+      const now = Date.now();
+      for (const [id, c] of this.carried) if (now - c.at > CARRY_EXPIRE_MS) this.carried.delete(id);
+      const hero = h.hero;
+      const health = !hero.alive ? RESPAWN_HEALTH_SHARE : hero.maxHealth > 0 ? hero.health / hero.maxHealth : 1;
+      const will = hero.maxWill > 0 ? hero.will / hero.maxWill : 1;
+      this.carried.set(heroId, { health, will, at: now });
+    }
     this.heroes.delete(heroId);
     this.law?.heroLeft(heroId);
     this.charging.delete(heroId);
@@ -650,7 +677,7 @@ export class CombatSim implements RegionSim {
     const h = slot.hero;
     const moveAway = !slot.phial && !!this.s.respawn;
     if (!slot.phial) h.pos = { ...slot.home };
-    this.combat.revive(h.id, slot.phial ? 1 : 0.5);
+    this.combat.revive(h.id, slot.phial ? 1 : RESPAWN_HEALTH_SHARE);
     h.will = h.maxWill;
     h.combo = 0;
     slot.downMs = null;
@@ -670,9 +697,10 @@ function state(c: Hero | Creature, defId: number): EntityState {
   return { id: c.id, def_id: defId, x: r(c.pos.x), y: r(c.pos.y), z: r(c.pos.z), yaw: r(c.yaw), anim: c.alive ? c.anim : Anim.Death, health: Math.ceil(c.health) };
 }
 
-export const combatSimFactory =
-  (s: WorldServices): SimFactory =>
-  (region, channelId) =>
-    new CombatSim(region, channelId, s);
+export const combatSimFactory = (s: WorldServices): SimFactory => {
+  // One record per app, not per module: tests run many apps that reuse hero ids.
+  const carried = new Map<number, CarriedVitals>();
+  return (region, channelId) => new CombatSim(region, channelId, s, carried);
+};
 
 const dist2d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
