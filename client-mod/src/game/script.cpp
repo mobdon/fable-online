@@ -28,6 +28,7 @@ constexpr unsigned kAttackable = 0x728;      // (reference*, bool)
 constexpr unsigned kDamageable = 0x810;      // (reference*, bool)
 constexpr unsigned kSetFree = 0x7BC;         // (reference*)
 constexpr unsigned kLookInDirection = 0x768; // (reference*, float yaw, bool)
+constexpr unsigned kGiveGold = 0x1F8;        // (int amount)
 constexpr unsigned kHeroHealth = 0x404;      // () -> float
 constexpr unsigned kHeroMaxHealth = 0x408;   // () -> float
 // .AddScriptedMode (ref*, CCharString* label): pushes a CModeScripted (vtable 0x01267670) on the
@@ -337,9 +338,13 @@ uintptr_t scripted_control(ThingRef& t) {
     if (flags >= 0) return 0;
     uintptr_t begin = read_ptr(thing + kThingComponents);
     uintptr_t end = read_ptr(thing + kThingComponents + 4);
-    if (!begin || end < begin || end - begin > 0x100 * 8 || !readable(begin, end - begin)) return 0;
+    // A creature can hold more than 256 components; allow the same 512 as add_scripted_mode.
+    // The list is sorted by id, so the walk stops once it is past the one wanted.
+    if (!begin || end <= begin || (end - begin) % 8 || end - begin > 512 * 8 || !readable(begin, 8)) return 0;
     for (uintptr_t p = begin; p < end; p += 8) {
+        if (!readable(p, 8)) return 0;
         uint32_t id = read_ptr(p);
+        if (id > kScriptedControlId) return 0;
         if (id != kScriptedControlId) continue;
         uintptr_t comp = read_ptr(p + 4);
         if (comp && readable(comp, 0x20) && read_ptr(comp) == kScriptedControlVtable) return comp;
@@ -532,6 +537,15 @@ bool play_looping_anim(ThingRef& t, const char* anim, int loops, bool clear_firs
 
 bool play_anim_once(ThingRef& t, const char* anim, bool clear_first, uint32_t sequence) {
     return queue_anim(t, anim, false, -1, clear_first, sequence);
+}
+
+bool give_gold(int amount) {
+    uintptr_t obj = iface();
+    if (!obj) return false;
+    void* fn = slot(obj, kGiveGold);
+    if (!fn) return false;
+    as<void(__thiscall*)(void*, int)>(fn)(reinterpret_cast<void*>(obj), amount);
+    return true;
 }
 
 bool hero_health(float& current, float& max) {

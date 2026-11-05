@@ -196,12 +196,23 @@ bool g_swapped = false;   // kept for the stats line; always false
 float shoulder_now() { return config().camera_shoulder; }
 
 // The camera the engine draws this frame with, after smoothing and the shoulder offset: name
-// tags are placed with it, so they sit where the hero is drawn.
+// tags are placed with it, so they sit where the hero is drawn. Fable sets the camera more
+// than once a frame, so only the gameplay camera counts: a call the mouse-look test accepts
+// (near the hero, mouse-look running), from one call site, and never a camera at the origin
+// (set during loads and before the first update). The site is the first one that passes; if
+// it stops passing for a second, the next site that does takes over.
 std::mutex g_frame_mu;
 float g_frame[9] = {};
 double g_frame_at = 0;
-void remember_frame_camera(const float* desc, double now) {
+uint32_t g_frame_site = 0;
+void remember_frame_camera(const float* desc, uint32_t site, bool mouse_look, double now) {
+    if (!mouse_look || (desc[0] == 0.0f && desc[1] == 0.0f && desc[2] == 0.0f)) return;
     std::lock_guard<std::mutex> lock(g_frame_mu);
+    if (site != g_frame_site) {
+        if (g_frame_site && now - g_frame_at < 1.0) return;
+        g_frame_site = site;
+        fo::log("camera: name tags follow the SetCamera call at %08X", static_cast<unsigned>(site));
+    }
     std::memcpy(g_frame, desc, sizeof g_frame);
     g_frame_at = now;
 }
@@ -272,7 +283,7 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
             changed = true;
         }
     }
-    remember_frame_camera(desc, now);
+    remember_frame_camera(desc, site, mouse_look, now);
     o_set_camera(self, desc);
     if (changed) std::memcpy(desc, saved, sizeof saved);
 }

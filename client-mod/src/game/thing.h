@@ -39,9 +39,12 @@ constexpr uint32_t kHeroStatsType = 4;
 constexpr uint32_t kHeroStatsVtable = 0x0124F70C;
 constexpr uint32_t kStatsRenownLevel = 0x070;  // int, "RenownLevel"
 constexpr uint32_t kStatsRenownTotal = 0x07C;  // int, "RenownTotal": what the hero's stats screen counts
+constexpr uint32_t kStatsGold = 0x03C;  // int: the purse, what GiveGold's 0x0057B327 adds to (clamped at 0)
 
 /** The hero's total renown in Fable (CTCHeroStats RenownTotal). False when it can't be read. */
 bool read_renown(uintptr_t thing, int32_t& total, std::string* why = nullptr);
+/** The hero's gold in Fable (CTCHeroStats +0x3C). False when it can't be read. */
+bool read_gold(uintptr_t thing, int32_t& gold, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();
@@ -69,6 +72,13 @@ bool write_health(uintptr_t thing, float health);
 uintptr_t physics_of(uintptr_t thing);
 /** A rough area id: a hash of the hero's area anchor, used until regions are mapped. */
 uint32_t area_id(uintptr_t thing);
+
+/**
+ * CThing::Remove(true) (0x004C9B80), the call Fable's own code and the level loader use to take
+ * a thing out of the world. The engine sets +0x91 bit 0 and frees it later; it ignores a thing
+ * already being removed. Game thread only. False when the thing is unreadable or already going.
+ */
+bool remove_thing(uintptr_t thing);
 
 /** Every live creature object in the process, by vtable. Slow: used by the spawn probe. */
 std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);

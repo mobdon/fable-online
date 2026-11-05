@@ -101,6 +101,13 @@ const char* last_anim_refusal();
 /** Drops everything queued on the thing's scripted-control component. */
 void clear_scripted(ThingRef& t);
 
+/**
+ * Adds `amount` (may be negative) to the hero's purse through the script interface's GiveGold
+ * (slot +0x1F8), the call the dev kit's gold button uses; Fable clamps the purse at 0 and at its
+ * own maximum. Game thread only. False when the interface is not up.
+ */
+bool give_gold(int amount);
+
 /** Hero health, through the same calls the scripts use. Returns false if not readable. */
 bool hero_health(float& current, float& max);
 

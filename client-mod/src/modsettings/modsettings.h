@@ -27,6 +27,8 @@ void close();
 bool is_open();
 /** True while open, and for a moment after closing, so the closing key doesn't reach the game. */
 bool input_blocked();
+/** The same for the mouse, also held until the button that closed the screen is released. */
+bool mouse_blocked();
 
 /** Overlay, render thread, between Renderer::begin and end. */
 void draw(overlay::Renderer& r);
@@ -35,6 +37,8 @@ void draw_hud(overlay::Renderer& r, bool hero_valid, float x, float y, float z, 
 
 /** A line from elsewhere (such as the server's answer to a dev spawn) shown on the screen. Any thread. */
 void notify(const std::string& text);
+/** True while Fable's pause screen or in-game menu is up. Reads only; any thread. */
+bool fable_menu_open();
 /** True while the MOD SETTINGS button should be on screen (one of Fable's menus is up). */
 bool button_wanted();
 /** Overlay, at Present, on top of everything Fable drew: the MOD SETTINGS button. */

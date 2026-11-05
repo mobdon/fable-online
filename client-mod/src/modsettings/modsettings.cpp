@@ -63,6 +63,11 @@ Model g_model;
 bool g_built = false;
 std::atomic<bool> g_open{false};
 std::atomic<DWORD> g_block_until{0};
+// Set when the screen closes: the left button that closed it may still be down, and its
+// release (or a press Fable sees as new) must not reach Fable's menu or our pause button,
+// which would open the screen again. Cleared once the button is seen up.
+std::atomic<bool> g_release_pending{false};
+std::atomic<DWORD> g_closed_at{0};
 std::atomic<int> g_open_request{-1};
 float g_px = -1, g_py = -1;
 bool g_pointer_seen = false;
@@ -71,6 +76,10 @@ bool g_dinput_button = false;
 std::vector<int> g_pending;   // actions for the game thread
 std::string g_flash;          // a short note after an action
 DWORD g_flash_at = 0;
+// The HUD scale saved from the menu this session. Config::hud_scale is only read when the
+// game starts (and again on a device reset, where a mid-game change would be wrong), so it
+// is left alone and the row shows this instead. Below -1: nothing saved yet.
+float g_hud_scale_saved = -2;
 
 Row toggle(int id, const char* label, const char* help, bool restart = false) {
     Row r;
@@ -175,7 +184,7 @@ void sync_values() {   // caller holds g_mu
     g_model.set_value(kRedTarget, c.red_target);
     g_model.set_value(kCrosshair, static_cast<int>(c.crosshair));
     g_model.set_value(kNameTags, c.tags_enabled);
-    g_model.set_value(kHudScale, nearest(kHudScales, c.hud_scale));
+    g_model.set_value(kHudScale, nearest(kHudScales, g_hud_scale_saved >= -1 ? g_hud_scale_saved : c.hud_scale));
     g_model.set_value(kHudBottom, nearest(kBottomScales, c.hud_bottom_scale));
     g_model.set_value(kGod, c.god_mode);
     g_model.set_value(kSpawning, game::spawns::suppressed() ? 0 : 1);
@@ -206,6 +215,15 @@ void flash(const char* s) {   // caller holds g_mu
     g_flash_at = GetTickCount();
 }
 
+// The keyboard and the mouse both get a short tail after the screen closes.
+void mark_closed() {
+    const DWORD now = GetTickCount();
+    g_open = false;
+    g_block_until = now + 250;
+    g_closed_at = now;
+    g_release_pending = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+}
+
 void apply(int id, int v) {   // caller holds g_mu
     Config& c = config_edit();
     switch (id) {
@@ -229,6 +247,7 @@ void apply(int id, int v) {   // caller holds g_mu
     case kHudScale: {
         // Read when the game starts: only the ini changes now.
         const float s = kHudScales[v];
+        g_hud_scale_saved = s;
         config_write(L"display", L"hud_scale", s < 0 ? L"off" : s == 0 ? L"auto" : num(s));
         break;
     }
@@ -264,8 +283,7 @@ void act(int id) {   // caller holds g_mu
     case kCapture:
         if (!display::probe::ready()) { flash("Turn on Frame capture tools and restart the game first."); return; }
         g_model.close();   // capture the game's frame, not this screen
-        g_open = false;
-        g_block_until = GetTickCount() + 250;
+        mark_closed();
         display::probe::request_capture();
         fo::log("modsettings: frame capture requested");
         return;
@@ -347,8 +365,7 @@ void handle(const Event& e) {   // caller holds g_mu
     case Event::Changed: apply(e.id, e.value); break;
     case Event::Action: act(e.id); break;
     case Event::Closed:
-        g_open = false;
-        g_block_until = GetTickCount() + 250;
+        mark_closed();
         fo::log("modsettings: closed");
         break;
     default: break;
@@ -475,6 +492,8 @@ bool fable_menu_up() {
     return game::pause_menu::open() || game::player_modes::running(kInGameMenuMode);
 }
 
+bool fable_menu_open() { return game::pause_menu::open() || game::player_modes::running(kInGameMenuMode); }
+
 bool button_wanted() { return !g_open && g_window && fable_menu_up(); }
 
 void draw_pause_button(Renderer& r, bool) {
@@ -491,8 +510,12 @@ void draw_pause_button(Renderer& r, bool) {
                 static_cast<unsigned>(game::player_modes::running_mask()), paused && show ? "; MOD SETTINGS button drawn" : "");
     }
     was_paused = paused;
-    if (take_row_pick()) { open(kExtras); return; }
-    if (!show) { g_pause_mouse_was_down = false; return; }
+    // A pick just after closing is the click or key that closed the screen, reaching Fable's row.
+    if (mouse_blocked()) {
+        if (g_row_picked.exchange(false)) fo::log("modsettings: Mod Settings row pick ignored, the screen has just closed");
+    } else if (take_row_pick()) { open(kExtras); return; }
+    // While hidden, follow the real button: one held across closing is not a new press.
+    if (!show) { g_pause_mouse_was_down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0; return; }
     // When the served game.bin lists the row, Fable draws it and handles the mouse and keys.
     if (g_row_hooked && game::shop_stock::menu_row_served()) return;
     // An extra entry at the foot of Fable's in-game menu list, in the same place, size and
@@ -512,7 +535,7 @@ void draw_pause_button(Renderer& r, bool) {
         inside = px >= x && px < x + w && py >= y && py < y + h;
     }
     const bool down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-    if (inside && down && !g_pause_mouse_was_down && GetForegroundWindow() == g_window) {
+    if (inside && down && !g_pause_mouse_was_down && !mouse_blocked() && GetForegroundWindow() == g_window) {
         fo::log("modsettings: opened from Fable's menu");
         g_pause_mouse_was_down = down;
         open(kExtras);
@@ -529,6 +552,17 @@ void draw_pause_button(Renderer& r, bool) {
 }
 
 bool input_blocked() { return g_open.load() || GetTickCount() < g_block_until.load(); }
+
+bool mouse_blocked() {
+    if (g_open.load()) return true;
+    const DWORD now = GetTickCount();
+    if (now < g_block_until.load()) return true;
+    if (!g_release_pending.load()) return false;
+    // Held at most a few seconds, so a missed release can never keep the mouse from Fable.
+    if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) && now - g_closed_at.load() < 3000) return true;
+    g_release_pending = false;
+    return false;
+}
 
 void draw(Renderer& r) {
     if (!g_open) return;
@@ -626,6 +660,16 @@ bool on_message(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         if ((msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP) && g_pause_lit && game::pause_menu::open()) return true;
         // Swallow the tail of the key that closed the screen, so Fable doesn't act on it too.
         if ((msg == WM_KEYUP || msg == WM_CHAR) && GetTickCount() < g_block_until.load()) return true;
+        // The same for the mouse: the release of the click that closed it, and any click in the tail.
+        switch (msg) {
+        case WM_LBUTTONUP:
+            if (g_release_pending.exchange(false)) return true;
+            [[fallthrough]];
+        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+        case WM_MBUTTONDOWN: case WM_MBUTTONUP:
+            return mouse_blocked();
+        default: break;
+        }
         return false;
     }
     std::lock_guard<std::mutex> lock(g_mu);

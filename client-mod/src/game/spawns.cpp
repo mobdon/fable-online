@@ -61,14 +61,10 @@ constexpr uintptr_t kLoadThingCalls[] = {0x0052062E, 0x00520BA1, 0x00520F9A, 0x0
 constexpr uintptr_t kReadHeader = 0x004C81F0;
 constexpr uintptr_t kReadHeaderCalls[] = {0x004C89A8, 0x004C9252, 0x0051FE07};
 constexpr uint32_t kHeaderDef = 0x08;
-// CThing::Remove(bool), the call the loader itself makes on a thing it cannot keep (and the
-// script interface's remove command). __thiscall (thing, bool), pops 4.
-constexpr uintptr_t kThingRemove = 0x004C9B80;
 constexpr uint32_t kAICreatureVtable = 0x0127293C;  // CThingAICreature, the .tng "AICreature" kind
 constexpr uint32_t kThingScriptName = 0x74;         // CCharString, set from the entry's ScriptName
 
 using LoadThingFn = uintptr_t(__fastcall*)(uintptr_t manager, uintptr_t unused, uintptr_t parser, int mode);
-using RemoveFn = void(__fastcall*)(uintptr_t thing, uintptr_t unused, int flag);
 
 world::SpawnFilter g_filter;
 bool g_levelHook = false;
@@ -134,7 +130,8 @@ uintptr_t __fastcall load_thing_hook(uintptr_t manager, uintptr_t, uintptr_t par
     if (!read_char_string(thing + kThingScriptName, script, sizeof(script))) return thing;
     if (!g_filter.should_drop(true, g_def, script)) return thing;
 
-    reinterpret_cast<RemoveFn>(kThingRemove)(thing, 0, 1);
+    // CThing::Remove, the call the loader itself makes on a thing it cannot keep (thing.h).
+    if (!remove_thing(thing)) return thing;
     ++g_dropped;
     if (g_dropped <= 20 || g_dropped % 100 == 0)
         fo::log("spawns: left out level monster %s (the server runs it; %u so far)", g_def,

@@ -858,6 +858,9 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             }
             if (!g_chat.is_open()) {
                 if (static_cast<int>(w) == cfg.open_key && !(GetKeyState(VK_MENU) & 0x8000)) {
+                    // Only over the world: on a loading screen or in Fable's pause screen or
+                    // in-game menu the key is Fable's (Enter picks a menu row there).
+                    if (!sync::world_shown() || modsettings::fable_menu_open()) break;
                     g_chat.open();
                     flush_outbox();
                     return 0;
@@ -942,7 +945,7 @@ HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
             if (b[i] & 0x80) m |= 1u << i;
         g_mouse_buttons = m;
     }
-    if (SUCCEEDED(hr) && data && is_mouse(dev) && modsettings::is_open()) {
+    if (SUCCEEDED(hr) && data && is_mouse(dev) && modsettings::mouse_blocked()) {
         modsettings::on_mouse_state(data, size);   // the settings screen has the mouse, nothing under it
         std::memset(data, 0, size);
     } else if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
@@ -972,7 +975,7 @@ HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DW
         }
         g_mouse_buttons = m;
     }
-    if (SUCCEEDED(hr) && inout && is_mouse(dev) && modsettings::is_open()) {
+    if (SUCCEEDED(hr) && inout && is_mouse(dev) && modsettings::mouse_blocked()) {
         if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) modsettings::on_mouse_data(rg, cb, *inout);
         *inout = 0;
     } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {

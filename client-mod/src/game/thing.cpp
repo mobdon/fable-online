@@ -45,6 +45,12 @@ bool looks_like_hero(uintptr_t a) {
            read(phys, &pvt, 4) && pvt == kPhysicsVtable;
 }
 
+/** Bit 0 of +0x91: the engine is removing the thing (an area change); its memory goes soon. */
+bool being_removed(uintptr_t a) {
+    uint8_t flags = 0;
+    return !read(a + kFlags91, &flags, 1) || (flags & 1);
+}
+
 constexpr size_t kScanPiece = 64 * 1024;
 
 /** Walks the process's own private, writable, committed memory. */
@@ -71,8 +77,10 @@ void each_region(Fn&& fn) {
 
 }  // namespace
 
-bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
-    auto fail = [&](const char* w) { if (why) *why = w; return false; };
+namespace {
+/** The thing's CTCHeroStats (component type 4, vtable checked), or 0 with the reason in `why`. */
+uintptr_t hero_stats(uintptr_t thing, std::string* why) {
+    auto fail = [&](const char* w) -> uintptr_t { if (why) *why = w; return 0; };
     uint8_t flags = 0;
     uint32_t range[2] = {};  // begin, end of the {type, component} pairs
     if (!read(thing + kFlags91, &flags, 1) || (flags & 1)) return fail("hero being removed");
@@ -87,14 +95,36 @@ bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
         if (pairs[i * 2] > kHeroStatsType) break;
         if (pairs[i * 2] != kHeroStatsType) continue;
         uint32_t comp = pairs[i * 2 + 1], vt = 0;
-        int32_t v = 0;
         if (!read(comp, &vt, 4)) return fail("stats component unreadable");
         if (vt != kHeroStatsVtable) return fail("type 4 is not CTCHeroStats");
-        if (!read(comp + kStatsRenownTotal, &v, 4) || v < 0 || v > 10000000) return fail("renown out of range");
-        total = v;
-        return true;
+        return comp;
     }
     return fail("no stats component");
+}
+}  // namespace
+
+bool read_renown(uintptr_t thing, int32_t& total, std::string* why) {
+    uintptr_t comp = hero_stats(thing, why);
+    int32_t v = 0;
+    if (!comp) return false;
+    if (!read(comp + kStatsRenownTotal, &v, 4) || v < 0 || v > 10000000) {
+        if (why) *why = "renown out of range";
+        return false;
+    }
+    total = v;
+    return true;
+}
+
+bool read_gold(uintptr_t thing, int32_t& gold, std::string* why) {
+    uintptr_t comp = hero_stats(thing, why);
+    int32_t v = 0;
+    if (!comp) return false;
+    if (!read(comp + kStatsGold, &v, 4) || v < 0) {
+        if (why) *why = "gold unreadable or negative";
+        return false;
+    }
+    gold = v;
+    return true;
 }
 
 bool read_health(uintptr_t thing, float& health, float& maxHealth) {
@@ -126,8 +156,17 @@ uintptr_t physics_of(uintptr_t thing) {
     return phys;
 }
 
+bool remove_thing(uintptr_t thing) {
+    constexpr uintptr_t kThingRemove = 0x004C9B80;  // __thiscall (thing, bool), pops 4
+    using RemoveFn = void(__fastcall*)(uintptr_t thing, uintptr_t unused, int flag);
+    uint32_t vt = 0;
+    if (!read(thing, &vt, 4) || vt < 0x01200000 || vt >= 0x01400000 || being_removed(thing)) return false;
+    reinterpret_cast<RemoveFn>(kThingRemove)(thing, 0, 1);
+    return true;
+}
+
 uintptr_t local_hero() {
-    if (g_hero && !looks_like_hero(g_hero)) {
+    if (g_hero && (!looks_like_hero(g_hero) || being_removed(g_hero))) {
         g_hero = 0;
         fo::log("thing: lost the hero (area change or front end)");
     }
@@ -141,7 +180,8 @@ uintptr_t local_hero() {
         buf.resize(size / 4);
         if (!read(lo, buf.data(), buf.size() * 4)) return;
         for (size_t i = 0; i < buf.size(); ++i)
-            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4) && !is_stand_in(lo + i * 4)) {
+            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4) && !being_removed(lo + i * 4) &&
+                !is_stand_in(lo + i * 4)) {
                 found = lo + i * 4;
                 return;
             }

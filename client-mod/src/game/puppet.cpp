@@ -26,6 +26,9 @@ constexpr uint32_t kShowAfterPlacedMs = 150;
 constexpr uint32_t kRetryRefusedMs = 100;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
 constexpr float kSpawnRadius = 6.0f;
+/** Scripted mode is tried this often, this many times, until the creature's mode stack is there. */
+constexpr uint32_t kScriptedRetryMs = 500;
+constexpr uint32_t kScriptedTries = 12;
 /** Parked puppets kept per def. Beyond this they are retired. */
 constexpr size_t kPoolPerDef = 8;
 /**
@@ -57,6 +60,9 @@ constexpr uint32_t kGaitSettleMs = 150;
 constexpr uint32_t kGaitRefreshMs = 500;
 /** Loops per queued animation. The loop is re-queued whenever the queue runs dry. */
 constexpr int kGaitLoops = 50;
+
+/** Dead as the entity table counts it (world/entities.cpp): a death anim or no health left. */
+bool pose_dead(const world::Pose& pose) { return pose.anim == world::Anim::Death || pose.health <= 0; }
 
 Gait gait_for(const world::Pose& pose) {
     switch (pose.anim) {
@@ -131,6 +137,21 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             p.lastCommandsMs = 0;
             p.createdMs = nowMs;
             p.deadSinceMs = 0;
+            p.leaving = false;
+            // Nothing from the entity it stood in for last: no flinch from its old health, no
+            // half-done swing sequence, no pending retry.
+            p.lastHealth = -1;
+            p.flinchUntilMs = 0;
+            p.strikes = 0;
+            p.retryAtMs = 0;
+            p.animOk = false;
+            p.shownAfterMs = 0;
+            p.wantedSinceMs = 0;
+            p.lastAnimMs = 0;
+            // Park leaves scripted mode on; one that never took it gets more tries from drive().
+            p.scriptedTries = 0;
+            p.scriptedRetryMs = 0;
+            try_scripted_mode(p, nowMs);
             live_.emplace(s.id, std::move(p));
             ++stats_.reused;
             return true;
@@ -162,10 +183,8 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     // Without this a hostile creature's own Fable AI takes the hero as its target and turns
     // down the mod's walk and swing actions (online-17: a bandit refused ST_WALK and stood still
     // while the server's copy fought). Scripted mode is how quest scripts take a creature over.
-    if (scriptedMode_) {
-        bool ok = script::add_scripted_mode(p.ref, "FO_PUPPET");
-        fo::log("puppet: %s %s", name, ok ? "in scripted mode (its own AI is off)" : "has no mode stack; left as it is");
-    }
+    // CreateNear's creature may not be finished yet: drive() tries again on later ticks.
+    try_scripted_mode(p, nowMs);
     p.lastCommandsMs = nowMs;
     p.createdMs = nowMs;
     p.thingAddr = p.ref.thing();
@@ -176,12 +195,29 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     return true;
 }
 
+void PuppetPool::try_scripted_mode(Puppet& p, uint32_t nowMs) {
+    if (!scriptedMode_ || p.scripted || p.scriptedTries >= kScriptedTries) return;
+    if (p.scriptedTries && static_cast<int32_t>(nowMs - p.scriptedRetryMs) < 0) return;
+    ++p.scriptedTries;
+    p.scriptedRetryMs = nowMs + kScriptedRetryMs;
+    // add_scripted_mode only calls the engine once it has found the mode stack, so a failed
+    // try changes nothing and is safe to repeat.
+    p.scripted = script::add_scripted_mode(p.ref, "FO_PUPPET");
+    if (p.scripted)
+        fo::log("puppet: %s in scripted mode (its own AI is off)%s", p.scriptName.c_str(),
+                p.scriptedTries > 1 ? " on a later try" : "");
+    else if (p.scriptedTries == kScriptedTries)
+        fo::log("puppet: %s has no mode stack after %u tries; left as it is", p.scriptName.c_str(), kScriptedTries);
+}
+
 void PuppetPool::park(uint32_t id) {
     auto it = live_.find(id);
     if (it == live_.end()) return;
     Puppet p = std::move(it->second);
     live_.erase(it);
     if (!p.ref.alive()) {
+        // The engine freed it: its address may be reused by any new thing, even a hero.
+        mark_stand_in(p.thingAddr, false);
         ++stats_.lost;
         return;
     }
@@ -203,7 +239,7 @@ void PuppetPool::park(uint32_t id) {
 
 void PuppetPool::place(const std::vector<world::Pose>& poses) {
     for (const world::Pose& pose : poses) {
-        if (pose.anim == world::Anim::Death) continue;  // left where it fell
+        if (pose_dead(pose)) continue;  // left where it fell
         auto it = live_.find(pose.id);
         if (it == live_.end()) continue;
         uintptr_t thing = it->second.ref.thing();  // 0 once the engine has freed it
@@ -235,16 +271,35 @@ void PuppetPool::hold_parked(uint32_t nowMs) {
 }
 
 /**
+ * Removing a creature is only done the way Fable's own gameplay code does it: on the game
+ * thread, with the script interface up, a hero in the world and no area load under way
+ * (the same conditions under which new puppets are made).
+ */
+bool PuppetPool::may_remove() const {
+    return gameThread_ == static_cast<uint32_t>(GetCurrentThreadId()) && script::ready() && local_hero() != 0 && !holding(lastSyncMs_);
+}
+
+/**
  * Let go of a puppet for good. It is never handed to Fable's own AI (SetFree): a freed
- * bandit is an ordinary hostile creature and attacks the hero. It stays hidden, far away.
+ * bandit is an ordinary hostile creature and attacks the hero. It is taken out of the world
+ * when that is safe (otherwise a named FO_PUPPET_* creature would stay, and could come back
+ * with its own AI after a save and reload); if not, it stays hidden, far away.
  */
 void PuppetPool::retire(Puppet& p) {
     if (p.ref.alive()) {
         script::clear_commands(p.ref);
         script::set_drawable(p.ref, false);
         script::set_attackable(p.ref, false);
-        send_away(p);
+        uintptr_t thing = p.ref.thing();
+        if (thing && may_remove() && remove_thing(thing)) {
+            if (stats_.removed++ < 20) fo::log("puppet: %s removed from the world", p.scriptName.c_str());
+        } else {
+            send_away(p);
+        }
     }
+    // Let go of the mark with the thing: a hero later made at that address must be found.
+    mark_stand_in(p.thingAddr, false);
+    p.thingAddr = 0;
     p.ref.release();
 }
 
@@ -262,31 +317,19 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
         hold(nowMs, kHoldAfterLossMs);
         return;
     }
+    try_scripted_mode(p, nowMs);
+    p.leaving = false;  // the server still sends it
 
     // A dead creature is left where it fell, playing its death and then lying still; the
     // server will stop sending it when the corpse is gone.
-    if (pose.anim == world::Anim::Death) {
-        if (!p.deadSinceMs) {
-            p.deadSinceMs = nowMs ? nowMs : 1;
-            p.diedAt = Pos{pose.x, pose.y, pose.z};
-            fo::log("puppet: %s died on the server", p.scriptName.c_str());
-        }
-        // Its own AI may still try to walk it off or swing: keep it where it fell.
-        Pos at;
-        if (read_pos(thing, at) && std::hypot(at.x - p.diedAt.x, at.y - p.diedAt.y) > kCorpseDriftM)
-            write_pos(thing, p.diedAt, false, 0);
-        if (p.hidden) return;
-        if (animate_) animate(p, pose, nowMs);
-        uint32_t dead = nowMs - p.deadSinceMs;
-        bool fell = p.gait == Gait::Death;
-        if ((!fell && dead >= kDeathRefusedHideMs) || dead >= kCorpseShownMs) {
-            script::clear_commands(p.ref);
-            script::set_drawable(p.ref, false);
-            p.hidden = true;
-            fo::log("puppet: %s hidden %u ms after its death (%s)", p.scriptName.c_str(), dead,
-                    fell ? "corpse removed" : "the death animation never played");
-        }
+    if (pose_dead(pose)) {
+        hold_corpse(p, thing, pose, nowMs);
         return;
+    }
+    if (p.deadSinceMs) {
+        // Alive again (a downed hero brought back): an ordinary puppet from here on.
+        fo::log("puppet: %s is alive again on the server", p.scriptName.c_str());
+        p.deadSinceMs = 0;
     }
 
     write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
@@ -324,6 +367,56 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
         script::clear_commands(p.ref);
         if (animating) p.gait = Gait::None;  // the clear ended it: start the gait again next tick
     }
+}
+
+void PuppetPool::hold_corpse(Puppet& p, uintptr_t thing, const world::Pose& pose, uint32_t nowMs) {
+    if (!p.deadSinceMs) {
+        p.deadSinceMs = nowMs ? nowMs : 1;
+        p.diedAt = Pos{pose.x, pose.y, pose.z};
+        fo::log("puppet: %s died on the server (%s)", p.scriptName.c_str(),
+                pose.anim == world::Anim::Death ? "death anim" : "no health left");
+    }
+    // Its own AI may still try to walk it off or swing: keep it where it fell.
+    Pos at;
+    if (read_pos(thing, at) && std::hypot(at.x - p.diedAt.x, at.y - p.diedAt.y) > kCorpseDriftM)
+        write_pos(thing, p.diedAt, false, 0);
+    if (p.hidden) return;
+    if (animate_) {
+        world::Pose dying = pose;  // a 0-health pose may still carry its last anim: play the fall
+        dying.anim = world::Anim::Death;
+        animate(p, dying, nowMs);
+    }
+    uint32_t dead = nowMs - p.deadSinceMs;
+    bool fell = p.gait == Gait::Death;
+    if ((!fell && dead >= kDeathRefusedHideMs) || dead >= kCorpseShownMs) {
+        script::clear_commands(p.ref);
+        script::set_drawable(p.ref, false);
+        p.hidden = true;
+        fo::log("puppet: %s hidden %u ms after its death (%s)", p.scriptName.c_str(), dead,
+                fell ? "corpse removed" : "the death animation never played");
+    }
+}
+
+/** Removed puppets whose death is still showing: kept on their corpse until hidden, then parked. */
+void PuppetPool::finish_leaving(uint32_t nowMs) {
+    std::vector<uint32_t> done;
+    for (auto& [id, p] : live_) {
+        if (!p.leaving) continue;
+        uintptr_t thing = p.ref.thing();
+        if (thing && p.ref.alive() && !p.hidden) {
+            world::Pose pose;
+            pose.id = id;
+            pose.kind = p.spawn.kind;
+            pose.x = p.diedAt.x;
+            pose.y = p.diedAt.y;
+            pose.z = p.diedAt.z;
+            pose.anim = world::Anim::Death;
+            pose.health = 0;
+            hold_corpse(p, thing, pose, nowMs);
+        }
+        if (!thing || !p.ref.alive() || p.hidden) done.push_back(id);
+    }
+    for (uint32_t id : done) park(id);
 }
 
 void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
@@ -391,13 +484,27 @@ void PuppetPool::animate(Puppet& p, const world::Pose& pose, uint32_t nowMs) {
 
 void PuppetPool::sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
                       const std::vector<world::Pose>& poses, uint32_t nowMs) {
+    gameThread_ = static_cast<uint32_t>(GetCurrentThreadId());
+    lastSyncMs_ = nowMs;
     for (uint32_t id : removed) {
         pending_.erase(id);
+        // A creature removed while its death shows (a corpse cleared early, or the last frames
+        // lost) falls and lies there first, then is parked like any other.
+        auto it = live_.find(id);
+        if (it != live_.end() && it->second.deadSinceMs && !it->second.hidden) {
+            if (!it->second.leaving) fo::log("puppet: %s removed while dead; parked after its fall", it->second.scriptName.c_str());
+            it->second.leaving = true;
+            continue;
+        }
         park(id);
     }
-    for (const world::Spawn& s : spawned)
+    for (const world::Spawn& s : spawned) {
+        auto it = live_.find(s.id);
+        if (it != live_.end() && it->second.leaving) park(s.id);  // the id is back: start afresh
         if (!live_.count(s.id)) pending_[s.id] = s;
+    }
     for (const world::Pose& p : poses) drive(p, nowMs);
+    finish_leaving(nowMs);
     hold_parked(nowMs);
     // One new puppet at a time, and none while held.
     if (!pending_.empty() && !holding(nowMs) && nowMs - lastSpawnMs_ >= kSpawnEveryMs) {
