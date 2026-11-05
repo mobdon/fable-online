@@ -268,10 +268,12 @@ export class AiDirector implements AiHooks {
         this.world.combat.setBlocking(b.c.id, false);
       }
       if (b.c.stunnedMs > 0) {
-        // Staggered: combat owns the animation, and a swing being wound up is lost.
+        // Staggered: it stops where it is and flinches, and a swing being wound up is lost.
         if (b.swingAt) this.cancelSwing(b);
+        b.c.anim = Anim.Hit;
         continue;
       }
+      if (b.c.anim === Anim.Hit) b.c.anim = b.state === 'idle' || b.state === 'wander' || b.state === 'return' ? Anim.Idle : Anim.Alert;
       if (b.swingAt && this.now >= b.swingAt) this.land(b);
       else if (b.swingAt) {
         // Track the target through the first part of the wind-up, then commit to the line.
