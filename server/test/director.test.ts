@@ -25,6 +25,23 @@ test('childhood and Guild training get private solo instances', () => {
   assert.equal(app.director.stats().privateInstances, 1);
 });
 
+test('a move inside a solo instance keeps its channel running', () => {
+  const app = testApp();
+  const kid = makeHero(app, 'childhood').hero;
+  const inbox: string[] = [];
+  const c1 = app.director.join(kid, link(kid.id, inbox));
+  const c2 = app.director.transfer(kid.id, c1.region.name, { x: 1, y: 2, z: 0 }, 'door');
+  assert.equal(c2.kind, 'private');
+  assert.equal(app.director.channelOf(kid.id), c2);
+  assert.equal(app.director.stats().privateInstances, 1);
+  c2.loading.clear();
+  inbox.length = 0;
+  app.director.tick(50);
+  assert.ok(inbox.some((f) => JSON.parse(f).t === 'tick'), 'the channel is still stepped');
+  app.director.leave(kid.id);
+  assert.equal(app.director.stats().privateInstances, 0);
+});
+
 test('shared channels fill to the soft cap, then scale out, then overflow to the hard cap', () => {
   const app = testApp({ channelSoftCap: 10, channelHardCap: 12, maxChannels: 3 });
   const heroes = Array.from({ length: 36 }, () => makeHero(app).hero);

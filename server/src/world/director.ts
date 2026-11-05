@@ -192,11 +192,14 @@ export class Director {
     const link = from.players.get(heroId)!;
     // Pick (or open) the target before leaving, so a full region leaves the hero where they are.
     const priv = solo ?? (via === 'law' ? false : from.kind === 'private');
-    const target = priv ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion, heroId);
+    // A move inside the hero's own instance (a door within the region) stays in that channel:
+    // opening it again would reuse its id, and closing `from` would then drop the new one.
+    const same = priv && from.kind === 'private' && from.id === privateId(toRegion, heroId);
+    const target = same ? from : priv ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion, heroId);
     from.remove(heroId);
     this.where.delete(heroId);
     this.hooks.onLeave?.(from, heroId);
-    if (from.kind === 'private') this.closeChannel(from);
+    if (from.kind === 'private' && !same) this.closeChannel(from);
     this.persist(heroId, toRegion, at);
     // A client that loaded the region itself is already there: no wait, and the next report
     // comes from where it just was.
@@ -468,7 +471,7 @@ export class Director {
     if (this.privateCount >= this.cfg.maxPrivateInstances)
       throw new GameError('instances_full', 'All solo instances are busy, try again shortly', 503);
     const def = this.regions.get(region)!;
-    const id = `${region}~${heroId}`;
+    const id = privateId(region, heroId);
     const ch = new Channel(id, def, 'private', this.simFactory(def, id), heroId, this.cfg.interestRadius);
     ch.origin = this.regions.origin(region);
     this.channels.set(id, ch);
@@ -495,4 +498,5 @@ export class Director {
   }
 }
 
+const privateId = (region: string, heroId: number) => `${region}~${heroId}`;
 const isOrigin = (p: Vec3) => p.x === 0 && p.y === 0 && p.z === 0;
