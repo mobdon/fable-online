@@ -223,3 +223,12 @@ test('dev spawns reach the combat sim through the town layer', () => {
   const r = w.sim.devSpawn!(h, 'CREATURE_WOLF', 10);
   assert.ok('id' in r, JSON.stringify(r));
 });
+
+test('dev despawns reach the inner sim through the town layer', () => {
+  const w = world();
+  const calls: string[] = [];
+  (w.combat as unknown as { devDespawn: (h: number, what: string) => object }).devDespawn = (_h, what) => (calls.push(what), { removed: ['CREATURE_WOLF'] });
+  const r = w.sim.devDespawn!(1, 'nearest');
+  assert.deepEqual(r, { removed: ['CREATURE_WOLF'] });
+  assert.deepEqual(calls, ['nearest']);
+});
