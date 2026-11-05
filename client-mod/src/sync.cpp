@@ -108,6 +108,8 @@ struct State {
     uint32_t lastGearReadMs = 0;
     game::HeroGear lastGear;
     bool gearLogged = false;
+    std::string gearWhy;
+    bool gearListLogged = false;
     uint32_t healSeq = 0;
     /** The server's death, shown without Fable's own game over (world/death.h). */
     world::DeathView death;
@@ -150,7 +152,6 @@ struct State {
     /** Hero experience kept in step with the server (only when its welcome offers it). */
     world::XpSync xp;
     bool serverXp = false;
-    bool gearFailLogged = false;
     bool xpOn = true;
     uint32_t lastXpMs = 0;
     uint32_t xpWrites = 0;
@@ -723,11 +724,24 @@ void report_gear(uint32_t nowMs) {
     game::HeroGear g;
     if (!hero) return;
     if (!game::read_gear(hero, g)) {
-        if (!s.gearFailLogged && *game::gear_missing()) {
-            s.gearFailLogged = true;
-            fo::log("sync: can't read the hero's gear (%s)", game::gear_missing());
+        // Said once per reason, with the hero's component list the first time, so a log shows
+        // why no gear went out.
+        const std::string why = game::gear_why();
+        if (why != s.gearWhy) {
+            s.gearWhy = why;
+            fo::log("sync: can't read the hero's gear: %s", why.c_str());
+            if (!s.gearListLogged && why != "no hero") {
+                s.gearListLogged = true;
+                fo::log("sync: hero components (type:vtable): %s", game::component_list(hero).c_str());
+            }
         }
         return;
+    }
+    if (!g.armourKnown && g.armourWhy != s.gearWhy) {
+        s.gearWhy = g.armourWhy;
+        fo::log("sync: can't read the hero's clothing: %s", g.armourWhy.c_str());
+    } else if (g.armourKnown) {
+        s.gearWhy.clear();
     }
     std::string worn;
     for (const std::string& a : g.armour) worn += (worn.empty() ? "" : ", ") + a;

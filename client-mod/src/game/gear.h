@@ -14,6 +14,8 @@ struct HeroGear {
     std::vector<std::string> armour;
     /** False when the clothing list couldn't be read: the report then leaves armour out. */
     bool armourKnown = false;
+    /** Why the clothing couldn't be read, when it couldn't. */
+    std::string armourWhy;
 };
 
 constexpr size_t kMaxWorn = 12;
@@ -25,7 +27,10 @@ constexpr size_t kMaxWorn = 12;
  */
 bool read_gear(uintptr_t hero, HeroGear& out);
 
-/** Why read_gear failed last, for the log ("" after a good read). */
-const char* gear_missing();
+/** Why the last read_gear (or its clothing part) failed, for the log. */
+const char* gear_why();
+
+/** The hero's components as "type:vtable" pairs, for the log when a lookup fails. */
+std::string component_list(uintptr_t hero);
 
 }  // namespace fo::game
