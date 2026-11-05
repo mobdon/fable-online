@@ -27,6 +27,8 @@ void close();
 bool is_open();
 /** True while open, and for a moment after closing, so the closing key doesn't reach the game. */
 bool input_blocked();
+/** The same for the mouse, also held until the button that closed the screen is released. */
+bool mouse_blocked();
 
 /** Overlay, render thread, between Renderer::begin and end. */
 void draw(overlay::Renderer& r);
