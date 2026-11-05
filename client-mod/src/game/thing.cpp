@@ -155,6 +155,8 @@ uintptr_t local_hero() {
 
 void forget_hero() { g_hero = 0; }
 
+bool marked_stand_in(uintptr_t thing) { return is_stand_in(thing); }
+
 void mark_stand_in(uintptr_t thing, bool on) {
     if (!thing) return;
     std::lock_guard<std::mutex> lock(g_standInsMu);

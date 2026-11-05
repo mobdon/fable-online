@@ -49,6 +49,8 @@ uintptr_t local_hero();
 void forget_hero();
 /** Marks a stand-in (another player shown with the hero's def) so the hero scan skips it. */
 void mark_stand_in(uintptr_t thing, bool on);
+/** True for a thing marked with mark_stand_in. */
+bool marked_stand_in(uintptr_t thing);
 
 bool read_pos(uintptr_t thing, Pos& out);
 /** Facing in radians, the same convention write_pos uses (forward = -sin, cos). */

@@ -94,6 +94,25 @@ test('part of a stack is split off for the receiver; the rest stays', () => {
   assert.ok(w.app.economy.audit().ok);
 });
 
+test('a whole stack offered without a quantity cannot shrink before the swap', () => {
+  const w = world();
+  const [a, b] = w.heroes as [number, number];
+  w.app.economy.grant(b, 300, 'quest_reward', key());
+  const apples = w.app.economy.mintItem(a, 'Apple', 20, 'loot', key()).itemId;
+  w.trades.open(a, b);
+  w.trades.setOffer(b, 300, []);
+  const v = w.trades.setOffer(a, 0, [apples]);
+  assert.deepEqual(w.last(b, 'trade_state')!.theirs.items, [{ item: apples, def: 'Apple', qty: 20 }]);
+  w.wait();
+  w.trades.accept(b, v);
+  // A eats 19 of the 20 between B's accept and their own.
+  for (let i = 0; i < 19; i++) w.app.economy.consumeOne(a, 'Apple', key());
+  assert.throws(() => w.trades.accept(a, v), code('bad_quantity'));
+  assert.equal(w.app.economy.balance(b), 300);
+  assert.equal(w.app.economy.item(apples)!.owner_hero, a);
+  assert.ok(w.app.economy.audit().ok);
+});
+
 test('an item sold, moved or spent after it was offered fails the swap; nothing moves', () => {
   const w = world();
   const [a, b] = w.heroes as [number, number];

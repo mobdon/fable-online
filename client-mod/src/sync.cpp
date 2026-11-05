@@ -1089,7 +1089,7 @@ void tick() {
 }  // namespace
 
 bool world_shown() {
-    const uint32_t now = GetTickCount(), at = g_worldShownMs.load();
+    const uint32_t now = clock_ms(), at = g_worldShownMs.load();  // tick() stamps with clock_ms()
     return at && now - at < 250 && static_cast<int32_t>(now - g_busyUntilMs.load()) >= 0;
 }
 

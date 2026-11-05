@@ -276,7 +276,12 @@ export class TradeSessions {
 
   private validate(heroId: number, offer: Offer): void {
     if (offer.gold > this.economy.balance(heroId)) throw new GameError('insufficient_gold', 'Not enough gold');
-    for (const x of offer.items) this.economy.tradeableItem(heroId, x.id, x.qty);
+    // A whole stack is frozen at the size the other side sees: if it shrinks before the swap
+    // (a potion drunk), executeTrade refuses the trade instead of handing over less.
+    for (const x of offer.items) {
+      const it = this.economy.tradeableItem(heroId, x.id, x.qty);
+      x.qty ??= it.quantity;
+    }
   }
 
   private side(t: Trade, i: 0 | 1): TradeSide {

@@ -5,6 +5,8 @@
 #include "../log.h"
 
 namespace fo::game {
+bool marked_stand_in(uintptr_t thing);   // thing.cpp (thing.h would clash with the offsets below)
+
 namespace {
 constexpr uint32_t kHeroVtable = 0x012457FC;      // CThingPlayerCreature
 constexpr uint32_t kPhysicsVtable = 0x0126616C;   // CTCPhysicsControlled
@@ -46,7 +48,9 @@ uintptr_t scan() {
                 size_t n = mbi.RegionSize - off < kChunk ? mbi.RegionSize - off : kChunk;
                 if (!read(lo + off, buf, n)) break;
                 for (size_t i = 0; i < n / 4; ++i)
-                    if (buf[i] == kHeroVtable && looks_like_hero(lo + off + i * 4)) return lo + off + i * 4;
+                    if (buf[i] == kHeroVtable && looks_like_hero(lo + off + i * 4) &&
+                        !marked_stand_in(lo + off + i * 4))  // other players are drawn with the hero's def
+                        return lo + off + i * 4;
             }
         }
         p = lo + mbi.RegionSize;
@@ -79,7 +83,7 @@ HeroPos hero_peek() {
 
 HeroPos hero_read() {
     HeroPos out;
-    if (g_hero && !looks_like_hero(g_hero)) { g_hero = 0; fo::log("hero: lost (area change or menu)"); }
+    if (g_hero && (!looks_like_hero(g_hero) || marked_stand_in(g_hero))) { g_hero = 0; fo::log("hero: lost (area change or menu)"); }
     if (!g_hero) {
         if (GetTickCount() - g_last_scan < 3000) return out;  // scanning is slow; not every tick
         g_last_scan = GetTickCount();
