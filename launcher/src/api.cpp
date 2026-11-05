@@ -112,6 +112,10 @@ bool join(const Config& c, Session& s, const std::string& region, const std::str
     out.ticket = v["ticket"].str();
     out.host = v["host"].str();
     out.port = int(v["port"].num());
+    const json::Value& chat = v["chat"];
+    out.chat_token = chat["token"].str();
+    out.chat_host = chat["host"].str().empty() ? out.host : chat["host"].str();
+    out.chat_port = int(chat["port"].num());
     return true;
 }
 

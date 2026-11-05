@@ -82,7 +82,7 @@ the creatures' `InitialPosX` in the `.tng` agree (2067.01 = 2048 + 19.01 on
 | Door | Shared by the channel. Swings shut 20 s after being opened. Prison doors stay locked. |
 | Demon door | The riddle runs in the hero's own game, like every quest. The client reports `opened`; the server checks the hero is within 10 m, records it per hero, and only then lets that hero through the exit behind it. The reward chests behind it are ordinary once-per-hero chests. |
 | Door that loads another region | Moves the hero to the linked entrance. |
-| Region exit | Walking into it (server position) moves the hero to the linked entrance. |
+| Region exit | Walking into it (server position) moves the hero to the linked entrance. The hero's own game also reports the exit it fired (`interact` with `use`); the server checks the hero is within the exit's radius + 3 m and its gates (a shut demon door), then moves the hero and answers `{"t":"ok"}`. |
 
 No duping: every chest, spot, container and pickup goes through
 `Economy.claimLoot` with a claim key such as `chest:<hero>:<thing>`. The key is unique in
@@ -125,14 +125,36 @@ against them:
 
 Exits that only exist in quest sections are left to the client's quest for now.
 
+### Cullis Gates and the Guild Seal
+
+`server/src/world/travel/travel.ts` (`Travel`). The extractor lists every thing with a
+`CTCTeleporter` component as a gate (`gates` in `world-things.json`), the Guild's
+`OBJECT_GUILD_PEDESTAL_TELEPORT_01` marked `guild`. Teleporters in buyable houses and
+switched-off models (`*_OFF_*`) are left out, and a gate placed twice at the same spot (a
+quest section swapping models) is kept once.
+
+| Rule | Detail |
+| --- | --- |
+| Unlocking | A gate unlocks for a hero when the server's copy of the hero is within 12 m of it (checked about once a second), or stands in it and walks in. Stored per hero in `hero_flags` as `gate:<id>`. Nothing the client says unlocks a gate. The Guild is always open. |
+| Who can travel | Graduated heroes in a shared channel, alive, not loading a region, not wanted or in prison (the law's `cullis_gate` check in `Director.transfer`). |
+| Combat | No travel for 10 s after dealing or taking a hit (`RegionSim.combatState`). |
+| Cooldown | 10 s between jumps. |
+| Barriers | No travel out of or into `DemonDoor_*`, the prisons, `BowerstoneJail`, `Arena` and `ArenaCells`. |
+| Seal jump | Travel without `from` is a Guild Seal jump from anywhere and remembers where the hero left; `to: "back"` returns there once. The way back is kept in memory, not across logouts. |
+| Gate to gate | With `from`, the hero must stand within 4 m of that gate; no way back is set. |
+| Arrival | 2.5 m out of the gate along its facing, then the usual `enter_region` (`via: "cullis_gate"`, `thing`: the gate) and the region-load freeze. |
+| Parties | `Travel.parties` (unset until parties exist). Members in the same channel within 20 m who pass the same checks go along and land around the arrival point; the rest are told `travel_result` with `left_behind_by`. |
+
 ## Protocol
 
 Client to server:
 
 | Message | Meaning |
 | --- | --- |
-| `{"t":"interact","thing":"LookoutPoint:112","action":"use"}` | The hero used a thing. `action` is `use` (default), `open`, `close`, or `opened` (demon doors). |
+| `{"t":"interact","thing":"LookoutPoint:112","action":"use"}` | The hero used a thing. `action` is `use` (default), `open`, `close`, or `opened` (demon doors). On an exit, `use` means Fable fired it and is waiting for the server. |
 | `{"t":"region_ready","region":"GreatwoodEntrance"}` | The local game finished loading the region it was sent to. |
+| `{"t":"gates"}` | List the gates this hero can travel to. An `interact` on a gate does the same and unlocks it if the hero is there. |
+| `{"t":"travel","to":"LookoutPoint:5"\|"guild"\|"back","from":"Greatwood:7"}` | Travel. `from` (optional) is the gate the hero stands in; without it this is a Guild Seal jump. |
 
 Server to client:
 
@@ -142,6 +164,10 @@ Server to client:
 | `{"t":"objects","region":...,"doors":[[id,open]],"gone":[ids],"opened":[ids]}` | Sent after every `enter_region`: doors not in their default state, items gone for this hero, chests and demon doors this hero already opened. |
 | `{"t":"object","id":...,"open":true}` / `{"gone":true}` / `{"opened":true}` | One thing changed. |
 | `{"t":"loot","thing":...,"gold":500,"items":[{"item_id","def"}],"blocked":[],"again":false}` | What the hero got. `again` means they already had it and nothing new was made. |
+| `{"t":"ok","thing":...}` | Accepted an exit or a door that loads another region; `enter_region` follows. |
+| `{"t":"gates","gates":[{"id","region","guild"}],"guild":true,"back":{"region"}\|null}` | Where this hero can travel. |
+| `{"t":"gate_unlocked","id":...,"region":...}` | The hero just found a gate. |
+| `{"t":"travel_result","ok":true,"to":...,"region":...,"party":[ids]}` / `{"ok":false,"error":"locked"\|"in_combat"\|"cooldown"\|"barred"\|"no_return"\|"too_far"\|"wanted"\|...}` | Answer to `travel`. Party members who went along get `"with":<leader>`; ones left behind get `"left_behind_by":<leader>`. On success `enter_region` follows. |
 | `{"t":"error","error":"too_far"\|"need_keys"\|"gone"\|"locked"\|"demon_door_closed"\|...,"thing":...}` | Refused. |
 
 ## The client side
@@ -188,21 +214,44 @@ The jobs in the mod, in order:
 
 ### What the mod does today
 
-Built on the entity sync layer (`docs/entity-sync.md`):
+Thing ids (job 1): the thing manager (`[0x13B8A1C]`, a STLport `map<uint64, CThing*>` at
++0x58: node +4 parent, +8 left, +0xC right, +0x10 key, +0x18 thing) is keyed by the
+run-time UID, `(MapUID << 40) | uid from the level file`. The mod reads the MapUID to
+level script name table from the player's own `Data/Levels/FinalAlbion.wld`, so the
+server id is `<LevelScriptName>:<uid & 0xFFFFFFFF>` with no guessing. A component's thing
+is at component +4; a thing's components are a sorted vector of `{int id, CTCBase*}` at
++0x44.
 
-- `client-mod/src/world/objects.{h,cpp}` (pure logic, `tests/objects_test.cpp`) keeps the
-  server's answers: door states, items gone, chests and demon doors opened, loot received
-  and refusals. It builds `interact` and `region_ready` frames, sends a request for a
-  thing at most once a second while it waits for the answer, refuses requests while a
-  region is loading, and forgets the old region on every region change.
-- `client-mod/src/sync.cpp` feeds it every frame. After an `enter_region` with
-  `loading`, it waits for the local game's own load to finish (the hero exists again and
-  is in a different area) and sends `region_ready`, or sends it after 25 s so the hero is
-  never stuck. Until job 2 is mapped, the local game loads the next region itself when the
-  hero walks through the exit, at the same moment the server moves them.
-- `client-mod/src/game/things.{h,cpp}` is where the changes reach Fable. Finding the local
-  thing for a server id is not mapped yet, so each change is logged
-  (`things: open door LookoutPoint:...`) instead of applied.
+Eleven direct call sites inside Fable.exe go through the mod (`client-mod/src/game/things.cpp`).
+Each call site is checked byte for byte before it is changed, so another exe is left alone:
 
-Not done yet: jobs 1 and 3 to 6 above (the slots and offsets in the running game), and the
-inventory sync the loot relies on.
+| Call site | Fable call | What the mod does online |
+| --- | --- | --- |
+| 0x7798F6 (`CTCDRegionExit` update, slot 9) | `Trigger` 0x779080, posts the region-change message | Holds it, sends `interact` `use`. On `enter_region` or `ok` the trigger runs and Fable loads the region; `demon_door_closed`, `locked` or `jailed` drops it; anything else, or 3 s with no answer, lets it run. |
+| 0x7507F6 (`CTCChest` update), 0x81235B (search timer) | `GiveToHero` 0x74EE90, puts gold and items in the inventory | Holds it, sends `interact` `use`. `loot` with `again:false` lets Fable hand over the chest's own contents; `again`, `gone`, `need_keys`, `need_spade` drop it; anything else, or 5 s, lets it run. |
+| 0x731094, 0x7310DC / 0x7310A4, 0x731152 (`CTCDoor` update) | `PlayOpen` 0x730C00 / `PlayClose` 0x730DD0 | Fable plays the door, and if the hero is within 5 m the mod sends `interact` `open` or `close`. |
+| 0x5FBD79 (teleport to a gate's thing, also the Guild Seal's "Guild"), 0x5FC095 / 0x5FC0A8 (teleport to a region's active gate) | `CTCTeleporter::TeleportHeroHere` 0x7DFCF0, posts the same move message (0x2C) as an exit, with the gate's position | Holds it, sends `travel` with the gate's thing id. On `enter_region` or `travel_result` ok the jump runs; a rule refusal (`locked`, `in_combat`, `cooldown`, `barred`, `wanted`, `in_prison`, `no_return`, ...) drops it; anything else, or 4 s, lets it run. |
+| 0x41F58D (teleport screen, "go back") | 0x5FAD40, the same message to the spot the last seal jump left | Held the same way, sent as `travel` `back`. |
+
+`CTCTeleporter` (vtable 0x0126FDA4, component type 0xDD; a thing with one has flag
+0x20000000 at +0x38): +0x10 active (found), +0x11 set once, +0x12 hero-inside latch, +0x1B
+open the teleport screen on the next update. The Guild teleport (0x5FBD90) looks for the
+teleporter whose def is `HERO_GUILD_TELEPORT_MARKER`; the region list (0x5FBFA0) takes the
+first active teleporter in the chosen region.
+
+`CTCDoor`: +0x10 wanted state, +0x11 shown state, +0x14 game time it opened, +0x20 def
+(+0x28 trigger type: 0 proximity, 1 used). The update plays any change between the two
+states, so an `object` `open` from the server is applied by writing +0x10 (and +0x14 from
+the game clock at 0x13B89BC). `CTCDRegionExit`: +0xC Active, +0xF fired, +0x14 Radius,
++0x20 linked entrance UID. `CTCChest`: +0x30 ChestOpen; `CTCContainerRewardHero`: +0x18
+RewardEnabled.
+
+The held-action rules are pure logic in `client-mod/src/world/held.{h,cpp}`
+(`tests/held_test.cpp`). Offline, or with `FABLE_ONLINE_THINGS=0`, nothing is held.
+A quest script handing over a container's contents (`CGameScriptInterface` slot 124) is not
+routed, because quests run in each player's own game.
+
+Still to do: hiding items on the ground and pick-ups (job 5), demon door `opened` (job 6),
+doors that load another region (`CTCActionUseScriptedHook`), showing an already-emptied
+chest as open on arrival, and the inventory sync (Fable hands over its own copy of a
+chest's contents; the server's roll for potions can differ).

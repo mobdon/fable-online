@@ -2,8 +2,10 @@ import type { WebSocket } from 'ws';
 import type { App } from '../app.js';
 import { GameError } from '../errors.js';
 import type { PlayerLink } from '../world/channel.js';
-import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage } from './protocol.js';
+import { ResumeTokens } from './resume.js';
+import { Bucket, decode, encode, ProtocolError, type LawRequest, type ClientMessage, type TradeRequest, type PartyRequest } from './protocol.js';
 import { SHOP_REACH } from '../economy/shops.js';
+import { claimHeal } from '../combat/healing.js';
 import { townOf } from '../world/town/town-sim.js';
 import { shopIdOf } from '../world/town/townsfolk.js';
 
@@ -25,6 +27,13 @@ export class GameSocket {
   private interacts = new Bucket(4, 8);
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
+  private heals = new Bucket(2, 4);
+  private tradeReqs = new Bucket(4, 10);
+  private tradeInvites = new Bucket(0.2, 3);
+  private devSpawns = new Bucket(1, 5);
+  private travels = new Bucket(1, 3);
+  private partyReqs = new Bucket(2, 6);
+  private partyChats = new Bucket(1, 5);
   private drops = 0;
   private dropWindow = Date.now();
   private warnedPos = false;
@@ -74,24 +83,22 @@ export class GameSocket {
       }
       case 'interact':
         if (!this.interacts.take()) return this.dropped('interact flood');
-        return this.send(this.app.objects.interact(this.heroId, msg.thing, msg.action));
+        if (this.app.travel.isGate(msg.thing)) return this.send(this.app.travel.useGate(this.heroId, msg.thing));
+        return this.send(this.exitAware(msg.thing, this.app.objects.interact(this.heroId, msg.thing, msg.action)));
+      case 'gates':
+        if (!this.interacts.take()) return this.dropped('interact flood');
+        return this.send(this.app.travel.list(this.heroId));
+      case 'travel': {
+        if (!this.travels.take()) return this.send({ t: 'travel_result', ok: false, to: msg.to, error: 'rate', message: 'Slow down' });
+        const target = msg.to === 'guild' ? { guild: true as const } : msg.to === 'back' ? { back: true as const } : { gate: msg.to };
+        return this.send(this.app.travel.travel(this.heroId, target, msg.from));
+      }
       case 'region_ready':
         this.app.director.regionReady(this.heroId, msg.region);
         return;
-      case 'hero_pos': {
+      case 'hero_pos':
         if (!this.inputs.take()) return this.dropped('hero_pos flood');
-        // Off by default: a client-chosen position is a cheat waiting to happen. It
-        // exists so the first in-game tests can run before Fable's input is mapped.
-        if (!this.app.cfg.trustClientPositions) {
-          if (!this.warnedPos) {
-            this.warnedPos = true;
-            this.app.events.emit({ type: 'input_rejected', heroId: this.heroId, reason: 'hero_pos not trusted' });
-          }
-          return;
-        }
-        this.app.director.channelOf(this.heroId)?.placeHero(this.heroId, { x: msg.x, y: msg.y, z: msg.z }, msg.yaw);
-        return;
-      }
+        return this.heroPos(this.heroId, msg);
       case 'ping':
         if (!this.inputs.take()) return this.dropped('ping flood');
         return this.send({ t: 'pong', n: msg.n });
@@ -108,14 +115,118 @@ export class GameSocket {
       case 'shop_sell':
         if (!this.shopActions.take()) return this.send({ t: 'shop_result', ok: false, error: 'rate', message: 'Slow down' });
         return this.shop(this.heroId, msg);
+      case 'party':
+        return this.party(this.heroId, msg);
+      case 'heal':
+        if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
+        return this.heal(this.heroId, msg.share, msg.key);
+      case 'trade_request':
+        if (!this.tradeInvites.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Wait a moment before asking again' });
+        return this.trade(this.heroId, msg);
+      case 'trade_answer':
+      case 'trade_offer':
+      case 'trade_accept':
+      case 'trade_unaccept':
+      case 'trade_cancel':
+        if (!this.tradeReqs.take()) return this.send({ t: 'trade_error', error: 'rate', message: 'Slow down' });
+        return this.trade(this.heroId, msg);
+      case 'dev_spawn':
+        if (!this.devSpawns.take()) return this.send({ t: 'dev_result', ok: false, message: 'Slow down' });
+        return this.devSpawn(this.heroId, msg.def, msg.count);
       case 'hello':
         return this.close(4002, 'duplicate hello');
     }
   }
 
+  /**
+   * The mod reporting where its Fable has the hero, until Fable's input is mapped. With
+   * clientMovement 'checked' the channel accepts only moves the hero could have made, and a
+   * refused one gets the server's position back so the client can snap to it.
+   */
+  private heroPos(heroId: number, msg: Extract<ClientMessage, { t: 'hero_pos' }>): void {
+    const { app } = this;
+    const mode = app.cfg.clientMovement;
+    if (mode === 'off') {
+      if (!this.warnedPos) {
+        this.warnedPos = true;
+        app.events.emit({ type: 'input_rejected', heroId, reason: 'hero_pos not accepted' });
+      }
+      return;
+    }
+    const ch = app.director.channelOf(heroId);
+    if (!ch) return;
+    const at = { x: msg.x, y: msg.y, z: msg.z };
+    const g = ch.moves.get(heroId);
+    if (g) {
+      const from = g.area;
+      const now = Date.now();
+      let area = g.noteArea(msg.area, now);
+      if (area === 'same' && msg.load) area = g.noteLoad(now);
+      if (area !== 'same') app.events.emit({ type: 'area_change', heroId, channelId: ch.id, from, to: msg.area, refused: area === 'too_soon', how: msg.load ? 'load' : 'area' });
+    }
+    if (mode === 'trusted') {
+      if (ch.placeHero(heroId, ch.toLocal(at), msg.yaw)) this.followRegion(heroId, at, false);
+      return;
+    }
+    const before = ch.sim.position(heroId);
+    const { verdict, correct } = ch.reportPosition(heroId, at, msg.yaw);
+    if (verdict.ok) {
+      if (verdict.anchored) {
+        // Save the anchored spot now rather than at the next persist, so a crash right after
+        // joining does not put the hero back where the server last had them.
+        const local = ch.toLocal(at);
+        app.heroes.savePosition(heroId, ch.region.name, local.x, local.y, local.z);
+        if (before)
+          app.events.emit({ type: 'move_anchor', heroId, channelId: ch.id, distance: Math.round(Math.hypot(local.x - before.x, local.y - before.y, local.z - before.z)) });
+      }
+      // Last: this may move the hero to another channel.
+      this.followRegion(heroId, at, verdict.anchored);
+      return;
+    }
+    if (verdict.reason === 'loading' || verdict.reason === 'not_here') return;
+    // One event per run of refusals, not one per packet.
+    if (g && g.rejected === 1) app.events.emit({ type: 'move_rejected', heroId, channelId: ch.id, reason: verdict.reason, count: g.rejected });
+    if (correct) this.send({ t: 'pos_correct', x: correct.x, y: correct.y, z: correct.z, reason: verdict.reason, area: ch.areaOf(heroId) });
+  }
+
+  private lastFollowAt = 0;
+
+  /**
+   * A refused region exit that the mod lets Fable take anyway (it was not here, too far, or
+   * still arriving): Fable moves the hero into the next area regardless, so the move guard
+   * lets that one jump through and region following puts the hero where Fable did. Locked
+   * and gated exits are stopped by the mod, so they get nothing.
+   */
+  private exitAware(thingId: string, out: Record<string, unknown>): Record<string, unknown> {
+    if (this.heroId == null) return out;
+    if (out.t !== 'error' || !['not_here', 'too_far', 'loading'].includes(String(out.error))) return out;
+    const t = this.app.objects.things.get(thingId);
+    if (t && t.kind !== 'exit') return out;
+    if (!t && !/^[A-Za-z0-9_]+:\d+$/.test(thingId)) return out;
+    const heroId = this.heroId;
+    const g = this.app.director.channelOf(heroId)?.moves.get(heroId);
+    g?.allowJump(Date.now());
+    return out;
+  }
+
+  /**
+   * Keep the hero's server region in step with the region the client's Fable has loaded,
+   * worked out from the position (Director.follow). Checked straight after a jump the guard
+   * let through, and otherwise about once a second.
+   */
+  private followRegion(heroId: number, at: { x: number; y: number; z: number }, jumped: boolean): void {
+    const now = Date.now();
+    if (!jumped && now - this.lastFollowAt < 1000) return;
+    this.lastFollowAt = now;
+    this.app.director.follow(heroId, at);
+  }
+
   private law(heroId: number, m: LawRequest): void {
     const { app } = this;
     const ch = app.director.channelOf(heroId)?.sim.law;
+    // Ledger keys are global: scope the client's key to this hero and action, so it can never
+    // match (and so replay or block) another hero's payment, loot or quest claim.
+    const key = 'key' in m ? `law:${heroId}:${m.a}:${m.key}` : '';
     try {
       switch (m.a) {
         case 'weapon':
@@ -126,18 +237,18 @@ export class GameSocket {
           return ch?.report(heroId, m.kind, m.value);
         case 'steal': {
           if (!ch) throw new GameError('no_law', 'Nothing to steal here', 409);
-          const r = ch.steal(heroId, m.shop, m.def, { pickpocket: m.pickpocket, clientSpotted: m.spotted }, m.key);
+          const r = ch.steal(heroId, m.shop, m.def, { pickpocket: m.pickpocket, clientSpotted: m.spotted }, key);
           return this.send({ t: 'law_steal', spotted: r.spotted, item: r.itemId });
         }
         case 'answer':
           if (!ch) throw new GameError('no_prompt', 'Nobody is asking you anything', 409);
-          return ch.answer(heroId, m.choice, m.key);
+          return ch.answer(heroId, m.choice, key);
         case 'fence':
-          return this.send({ t: 'law_fenced', ...app.law.fence(heroId, m.item, m.key) });
+          return this.send({ t: 'law_fenced', ...app.law.fence(heroId, m.item, key) });
         case 'payout':
-          return this.send({ t: 'law_released', ...app.law.payOut(heroId, m.key) });
+          return this.send({ t: 'law_released', ...app.law.payOut(heroId, key) });
         case 'warden':
-          return this.send({ t: 'law_warden', ...app.law.warden(heroId, m.key) });
+          return this.send({ t: 'law_warden', ...app.law.warden(heroId, key) });
         case 'status':
           return app.law.pushStatus(heroId);
       }
@@ -145,6 +256,76 @@ export class GameSocket {
       if (!(e instanceof GameError)) throw e;
       this.send({ t: 'error', error: e.code, message: e.message });
     }
+  }
+
+  private party(heroId: number, m: PartyRequest): void {
+    const { parties } = this.app;
+    const bucket = m.op === 'say' ? this.partyChats : this.partyReqs;
+    if (!bucket.take()) return this.send({ t: 'party_error', op: m.op, error: 'rate', message: 'Slow down' });
+    try {
+      switch (m.op) {
+        case 'invite':
+          return parties.invite(heroId, m.name);
+        case 'accept':
+          return parties.accept(heroId, m.name || undefined);
+        case 'decline':
+          return parties.decline(heroId, m.name || undefined);
+        case 'leave':
+          return parties.leave(heroId);
+        case 'kick':
+          return parties.kick(heroId, m.name);
+        case 'lead':
+          return parties.lead(heroId, m.name);
+        case 'regroup':
+          return parties.regroup(heroId);
+        case 'say':
+          return parties.say(heroId, m.text);
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.send({ t: 'party_error', op: m.op, error: e.code, message: e.message });
+    }
+  }
+
+  /**
+   * Trade window requests. TradeSessions pushes trade_state, trade_done and the rest to both
+   * heroes itself; here only a refusal goes back to the one who asked.
+   */
+  private trade(heroId: number, m: TradeRequest): void {
+    const { trades } = this.app;
+    try {
+      switch (m.t) {
+        case 'trade_request':
+          return trades.request(heroId, m.to);
+        case 'trade_answer':
+          return trades.answer(heroId, m.from, m.yes);
+        case 'trade_offer':
+          trades.setOffer(heroId, m.gold, m.items);
+          return;
+        case 'trade_accept':
+          trades.accept(heroId, m.version);
+          return;
+        case 'trade_unaccept':
+          return trades.unaccept(heroId);
+        case 'trade_cancel':
+          return trades.cancel(heroId);
+      }
+    } catch (e) {
+      if (!(e instanceof GameError)) throw e;
+      this.send({ t: 'trade_error', error: e.code, message: e.message });
+    }
+  }
+
+  /**
+   * The local game healed the hero. Work out what the hero could have used (Heal Life first,
+   * then the healing items they carry), spend the closest match and heal by the server's own
+   * amount. Health itself reaches the client in the next tick, as always.
+   */
+  private heal(heroId: number, share: number, clientKey: string): void {
+    const { app } = this;
+    const r = claimHeal(app.director.channelOf(heroId)?.sim.healing, app.economy, heroId, share, `heal:${heroId}:${clientKey}`);
+    if (!r.replayed) app.events.emit({ type: 'heal', heroId, share, ok: r.ok, source: r.source, def: r.def, healed: r.healed, reason: r.reason });
+    this.send({ t: 'heal_result', key: clientKey, ...r, healed: r.healed === undefined ? undefined : Math.round(r.healed) });
   }
 
   /**
@@ -198,15 +379,53 @@ export class GameSocket {
     }
   }
 
+  /** Staff dev tool: monsters next to the hero, run by the server. Refused for player accounts. */
+  private devSpawn(heroId: number, def: string, count: number): void {
+    const { app } = this;
+    if (!app.staffHero(heroId)) {
+      app.events.emit({ type: 'input_rejected', heroId, reason: 'dev_spawn by a player account' });
+      return this.send({ t: 'dev_result', ok: false, message: 'Dev spawning needs a gm or admin account.' });
+    }
+    const sim = app.director.channelOf(heroId)?.sim;
+    if (!sim?.devSpawn) return this.send({ t: 'dev_result', ok: false, message: 'This server runs no monsters (combat is off).' });
+    const pool = app.spawnDefs.length ? app.spawnDefs : [];
+    const made: string[] = [];
+    let error = '';
+    for (let i = 0; i < count; i++) {
+      const name = def || pool[Math.floor(Math.random() * pool.length)];
+      if (!name) { error = 'No creature named and none to pick from.'; break; }
+      // 10-20 m ahead, a few metres apart sideways, so a group doesn't stack on one spot.
+      const r = sim.devSpawn(heroId, name, 10 + Math.random() * 10, (i - (count - 1) / 2) * 2.5);
+      if ('error' in r) { error = r.error; break; }
+      made.push(name);
+    }
+    console.log(`dev_spawn: hero ${heroId} spawned ${made.length ? made.join(', ') : 'nothing'}${error ? ` (${error})` : ''}`);
+    this.send({ t: 'dev_result', ok: made.length > 0, message: made.length ? `Spawned ${made.join(', ')}` : error });
+  }
+
   private hello(protocol: number, token: string): void {
     clearTimeout(this.helloTimer);
     const { app } = this;
     try {
       if (protocol !== app.cfg.protocolVersion) throw new GameError('protocol', `Server speaks protocol ${app.cfg.protocolVersion}`, 426);
-      const t = app.accounts.redeemJoinTicket(token);
-      if (t.realm !== app.cfg.realmId) throw new GameError('bad_ticket', 'Ticket is for another server', 401);
+      let t: { accountId: number; heroId: number };
+      let resumed = false;
+      if (ResumeTokens.looksLike(token)) {
+        const r = app.resume.redeem(token);
+        if (!r) throw new GameError('resume_expired', 'Reconnect window passed, start again from the launcher', 401);
+        t = r;
+        resumed = true;
+      } else {
+        const j = app.accounts.redeemJoinTicket(token);
+        if (j.realm !== app.cfg.realmId) throw new GameError('bad_ticket', 'Ticket is for another server', 401);
+        t = j;
+      }
       const hero = app.heroes.get(t.heroId);
       if (!hero || hero.account_id !== t.accountId) throw new GameError('bad_ticket', 'Hero not found', 401);
+      // Resume tokens chain from one connection to the next without the launcher, so check
+      // for a ban here as well, or a banned player could stay on by reconnecting.
+      const acct = app.accounts.byId(t.accountId);
+      if (!acct || (acct.banned_until && acct.banned_until > Date.now())) throw new GameError('banned', 'This account is suspended', 403);
       // Same hero logging in twice: the newer connection wins, the old one is dropped.
       GameSocket.online.get(hero.id)?.close(4003, 'logged in elsewhere');
       const link: PlayerLink = {
@@ -221,9 +440,25 @@ export class GameSocket {
       };
       this.heroId = hero.id;
       GameSocket.online.set(hero.id, this);
-      this.send({ t: 'welcome', player_id: hero.id, name: hero.name, phase: hero.phase, renown: hero.renown, tick_rate: app.cfg.tickRate });
-      app.director.join(hero, link);
+      this.send({
+        t: 'welcome',
+        player_id: hero.id,
+        name: hero.name,
+        phase: hero.phase,
+        renown: hero.renown,
+        tick_rate: app.cfg.tickRate,
+        // Good once, after this connection ends, to come back without a new ticket.
+        resume: app.resume.issue(hero.id, t.accountId),
+        resume_ms: app.cfg.resumeMs,
+        // Whether the server uses the mod's position reports ('off', 'checked', 'trusted').
+        client_move: app.cfg.clientMovement,
+        // Monster defs the server runs: the mod drops the level files' own copies of them.
+        ...(app.spawnDefs.length ? { spawn_defs: app.spawnDefs } : {}),
+      });
+      if (resumed) app.events.emit({ type: 'player_resumed', heroId: hero.id });
+      app.director.join(hero, link, resumed);
       app.law.pushStatus(hero.id);
+      app.parties.connect(hero.id, hero.name, (m) => link.send(encode(m)));
     } catch (e) {
       if (this.heroId !== null && GameSocket.online.get(this.heroId) === this) GameSocket.online.delete(this.heroId);
       this.heroId = null;
@@ -260,7 +495,11 @@ export class GameSocket {
     if (this.heroId === null) return;
     const id = this.heroId;
     this.heroId = null;
-    if (GameSocket.online.get(id) === this) GameSocket.online.delete(id);
+    if (GameSocket.online.get(id) === this) {
+      GameSocket.online.delete(id);
+      this.app.resume.disconnected(id);
+      this.app.parties.disconnect(id);
+    }
     this.app.director.leave(id);
   }
 }

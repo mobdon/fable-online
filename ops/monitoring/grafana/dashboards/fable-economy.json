@@ -306,7 +306,7 @@
       "id": 39,
       "type": "timeseries",
       "title": "Anomalies by rule",
-      "description": "Each rule is described in server/analytics/src/economy.ts. Look up the hero with economy.anomaly in the event log.",
+      "description": "Each rule is described in server/src/analytics/watchdog.ts. Look up the hero with economy.anomaly in the event log.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

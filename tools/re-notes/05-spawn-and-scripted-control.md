@@ -74,10 +74,67 @@ up, and they build the `NTCScriptedControl::CAction*` objects:
 | +0x64 | `.LookAt` | `CActionTurnToFacePosition` |
 | +0x28 / +0x58 | `.StopFollowingThing`, `.ClearCommands` | drops queued actions |
 
-The mod does not use these yet: it writes the position and facing into the physics
-component instead (`02-hero-live-state.md`), which needs no mapping of the move modes and
-cannot leave a creature walking somewhere the server never asked for. The move actions are
-the next step, for walk and run animations that match the speed the server reports.
+The mod does not use the move actions: it writes the position and facing into the physics
+component (`02-hero-live-state.md`), which cannot leave a creature walking somewhere the
+server never asked for, and plays the walk, run or idle loop itself (below).
+
+### What the move slot takes
+
+Slot +0x14 (`0x00903E20`, `ret 0x1C`) is `(ref* target, float stopDistance, int mode, int,
+bool, bool, bool)`. The target is another 12-byte thing reference: its vtable +0x12C is
+"is valid" and +0x2C returns the `CThing*`. `.RunTo` passes `(target, 0.3, 1, 0, 1, 0, 1)`
+by default. The mode maps to a move type: 0 -> 3, 1 -> 5, anything else -> 1. There is no
+form that takes coordinates: `CActionMoveTo` (0x50 bytes, ctor `0x009051F0`) keeps a
+reference to the target thing, so driving a puppet with it needs a second thing to aim at.
+
+## Playing animations (used by the puppets)
+
+**Correction (in-game test):** a `CREATURE_HERO` thing has no `CTCScriptedControl`. Components
+come from the def through a registry by name (`0x004EFFB4` registers the factory `0x004D311E`
+as "CTCScriptedControl"), and the hero's def does not list it. Bit `id` of the dwords at
+`thing+0x20` says which components a thing has (bit 31 of +0x20 is 0x1F). So the puppets skip
+the scripted queue and do what `CActionPlayAnimation::Update` (`0x00712900`) does, on the
+creature itself:
+
+| What | Address | Shape |
+| --- | --- | --- |
+| refuse new actions now | `0x0085F0C0` | `CThing::() -> bool` |
+| animation by name | `0x00662D80` | `CThing::(CCharString*, int -1) -> anim`, `ret 8` |
+| creature play-animation action | `0x008425E0` | ctor, 0xB4 bytes: `(creature, anim, b, looping, loops, out[2], b, global, b, 0, seq)` |
+| set as the current action | `0x006644F0` | `CThing::(action*) -> bool`, keeps a clone (action vtable +0x2C) |
+| queue behind the current one | `0x00664490` | `CThing::(action*)`, keeps a clone |
+| current action | `thing+0x100` | its byte +0x61 set = finished |
+
+The caller deletes its own action afterwards (vtable slot 0 with 1), as the engine does.
+
+The scripted-control path below is still right for creatures whose def has the component.
+
+The handle is not needed: every handle slot finds the thing's `CTCScriptedControl`
+(component id 0x1F, vtable `0x012658E4`) and queues an action on it. The mod does the same.
+
+| What | Address | Shape |
+| --- | --- | --- |
+| component lookup | inline | thing+0x20 sign bit set, then sorted `(id, component*)` pairs from `[thing+0x44]` to `[thing+0x48]` |
+| `operator new` | `0x00BFEA1A` | `__cdecl (size)` |
+| `CActionPlayAnimation` ctor | `0x009034F0` | `__thiscall`, 11 args, object 0x28 bytes, vtable `0x0128D6F4` |
+| queue an action | `0x007137D0` | `CTCScriptedControl::(action*)`, takes ownership |
+| stop and drop the queue | `0x00713630` | `CTCScriptedControl::()` |
+| end the creature's own action | `0x00662650` | `CThing::()`, only when `thing+0x6C` bit 3 is set |
+| queue update | `0x00713910` | runs whenever the queue is not empty (called from `0x006AD9B8`) |
+
+`.PlayLoopingAnim` (handle +0x50) builds `ctor(name, 0, 1, loops, 0, seq, 0, 1, [0x01375748], 0, 0)`;
+`.PlayAnimation` (+0x48) builds `ctor(name, b, 0, -1, 0, seq, ...)`. When the action runs,
+`0x00662D80` looks the name up in the creature's animation map (`[thing+0x70]` -> `+0x34`),
+the same map the movement code reads `ST_WALK` and `ST_RUN` from (`0x00663610`). So
+`ST_IDLE`, `ST_WALK`, `ST_RUN` and the other `ST_*` names play each creature's own loop.
+
+The puppets map the server's anim ids to these names (`client-mod/src/game/puppet.cpp`,
+`spec_for`): `ST_IDLE`, `ST_WALK`, `ST_RUN`, `ST_STRIKE_LEFT`/`ST_STRIKE_RIGHT`,
+`ST_IDLE_MELEE`, `ST_BACK_HIT`, `ST_DIE` then `ST_DEATH_FRAME`, `ST_LEAP_IN`,
+`ST_BLOCK_LOOP`, `ST_TAUNT`. All appear in `names.bin`. Which creature defs map each one is not
+checked yet: a name a creature lacks falls back to a default inside `0x00662D80`.
+
+`.ClearCommands` (+0x840) only zeroes component 0x30 +0x1C; it does not touch this queue.
 
 ## Creature generators
 
@@ -88,8 +145,59 @@ must do nothing, or every player sees a different set of monsters.
 | --- | --- | --- |
 | `CTCCreatureGenerator` | `0x01268C24` | slot +0x24 is its work slot (372 instructions), no arguments |
 | `CTCCreatureGeneratorCreator` | `0x0126EB3C` | the same slot, same shape |
-| `CTCActivationReceptorCreatureGenerator` | `0x012413EC` | generators a trigger switches on; not patched yet |
+| `CTCActivationReceptorCreatureGenerator` | `0x012413EC` | generators a trigger switches on; needs no patch (below) |
 
 `client-mod/src/game/spawns.cpp` points both +0x24 slots at a bare `ret` while suppression
-is on, and puts the originals back afterwards. Creatures already placed in the level's
-`.tng` are left alone for now: they are the next thing to handle.
+is on, and puts the originals back afterwards.
+
+The activation receptor only switches a generator on: its slot +0x70 (`0x007F7650`) looks up
+the owner's generator component (id 0x3D in the thing's component map at +0x44) and sets its
+active byte (+0x4F). The generator's work slot is already a `ret`, so nothing spawns.
+
+## Creatures placed in the level files
+
+The `.tng` `AICreature` entries do not come from a generator: the level loader builds each
+one. The loader registers its thing kinds at `0x00522A20` (`"AICreature"` -> factory
+`0x005272E0`, which allocates 0x1D8 bytes and runs the `CThingAICreature` constructor,
+vtable `0x0127293C`).
+
+| What | Address | Shape |
+| --- | --- | --- |
+| load one thing ("Load Single Thing") | `0x0051FD80` | `__thiscall (CThingManager*, parser*, int mode) -> CThing*`, `ret 8`; 0 when the entry is dropped |
+| its callers | `0x0052062E`, `0x00520BA1`, `0x00520F9A`, `0x00521155`, `0x00521521` | the three level loaders and two save loaders; all handle a 0 result |
+| read an entry's header | `0x004C81F0` | ecx = parser, edx = header; header +0 UID (64-bit), +8 `DefinitionType` (CCharString), +0xC `Player` |
+| its callers | `0x004C89A8`, `0x004C9252`, `0x0051FE07` | the first two run inside the load above |
+| `CThing::Remove(bool)` | `0x004C9B80` | `__thiscall (thing, bool)`, `ret 4`; the loader calls it with 1 on a thing it cannot keep, then returns 0 |
+| thing ScriptName | thing +0x74 | CCharString, set by the text parser at `0x004CAA00` |
+
+A CCharString is a pointer to a block whose first field is the `char*`.
+
+`spawns.cpp` points the five load calls at the mod and the three header reads at a small
+thunk that records the entry's def. When the thing that comes back is a `CThingAICreature`
+with no ScriptName and a def from the server's `spawn_defs` list, the mod removes it with
+`0x004C9B80(1)` and returns 0, which is the loader's own path for a dropped thing.
+Script-created creatures (`CreateNear` and friends) never pass through this loader.
+
+Not checked in game yet: whether Fable records a removed level creature as dead in the save,
+which would keep it gone in an offline game played later from the same save.
+
+## Checks before the creature animation call (0x00662D80)
+
+0x00662D80 reads `[thing+0x70]` (def holder; 0x0042B0A2 calls its vfunc +0x38 with
+"CAppearanceDef") and `[[[[thing+0x134]+0x0C]]+0x08]` (0x0073A6E0, then its vfunc +0x10).
+The CThing ctor (0x004C9030) zeroes +0x70. A stand-in made by CreateNear was seen with
+garbage there (0xFFFFFFFF, 0xCCCCCCCC, string bytes), so the mod only calls the
+animation path when the thing, the +0x70 object and the +0x134 chain object all have
+valid MSVC RTTI (vtable-4 -> complete object locator, signature 0 -> type descriptor
+".?AV..."), the thing's class name contains "Creature", and the stand-in is at least
+2 s old. A refusal is logged with the failed check ("anims: refused ...").
+An unknown ST_ name falls back to the def's default animation inside 0x00662D80.
+
+## Script references hold a CGameScriptThing, not the CThing
+
+A script reference ({vtable 0x01238C8C, object*, counter*}) points at a CGameScriptThing
+(vtable 0x012852CC), the script runner's wrapper. Its CThingPtr is at +0x0C
+({vtable, control*}); the control block's first dword is the CThing, or 0 once the engine
+has freed it (0x00A01B50). Reading component or creature fields straight off the wrapper
+gives the garbage seen at +0x70. The wrapper's own slots (e.g. vtable +0x18, the "near"
+value CreateNear asks for) are still called on the wrapper itself.

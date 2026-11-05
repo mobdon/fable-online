@@ -24,6 +24,13 @@ struct WorldConfig {
     std::string exeTimestamp;
 };
 
+/**
+ * The launcher's join ticket works once. After the first connection the server hands out a
+ * resume token (in `welcome`), which the mod passes here so a dropped connection can come
+ * back without a new ticket. With neither left, the connection stops and says why.
+ */
+void world_set_resume(const std::string& token);
+
 /** Starts the connection thread. Calling it twice replaces the connection. */
 void world_start(const WorldConfig& cfg);
 void world_stop();

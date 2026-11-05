@@ -14,4 +14,7 @@ void hook_device(IDirect3DDevice9* dev);
 LPARAM map_mouse(UINT msg, LPARAM l);
 float scale();
 void log_status();
+// Fable's HUD pieces that overlap this back-buffer rectangle are not drawn (Realm chat sits
+// there while it is open). w <= 0 clears it. Any thread.
+void hide_under(float x, float y, float w, float h);
 }  // namespace fo::display::hud

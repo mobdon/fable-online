@@ -44,7 +44,7 @@ test('frames label heroes with their name and renown, and creatures with their d
 });
 
 test('each player only gets the entities near them', () => {
-  const app = testApp({ interestRadius: 50, trustClientPositions: true });
+  const app = testApp({ interestRadius: 50, clientMovement: 'trusted' });
   const near = makeHero(app).hero;
   const far = makeHero(app).hero;
   const nearInbox: string[] = [];
@@ -76,10 +76,10 @@ test('each player only gets the entities near them', () => {
 });
 
 test('a position from the client is only used when the server is told to trust it', () => {
-  const guarded = testApp({ trustClientPositions: false });
+  const guarded = testApp({ clientMovement: 'off' });
   const hero = makeHero(guarded).hero;
   const ch = guarded.director.join(hero, link(hero.id, 'Mob', []));
-  assert.equal(guarded.cfg.trustClientPositions, false);
+  assert.equal(guarded.cfg.clientMovement, 'off');
 
   // The channel itself still obeys: the refusal is in the socket, which is where the
   // client's say-so arrives. Here we check the default is off and the frame is valid.
@@ -93,4 +93,11 @@ test('a position from the client is only used when the server is told to trust i
   assert.throws(() => decode(JSON.stringify({ t: 'hero_pos', x: 'over there', y: 0, z: 0 })), ProtocolError);
   assert.throws(() => decode(JSON.stringify({ t: 'hero_pos', x: 1e9, y: 0, z: 0 })), ProtocolError);
   assert.ok(ch.placeHero(hero.id, { x: 5, y: 5, z: 0 })); // the channel can place; the socket decides whether to
+});
+
+test('protocol: dev_spawn takes an optional def and 1-10 creatures', () => {
+  assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn' })), { t: 'dev_spawn', def: '', count: 1 });
+  assert.deepEqual(decode(JSON.stringify({ t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 })), { t: 'dev_spawn', def: 'CREATURE_WOLF', count: 3 });
+  assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', count: 50 })), ProtocolError);
+  assert.throws(() => decode(JSON.stringify({ t: 'dev_spawn', def: 'wolf; drop table' })), ProtocolError);
 });

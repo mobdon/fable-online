@@ -36,7 +36,12 @@ creatures, or every player sees a second, different set.
   nothing in server-run regions. Placed creatures from the `.tng` are removed on region
   load by def (bandits, Hobbes, wolves, balverines and so on).
 - Quests stay client-side. Creatures a quest script spawns are left alone: the hook only
-  blocks generators and `.tng` placements, not script `CreateNear` calls.
+  blocks generators and `.tng` placements, not script `CreateNear` calls. Placed creatures
+  with a ScriptName are quest creatures too: the server does not spawn them and the mod keeps
+  the level's copy.
+- The server lists the defs it spawns in its welcome (`spawn_defs`). The mod drops a
+  level-placed creature only when its def is on that list, so a server with no spawn data
+  (or an older one) leaves the level as it is.
 - Villagers, guards and traders are untouched for now; they stay local and simple.
 
 ### 2. Make a puppet for each server creature

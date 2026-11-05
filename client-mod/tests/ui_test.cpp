@@ -5,6 +5,7 @@
 #include "../src/ui/chat_model.h"
 #include "../src/ui/json.h"
 #include "../src/ui/nametags.h"
+#include "../src/ui/party_model.h"
 
 using namespace fo;
 static int failures = 0, checks = 0;
@@ -43,6 +44,11 @@ static void test_chat_commands() {
     CHECK(c.is_open());
     c.key(ui::Key::Escape, 0);
     CHECK(!c.is_open());
+
+    CHECK(!c.take_settings_request());
+    type(c, U"/settings");
+    CHECK(c.take_settings_request() && !c.take_settings_request());  // once, and nothing sent
+    CHECK(c.take_outbox().empty());
 
     type(c, U"hello there");
     auto out = c.take_outbox();
@@ -203,12 +209,127 @@ static void test_tags() {
     CHECK(ui::renown_color(100) != ui::renown_color(60000));
 }
 
+static void test_party() {
+    ui::ChatModel c;
+    // Party requests go to the world server, not the chat service.
+    type(c, U"/invite Thunder");
+    type(c, U"/accept");
+    type(c, U"/decline \"Old Bob\"");
+    type(c, U"/party kick Thunder");
+    type(c, U"/party lead Thunder");
+    type(c, U"/regroup");
+    type(c, U"/leave");
+    CHECK(c.take_outbox().empty());
+    auto w = c.take_world_outbox();
+    CHECK(w.size() == 7);
+    if (w.size() == 7) {
+        EQ(w[0], std::string(R"({"t":"party","op":"invite","name":"Thunder"})"));
+        EQ(w[1], std::string(R"({"t":"party","op":"accept"})"));
+        EQ(w[2], std::string(R"({"t":"party","op":"decline","name":"Old Bob"})"));
+        EQ(w[3], std::string(R"({"t":"party","op":"kick","name":"Thunder"})"));
+        EQ(w[4], std::string(R"({"t":"party","op":"lead","name":"Thunder"})"));
+        EQ(w[5], std::string(R"({"t":"party","op":"regroup"})"));
+        EQ(w[6], std::string(R"({"t":"party","op":"leave"})"));
+    }
+    // /kick without /party in front is still the moderators' command.
+    type(c, U"/kick Griefer");
+    CHECK(c.take_world_outbox().empty());
+    CHECK(c.take_outbox().size() == 1);
+    // A name is needed where it makes sense.
+    type(c, U"/invite");
+    CHECK(c.take_world_outbox().empty());
+    // Party chat: /p, /party with words, and plain lines while the box is on Party.
+    type(c, U"/p ready?");
+    type(c, U"/party to the Arena");
+    type(c, U"/p");
+    EQ(c.channel_label(), std::string("Party"));
+    type(c, U"go");
+    w = c.take_world_outbox();
+    CHECK(w.size() == 3);
+    if (w.size() == 3) {
+        EQ(w[0], std::string(R"({"t":"party","op":"say","text":"ready?"})"));
+        EQ(w[1], std::string(R"({"t":"party","op":"say","text":"to the Arena"})"));
+        EQ(w[2], std::string(R"({"t":"party","op":"say","text":"go"})"));
+    }
+    CHECK(c.take_outbox().empty());
+
+    // Frames from the world server.
+    ui::PartyModel p;
+    CHECK(p.on_world(parse(R"({"t":"party_invite","from":4,"name":"Maze","size":2,"expires_ms":60000})"), c, 1));
+    EQ(p.invite_from(), std::string("Maze"));
+    auto party = parse(R"({"t":"party","id":3,"leader":4,"max":4,"members":[
+        {"id":4,"name":"Maze","colour":"red","slot":0,"leader":true,"online":true,"region":"Bowerstone","channel":"Bowerstone#1"},
+        {"id":9,"name":"Thunder","colour":"blue","slot":1,"leader":false,"online":false,"region":null,"channel":null}]})");
+    CHECK(p.on_world(party, c, 2));
+    CHECK(p.in_party());
+    CHECK(p.leader() == 4);
+    CHECK(p.members().size() == 2);
+    CHECK(p.members().size() == 2 && !p.members()[1].online && p.members()[1].slot == 1);
+    EQ(p.invite_from(), std::string(""));
+    auto slots = ui::party_slots(party);
+    CHECK(slots.size() == 2 && slots[1].first == 9 && slots[1].second == 1);
+    CHECK(p.on_world(parse(R"({"t":"party_chat","from":9,"name":"Thunder","text":"hi"})"), c, 3));
+    CHECK(p.on_world(parse(R"({"t":"party_error","op":"invite","error":"no_such_player","message":"Nobody called X is online"})"), c, 4));
+    auto vis = c.visible(20, 4);
+    bool saw_chat = false, saw_err = false;
+    for (auto& v : vis) {
+        if (v.line->text == "[Party] Thunder: hi" && v.line->color == ui::ChatModel::kColorParty) saw_chat = true;
+        if (v.line->text == "Nobody called X is online" && v.line->color == ui::ChatModel::kColorError) saw_err = true;
+    }
+    CHECK(saw_chat);
+    CHECK(saw_err);
+    CHECK(!p.on_world(parse(R"({"t":"tick"})"), c, 5));
+    CHECK(p.on_world(parse(R"({"t":"party","id":null})"), c, 6));
+    CHECK(!p.in_party());
+    CHECK(p.members().empty());
+
+    // Orbs: identity view-projection with w = depth from the z row.
+    float m[16] = {1,0,0,0, 0,1,0,0, 0,0,0,1, 0,0,0,0};
+    p.set_marks({{9, 1, 0.0f, 0.0f, 10.0f}, {4, 0, 0.5f, 0.0f, -5.0f}});
+    auto orbs = p.layout(m, 1000, 800, 1, 0.0f);
+    CHECK(orbs.size() == 1);   // the second one is behind the camera
+    if (!orbs.empty()) {
+        CHECK(std::fabs(orbs[0].x - 500) < 0.01f && std::fabs(orbs[0].y - 400) < 0.01f);
+        CHECK((orbs[0].color & 0x00FFFFFF) == (ui::PartyModel::slot_color(1) & 0x00FFFFFF));
+    }
+}
+
+// What the chat window's mouse does: click a hero to whisper, wheel to scroll, click to place the cursor.
+static void test_chat_mouse() {
+    ui::ChatModel c;
+    c.on_server(parse(R"({"t":"welcome","v":1,"id":1,"name":"Hal","renown":0,"motd":"hi","channels":["say"]})"), 0);
+    c.open();
+    c.whisper_to("Maze");
+    EQ(c.channel_label(), "To Maze");
+    c.whisper_to("Hal");                          // yourself: no change
+    EQ(c.channel_label(), "To Maze");
+    for (char32_t ch : std::u32string(U"hello")) c.character(ch, 0);
+    c.set_cursor(2);
+    c.character(U'X', 0);
+    EQ(c.input_utf8(), "heXllo");
+    c.set_cursor(99);
+    CHECK(c.cursor() == 6);
+    c.key(ui::Key::Enter, 0);
+    auto out = c.take_outbox();
+    CHECK(!out.empty());
+    EQ(out.back(), R"({"t":"whisper","to":"Maze","text":"heXllo"})");
+    for (int i = 0; i < 20; ++i) c.system("line " + std::to_string(i), 1);
+    c.scroll_by(3);
+    CHECK(c.scrolled() == 3);
+    c.scroll_by(-10);
+    CHECK(c.scrolled() == 0);
+    c.scroll_by(1000);
+    CHECK(c.scrolled() > 0 && c.scrolled() < 1000);
+}
+
 int main() {
     test_json();
+    test_chat_mouse();
     test_chat_commands();
     test_chat_editing_and_log();
     test_tabs();
     test_tags();
+    test_party();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }

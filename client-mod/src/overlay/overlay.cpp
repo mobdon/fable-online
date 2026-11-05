@@ -2,7 +2,9 @@
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
+#include <cmath>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -10,14 +12,18 @@
 #include "../config.h"
 #include "../display/frame_probe.h"
 #include "../display/hud_scale.h"
+#include "../display/mouse_look.h"
 #include "../display/present.h"
 #include "../display/widescreen.h"
 #include "../log.h"
 #include "../menu/menu.h"
+#include "../modsettings/modsettings.h"
 #include "../net/chat_client.h"
 #include "../ui/chat_model.h"
 #include "../ui/json.h"
 #include "../ui/nametags.h"
+#include "../ui/trade_model.h"
+#include "../ui/party_model.h"
 #include "patch.h"
 #include "renderer.h"
 
@@ -69,9 +75,33 @@ HWND g_hwnd = nullptr;
 std::mutex g_mu;
 ui::ChatModel g_chat;
 ui::TagStore g_tags;
+ui::TradeModel g_trade;
+std::vector<ui::TradeTarget> g_trade_targets;
+std::vector<std::string> g_world_out;   // trade and party requests for the game connection
+ui::PartyModel g_party;
+std::vector<std::string> g_world_in;    // party frames from the game thread
 game::HeroPos g_hero;
 std::atomic<bool> g_chat_open{false};
 std::atomic<DWORD> g_block_until{0};   // swallow keys briefly after the box closes
+
+// Where things are in the open chat window, from the last frame drawn, for mouse clicks.
+// Back-buffer pixels. Guarded by g_mu.
+struct ChatHit {
+    float x, y, w, h;
+    enum Kind { Tab, Hero } kind;
+    int tab;
+    std::string name;
+};
+struct ChatLayout {
+    bool valid = false;
+    float win_x = 0, win_y = 0, win_w = 0, win_h = 0;
+    float edit_x = 0, edit_y = 0, edit_w = 0, edit_h = 0;
+    float screen_w = 0, screen_h = 0;
+    std::vector<ChatHit> hits;
+    std::vector<float> caret_x;   // x of each cursor position shown in the edit box
+    size_t caret_from = 0;        // the input character caret_x[0] stands for
+} g_layout;
+float g_ptr_x = -1, g_ptr_y = -1;   // the chat pointer, back-buffer pixels; < 0 = not over the window
 
 // Fable's fonts and frame art, read once by the mod thread; the render thread waits for it.
 std::atomic<const assets::UiArt*> g_art{nullptr};
@@ -93,11 +123,51 @@ double now_s() {
     return static_cast<double>(t.QuadPart - t0.QuadPart) / static_cast<double>(f.QuadPart);
 }
 
-bool input_blocked() { return menu::active() || g_chat_open.load() || GetTickCount() < g_block_until.load(); }
+std::atomic<bool> g_trade_keys{false};   // the trade window or an invitation has the keyboard
+
+bool input_blocked() {
+    return menu::active() || modsettings::input_blocked() || g_chat_open.load() || g_trade_keys.load() || GetTickCount() < g_block_until.load();
+}
 
 void flush_outbox() {  // caller holds g_mu
     for (auto& line : g_chat.take_outbox()) net::chat_send(line);
+    for (auto& cmd : g_chat.take_local())
+        if (cmd.first == "barter") g_trade.command(cmd.second, g_trade_targets, now_s());
+    for (auto& line : g_trade.take_outbox()) g_world_out.push_back(std::move(line));
+    double now = now_s();
+    for (auto& n : g_trade.take_notes()) g_chat.system(n.first, now, n.second);
+    for (auto& line : g_chat.take_world_outbox()) g_world_out.push_back(std::move(line));
     g_chat_open = g_chat.is_open();
+    g_trade_keys = g_trade.wants_keys();
+    // Open chat has the mouse: Fable's camera and attacks don't see it (display/mouse_look).
+    display::mouse_look::hold(g_chat_open.load(), g_hwnd);
+}
+
+// A window-message mouse position (client pixels) in back-buffer pixels. Caller holds g_mu.
+bool to_backbuffer(HWND w, LONG cx, LONG cy, float& x, float& y) {
+    RECT rc;
+    if (!w || !GetClientRect(w, &rc) || rc.right <= 0 || rc.bottom <= 0 || g_layout.screen_w <= 0) return false;
+    x = static_cast<float>(cx) * g_layout.screen_w / static_cast<float>(rc.right);
+    y = static_cast<float>(cy) * g_layout.screen_h / static_cast<float>(rc.bottom);
+    return true;
+}
+
+// A left click in the open chat window. Caller holds g_mu.
+void chat_click(float x, float y) {
+    if (!g_layout.valid) return;
+    auto inside = [&](float rx, float ry, float rw, float rh) { return x >= rx && x < rx + rw && y >= ry && y < ry + rh; };
+    for (const ChatHit& h : g_layout.hits) {
+        if (!inside(h.x, h.y, h.w, h.h)) continue;
+        if (h.kind == ChatHit::Tab) g_chat.set_tab(static_cast<ui::ChatTab>(h.tab));
+        else g_chat.whisper_to(h.name);
+        return;
+    }
+    if (inside(g_layout.edit_x, g_layout.edit_y, g_layout.edit_w, g_layout.edit_h) && !g_layout.caret_x.empty()) {
+        size_t best = 0;
+        for (size_t i = 1; i < g_layout.caret_x.size(); ++i)
+            if (std::fabs(g_layout.caret_x[i] - x) < std::fabs(g_layout.caret_x[best] - x)) best = i;
+        g_chat.set_cursor(g_layout.caret_from + best);
+    }
 }
 
 // ---- drawing ---------------------------------------------------------------
@@ -110,6 +180,8 @@ void mul(const D3DMATRIX& a, const D3DMATRIX& b, float out[16]) {
         }
 }
 
+void draw_text_line(float x, float y, float room, const std::string& s, uint32_t c, Face f);
+
 void pump_network(double now) {
     for (auto& e : net::chat_poll()) {
         if (e.kind == net::Event::Kind::Connected) { g_chat.on_connection(true, "", now); continue; }
@@ -118,6 +190,53 @@ void pump_network(double now) {
         if (!json::parse(e.text, m) || !m.is_object()) continue;
         if (m.str("t") == "tags") g_tags.apply(m);
         else g_chat.on_server(m, now);
+    }
+    for (auto& line : g_world_in) {
+        json::Value m;
+        if (json::parse(line, m) && m.is_object()) g_party.on_world(m, g_chat, now);
+    }
+    g_world_in.clear();
+}
+
+// Party members' orbs: a glow in their co-op colour over each one's stand-in, like the
+// spirits of Fable's unused co-op mode (SPRITE_MULTIPLAYER_ORB).
+void draw_party_orbs(const Config& cfg) {
+    if (!g_party.in_party() || !g_have_view || !g_have_proj) return;
+    float vp[16];
+    mul(g_view, g_proj, vp);
+    for (const ui::Orb& o : g_party.layout(vp, g_r.screen_w(), g_r.screen_h(), cfg.up_axis, cfg.tag_height + 0.9f)) {
+        const uint32_t a = o.color >> 24, rgb = o.color & 0x00FFFFFF;
+        g_r.ring(o.x, o.y, 0.0f, o.radius * 2.6f, o.radius * 2.0f, ((a * 0x50 / 255) << 24) | rgb);   // halo
+        g_r.ring(o.x, o.y, 0.0f, o.radius, o.radius * 0.5f, o.color);
+        g_r.ring(o.x, o.y, 0.0f, o.radius * 0.45f, o.radius * 0.3f, (a << 24) | 0xFFF6DC);       // hot centre
+    }
+}
+
+// The party list on the left, under Fable's own health and Will bars: a small pewter panel
+// with each member's colour, name and where they are.
+void draw_party_list() {
+    if (!g_party.in_party()) return;
+    const auto& members = g_party.members();
+    const float lh = g_r.line_height(Face::Chat), sh = g_r.line_height(Face::Small), th = g_r.line_height(Face::Title);
+    const float pad = 12, row_h = lh + sh + 4, w = 210;
+    const float h = pad + th + 6 + row_h * static_cast<float>(members.size()) + pad - 4;
+    const float x = 16, y = std::floor(g_r.screen_h() * 0.24f);
+    const uint32_t kText = 0xFFE9E4D6, kHead = 0xFFC9C0A8, kDim = 0xFF7E786C;
+    g_r.panel(x, y, w, h, 0.92f);
+    g_r.text(x + pad, y + pad - 2, "Party", 0xFFFFF6DC, Face::Title);
+    std::string count = std::to_string(members.size()) + " of 4";
+    g_r.text(x + w - pad - g_r.measure(count, Face::Small), y + pad + th - sh - 4, count, kHead, Face::Small);
+    float ry = y + pad + th + 4;
+    for (const ui::PartyMember& m : members) {
+        const uint32_t c = ui::PartyModel::slot_color(m.slot);
+        const float cx = x + pad + 7, cy = ry + lh / 2;
+        g_r.ring(cx, cy, 0.0f, 9.0f, 5.0f, (0x50u << 24) | (c & 0x00FFFFFF));
+        g_r.ring(cx, cy, 0.0f, 5.0f, 1.5f, m.online ? c : (0xFF000000 | ((c & 0x00FEFEFE) >> 1)));
+        std::string name = m.leader ? m.name + "  (leader)" : m.name;
+        draw_text_line(x + pad + 20, ry, w - pad * 2 - 20, name, m.online ? kText : kDim, Face::Chat);
+        std::string where = !m.online ? "offline" : m.region.empty() ? "on the way" : m.region;
+        draw_text_line(x + pad + 20, ry + lh, w - pad * 2 - 20, where, kDim, Face::Small);
+        ry += row_h;
     }
 }
 
@@ -188,9 +307,18 @@ void draw_chat(const Config& cfg, double now) {
     }
     size_t first = phys.size() > static_cast<size_t>(rows) ? phys.size() - rows : 0;
 
+    g_layout.valid = open;
+    g_layout.hits.clear();
+    g_layout.caret_x.clear();
+    g_layout.screen_w = g_r.screen_w();
+    g_layout.screen_h = g_r.screen_h();
+    // Fable's HUD pieces under the open window are left out, so nothing shows through or on top.
+    if (open && cfg.chat_hide_hud) display::hud::hide_under(win_x, win_y, win_w, win_h);
+    else display::hud::hide_under(0, 0, 0, 0);
     if (open) {
         const uint32_t kHead = 0xFFC9C0A8, kText = 0xFFE9E4D6, kBright = 0xFFFFF6DC, kDim = 0xFF7E786C;
         g_r.window(win_x, win_y, win_w, win_h, 1.0f);
+        g_layout.win_x = win_x; g_layout.win_y = win_y; g_layout.win_w = win_w; g_layout.win_h = win_h;
 
         // Title bar: the window's name, and the connection on the right.
         const float ty = win_y + pad - 2;
@@ -212,7 +340,9 @@ void draw_chat(const Config& cfg, double now) {
         for (int t = 0; t < static_cast<int>(ui::ChatTab::Count); ++t) {
             auto tab = static_cast<ui::ChatTab>(t);
             bool active = g_chat.tab() == tab, fresh = g_chat.unread(tab);
-            if (active) g_r.bar(sx, y, side_w, row_h, 1.0f, true, false);
+            const bool lit = !active && g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + row_h;
+            if (active || lit) g_r.bar(sx, y, side_w, row_h, active ? 1.0f : 0.45f, true, false);
+            g_layout.hits.push_back({sx, y, side_w, row_h, ChatHit::Tab, t, {}});
             g_r.text(sx + 10, y + (row_h - lh) / 2, ui::tab_name(tab), active ? kBright : fresh ? 0xFFF4E3A8 : kText);
             if (fresh && !active) g_r.text(sx + side_w - 14, y + (row_h - lh) / 2, "*", 0xFFF4E3A8);
             y += row_h;
@@ -224,7 +354,9 @@ void draw_chat(const Config& cfg, double now) {
             for (const auto& name : g_chat.contacts()) {
                 if (!room_for_row()) break;
                 bool target = g_chat.channel_label() == "To " + name;
-                draw_text_line(sx + 10, y, side_w - 12, name, target ? ui::ChatModel::kColorWhisper : kText, Face::Chat);
+                const bool lit = g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + lh;
+                draw_text_line(sx + 10, y, side_w - 12, name, target ? ui::ChatModel::kColorWhisper : lit ? kBright : kText, Face::Chat);
+                g_layout.hits.push_back({sx, y, side_w, lh, ChatHit::Hero, 0, name});
                 y += lh;
             }
             y += 6;
@@ -241,7 +373,10 @@ void draw_chat(const Config& cfg, double now) {
                     g_r.text(sx + 10, y, "and " + std::to_string(nearby.size() - shown) + " more", kDim, Face::Small);
                     break;
                 }
+                const bool lit = g_ptr_x >= sx && g_ptr_x < sx + side_w && g_ptr_y >= y && g_ptr_y < y + lh;
+                if (lit) g_r.bar(sx, y, side_w, lh, 0.45f, true, false);
                 draw_text_line(sx + 10, y, side_w - 12, t->name, ui::renown_color(t->renown) | 0xFF000000, Face::Chat);
+                g_layout.hits.push_back({sx, y, side_w, lh, ChatHit::Hero, 0, t->name});
                 y += lh;
                 ++shown;
             }
@@ -257,6 +392,7 @@ void draw_chat(const Config& cfg, double now) {
 
         // Edit box: an inset frame under the conversation, like PC_MSN_EDIT_BOX.
         g_r.panel(conv_x - 8, edit_y, conv_w + 16, edit_h, 0.95f);
+        g_layout.edit_x = conv_x - 8; g_layout.edit_y = edit_y; g_layout.edit_w = conv_w + 16; g_layout.edit_h = edit_h;
         const float iy = edit_y + (edit_h - lh) / 2, ix = conv_x + 2;
         std::string label = g_chat.channel_label() + ": ";
         float lx = ix + g_r.text(ix, iy, label, net::chat_connected() ? kHead : kDim);
@@ -268,6 +404,8 @@ void draw_chat(const Config& cfg, double now) {
         size_t to = from;
         while (to < u.size() && g_r.measure(ui::u32_to_utf8(u.substr(from, to + 1 - from))) <= room) ++to;
         g_r.text(lx, iy, ui::u32_to_utf8(u.substr(from, to - from)), kBright);
+        g_layout.caret_from = from;
+        for (size_t i = from; i <= to; ++i) g_layout.caret_x.push_back(lx + g_r.measure(ui::u32_to_utf8(u.substr(from, i - from))));
         if (static_cast<int>(now * 2) % 2 == 0) {
             float cx = lx + g_r.measure(ui::u32_to_utf8(u.substr(from, g_chat.cursor() - from)));
             g_r.rect(cx, iy + 1, 1, lh - 2, 0xE0FFF6DC);
@@ -275,6 +413,165 @@ void draw_chat(const Config& cfg, double now) {
     }
     float y = conv_bottom - lh * static_cast<float>(phys.size() - first);
     for (size_t i = first; i < phys.size(); ++i, y += lh) g_r.text(conv_x, y, phys[i].first, phys[i].second);
+}
+
+// The pointer for the open chat window, where the Windows cursor is (Fable no longer pulls
+// it back to the centre while chat has the mouse). Same arrow as the Mod settings screen.
+void draw_chat_pointer() {
+    g_ptr_x = g_ptr_y = -1;
+    if (!g_chat.is_open() || !g_hwnd) return;
+    POINT pt;
+    if (!GetCursorPos(&pt) || !ScreenToClient(g_hwnd, &pt)) return;
+    float x, y;
+    if (!to_backbuffer(g_hwnd, pt.x, pt.y, x, y) || x < 0 || y < 0 || x > g_r.screen_w() || y > g_r.screen_h()) return;
+    g_ptr_x = x;
+    g_ptr_y = y;
+    g_r.pointer(x, y, std::fmax(18.0f, g_r.line_height(Face::Chat) * 1.3f));
+}
+
+// The trade window, in the same frame as Realm chat (Lionhead's unused PC chat screen):
+// your pack on the left, your offer in the middle, the other hero's offer on the right,
+// each side's accept shown on Fable's pewter bar (warm once accepted). Keys are listed
+// along the bottom; the model has the rules (ui/trade_model.h).
+void draw_trade(double now) {
+    const uint32_t kHead = 0xFFC9C0A8, kText = 0xFFE9E4D6, kBright = 0xFFFFF6DC, kDim = 0xFF7E786C, kGold = 0xFFF4E3A8;
+    const float lh = g_r.line_height(Face::Chat), sh = g_r.line_height(Face::Small), th = g_r.line_height(Face::Title);
+    if (g_trade.phase() == ui::TradeModel::Phase::Invited) {
+        const std::string line = g_trade.partner() + " wants to trade with you";
+        char tail[64];
+        std::snprintf(tail, sizeof(tail), "Y: accept    N: decline    (%.0f s)", std::ceil(g_trade.invite_left(now)));
+        const float w = std::max(g_r.measure(line, Face::Title), g_r.measure(tail, Face::Small)) + 64;
+        const float h = th + sh + 40, x = (g_r.screen_w() - w) / 2, y = g_r.screen_h() * 0.18f;
+        g_r.window(x, y, w, h, 1.0f);
+        g_r.text(x + (w - g_r.measure(line, Face::Title)) / 2, y + 14, line, kBright, Face::Title);
+        g_r.text(x + (w - g_r.measure(tail, Face::Small)) / 2, y + 20 + th, tail, kHead, Face::Small);
+        return;
+    }
+    if (!g_trade.window_open()) return;
+
+    const float pad = 18, row_h = lh + 4;
+    const size_t rows = 10;
+    const float col_w = std::min(260.0f, std::max(190.0f, (g_r.screen_w() - 120) / 3.0f - 24));
+    const float gap = 20;
+    const float win_w = pad * 2 + col_w * 3 + gap * 2;
+    const float title_h = th + 10;
+    const float list_h = row_h * rows;
+    const float gold_h = lh + 12;
+    const float win_h = pad + title_h + sh + 6 + list_h + 10 + gold_h + 10 + row_h + 8 + sh + 6 + sh + pad;
+    const float wx = std::floor((g_r.screen_w() - win_w) / 2), wy = std::floor((g_r.screen_h() - win_h) / 2);
+    g_r.window(wx, wy, win_w, win_h, 1.0f);
+
+    // Title, and the purse on the right.
+    g_r.text(wx + pad + 2, wy + pad - 2, "Trade with " + g_trade.partner(), kBright, Face::Title);
+    const std::string purse = "Purse: " + std::to_string(g_trade.purse()) + " gold";
+    g_r.text(wx + win_w - pad - g_r.measure(purse, Face::Small), wy + pad - 2 + th - sh - 2, purse, kHead, Face::Small);
+    g_r.rule(wx + 10, wy + pad + title_h - 6, win_w - 20, 0.9f);
+
+    const float top = wy + pad + title_h + 2;
+    const float cx[3] = {wx + pad, wx + pad + col_w + gap, wx + pad + (col_w + gap) * 2};
+    const auto focus = g_trade.focus();
+    const char* heads[3] = {"Your pack", "Your offer", nullptr};
+    const std::string theirs_head = g_trade.partner() + " offers";
+    for (int c = 0; c < 3; ++c) {
+        const bool focused = (c == 0 && focus == ui::TradeModel::Focus::Pack) || (c == 1 && focus == ui::TradeModel::Focus::Offer);
+        g_r.text(cx[c] + 2, top, heads[c] ? heads[c] : theirs_head, focused ? kBright : kHead, Face::Small);
+    }
+    const float ly = top + sh + 6;
+    for (int c = 0; c < 3; ++c) g_r.panel(cx[c] - 6, ly - 4, col_w + 12, list_h + 8, 0.9f);
+
+    auto draw_list = [&](int c, const std::vector<ui::TradeItem>& items, bool focused) {
+        // Scroll so the selection stays in view.
+        size_t first = 0;
+        if (focused && g_trade.selected() >= rows) first = g_trade.selected() - rows + 1;
+        for (size_t i = first; i < items.size() && i < first + rows; ++i) {
+            const float y = ly + row_h * static_cast<float>(i - first);
+            const bool sel = focused && i == g_trade.selected();
+            if (sel) g_r.bar(cx[c], y, col_w, row_h, 1.0f, true, false);
+            std::string qty = items[i].qty > 1 ? std::to_string(items[i].qty) : "";
+            float qw = qty.empty() ? 0 : g_r.measure(qty) + 8;
+            draw_text_line(cx[c] + 8, y + (row_h - lh) / 2, col_w - 16 - qw, ui::item_label(items[i].def), sel ? kBright : kText, Face::Chat);
+            if (!qty.empty()) g_r.text(cx[c] + col_w - 6 - g_r.measure(qty), y + (row_h - lh) / 2, qty, sel ? kBright : kHead);
+        }
+        if (items.empty()) g_r.text(cx[c] + 8, ly + (row_h - lh) / 2, c == 0 ? "Nothing you can trade" : "Nothing yet", kDim, Face::Small);
+    };
+    draw_list(0, g_trade.pack(), focus == ui::TradeModel::Focus::Pack);
+    draw_list(1, g_trade.mine().items, focus == ui::TradeModel::Focus::Offer);
+    draw_list(2, g_trade.theirs().items, false);
+
+    // Gold under each offer: yours is an edit box like the chat's, theirs is plain.
+    const float gy = ly + list_h + 10;
+    {
+        const bool editing = focus == ui::TradeModel::Focus::Gold;
+        g_r.panel(cx[1] - 6, gy, col_w + 12, gold_h, editing ? 1.0f : 0.8f);
+        const float iy = gy + (gold_h - lh) / 2;
+        float x = cx[1] + 4 + g_r.text(cx[1] + 4, iy, "Gold: ", editing ? kBright : kHead);
+        x += g_r.text(x, iy, g_trade.gold_text(), kGold);
+        if (editing && static_cast<int>(now * 2) % 2 == 0) g_r.rect(x + 1, iy + 1, 1, lh - 2, 0xE0FFF6DC);
+        g_r.text(cx[2] + 4, iy, "Gold: ", kHead);
+        g_r.text(cx[2] + 4 + g_r.measure("Gold: "), iy, std::to_string(g_trade.theirs().gold), kGold);
+    }
+
+    // Accept state for each side, on the pewter bar: warm once accepted.
+    const float ay = gy + gold_h + 10;
+    auto accept_bar = [&](float x, bool on, const std::string& label) {
+        g_r.bar(x, ay, col_w, row_h, 1.0f, on, true);
+        g_r.text(x + (col_w - g_r.measure(label)) / 2, ay + (row_h - lh) / 2, label, on ? kBright : kText);
+    };
+    std::string mine_label;
+    if (g_trade.accepted_me()) mine_label = "You accepted";
+    else if (g_trade.can_accept(now)) mine_label = "A: accept";
+    else {
+        char b[48];
+        std::snprintf(b, sizeof(b), "Look it over... %.0f", std::ceil(std::max(0.1, g_trade.settle_left(now))));
+        mine_label = b;
+    }
+    accept_bar(cx[1], g_trade.accepted_me(), mine_label);
+    accept_bar(cx[2], g_trade.accepted_them(), g_trade.accepted_them() ? g_trade.partner() + " accepted" : "Not accepted yet");
+
+    // A refusal from the server, then the keys.
+    const float ny = ay + row_h + 8;
+    if (!g_trade.problem().empty()) draw_text_line(wx + pad, ny, win_w - pad * 2, g_trade.problem(), ui::TradeModel::kColorError, Face::Small);
+    else if (g_trade.accepted_me() && !g_trade.accepted_them())
+        g_r.text(wx + pad, ny, "Waiting for " + g_trade.partner() + " to accept.", kHead, Face::Small);
+    else if (g_trade.accepted_them() && !g_trade.accepted_me())
+        g_r.text(wx + pad, ny, g_trade.partner() + " has accepted this offer.", kHead, Face::Small);
+    const std::string keys = "Tab: switch    Up/Down: pick    Enter: offer / take back    Left/Right: how many    A: accept    Esc: cancel";
+    draw_text_line(wx + pad, ny + sh + 6, win_w - pad * 2, keys, kDim, Face::Small);
+}
+
+// A small mark at the centre of the view, in the warm parchment-gold of Fable's menu text
+// over a soft dark halo so it reads on snow and on night scenes alike. Sized with the screen
+// height, so it looks the same at 1080p and at 4K.
+void draw_crosshair(const Config& cfg) {
+    if (cfg.crosshair == Crosshair::Off || !g_hero.valid) return;
+    const float k = g_r.screen_h() / 900.0f;
+    const float cx = std::floor(g_r.screen_w() * 0.5f) + 0.5f, cy = std::floor(g_r.screen_h() * 0.5f) + 0.5f;
+    constexpr uint32_t kGold = 0xD8E9D6A0, kHalo = 0x70000000;
+    switch (cfg.crosshair) {
+    case Crosshair::Ring:
+        g_r.ring(cx, cy, 7.9f * k, 9.6f * k, 0.8f * k, kHalo);
+        g_r.ring(cx, cy, 8.45f * k, 9.05f * k, 0.5f * k, kGold);
+        g_r.ring(cx, cy, 0.0f, 2.2f * k, 1.0f * k, kHalo);
+        g_r.ring(cx, cy, 0.0f, 1.3f * k, 0.6f * k, kGold);
+        break;
+    case Crosshair::Dot:
+        g_r.ring(cx, cy, 0.0f, 3.2f * k, 1.2f * k, kHalo);
+        g_r.ring(cx, cy, 0.0f, 2.0f * k, 0.7f * k, kGold);
+        break;
+    case Crosshair::Cross: {
+        const float gap = 3.5f * k, len = 7.0f * k, t = 1.4f * k, f = 0.7f * k;
+        for (int halo = 1; halo >= 0; --halo) {
+            const float e = halo ? 1.0f * k : 0.0f;
+            const uint32_t c = halo ? kHalo : kGold;
+            g_r.soft_rect(cx - gap - len - e, cy - t / 2 - e, len + 2 * e, t + 2 * e, f, c);
+            g_r.soft_rect(cx + gap - e, cy - t / 2 - e, len + 2 * e, t + 2 * e, f, c);
+            g_r.soft_rect(cx - t / 2 - e, cy - gap - len - e, t + 2 * e, len + 2 * e, f, c);
+            g_r.soft_rect(cx - t / 2 - e, cy + gap - e, t + 2 * e, len + 2 * e, f, c);
+        }
+        break;
+    }
+    case Crosshair::Off: break;
+    }
 }
 
 void draw(IDirect3DDevice9* dev) {
@@ -292,8 +589,29 @@ void draw(IDirect3DDevice9* dev) {
     if (g_hero.valid)
         g_tags.set_self(cfg.tags_self, g_chat.me().empty() ? cfg.name : g_chat.me(), 0, g_hero.x, g_hero.y, g_hero.z);
     if (!g_r.begin(dev, art, cfg.font_px)) return;
+    draw_crosshair(cfg);
     draw_tags(cfg);
+    draw_party_orbs(cfg);
+    draw_party_list();
     if (cfg.chat_enabled) draw_chat(cfg, now);
+    g_trade.step(now);
+    flush_outbox();
+    draw_trade(now);
+    modsettings::draw_hud(g_r, g_hero.valid, g_hero.x, g_hero.y, g_hero.z, g_hero.area);
+    modsettings::draw_pause_button(g_r, g_hero.valid);
+    modsettings::draw(g_r);
+    if (cfg.chat_enabled && !modsettings::is_open()) draw_chat_pointer();   // on top of everything
+    g_r.end();
+}
+
+// Over the start-up menu only the Mod settings screen is drawn (chat and tags wait).
+void draw_settings_only(IDirect3DDevice9* dev) {
+    if (!modsettings::is_open()) return;
+    const assets::UiArt* art = g_art.load();
+    if (!art) return;
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (!g_r.begin(dev, art, config().font_px)) return;
+    modsettings::draw(g_r);
     g_r.end();
 }
 
@@ -313,6 +631,7 @@ HRESULT WINAPI hk_EndScene(IDirect3DDevice9* dev) {
         // The start-up menu covers the whole screen; chat and tags wait until it closes.
         if (g_no_backbuffer > 300 || targets_backbuffer(dev)) {
             menu::draw(dev);
+            draw_settings_only(dev);
             g_drawn = g_present_seen;
             g_no_backbuffer = 0;
         } else {
@@ -409,6 +728,7 @@ bool map_key(WPARAM vk, ui::Key& k) {
 LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     const Config& cfg = config();
     if (display::restyling()) return DefWindowProcW(h, msg, w, l);
+    if (modsettings::on_message(h, msg, w, l)) return 0;
     if (menu::active() && menu::on_message(h, msg, w, l)) return 0;
     if (cfg.chat_enabled && cfg.overlay_enabled) {
         static wchar_t high_surrogate = 0;
@@ -416,6 +736,13 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_KEYDOWN: {
             std::lock_guard<std::mutex> lock(g_mu);
             double now = now_s();
+            if (!g_chat.is_open() && g_trade.wants_keys()) {
+                ui::Key k;
+                if (map_key(w, k)) g_trade.key(k, now);
+                if (!g_trade.wants_keys()) g_block_until = GetTickCount() + 200;
+                flush_outbox();
+                return 0;
+            }
             if (!g_chat.is_open()) {
                 if (static_cast<int>(w) == cfg.open_key && !(GetKeyState(VK_MENU) & 0x8000)) {
                     g_chat.open();
@@ -426,6 +753,10 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             }
             ui::Key k;
             if (map_key(w, k)) g_chat.key(k, now);
+            if (g_chat.take_settings_request()) {
+                if (g_chat.is_open()) g_chat.close();
+                modsettings::open(modsettings::kExtras);
+            }
             if (!g_chat.is_open()) g_block_until = GetTickCount() + 200;
             flush_outbox();
             return 0;
@@ -433,6 +764,13 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         case WM_KEYUP:
         case WM_CHAR:
             if (!input_blocked()) break;
+            if (msg == WM_CHAR && !g_chat_open && g_trade_keys) {
+                std::lock_guard<std::mutex> lock(g_mu);
+                const wchar_t c = static_cast<wchar_t>(w);
+                if (c >= 0x20) g_trade.character(static_cast<char32_t>(c), now_s());
+                flush_outbox();
+                return 0;
+            }
             if (msg == WM_CHAR && g_chat_open) {
                 std::lock_guard<std::mutex> lock(g_mu);
                 wchar_t c = static_cast<wchar_t>(w);
@@ -444,9 +782,31 @@ LRESULT CALLBACK hk_WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             return 0;
         case WM_KILLFOCUS: {
             std::lock_guard<std::mutex> lock(g_mu);  // alt-tab closes the box so the game isn't stuck
-            if (g_chat.is_open()) { g_chat.close(); g_chat_open = false; }
+            if (g_chat.is_open()) { g_chat.close(); flush_outbox(); }
             break;
         }
+        case WM_SETCURSOR:
+            // Our own pointer is drawn while chat is open; keep the Windows arrow out of the way.
+            if (g_chat_open && LOWORD(l) == HTCLIENT) { SetCursor(nullptr); return TRUE; }
+            break;
+        case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: {
+            if (!g_chat_open) break;
+            std::lock_guard<std::mutex> lock(g_mu);
+            float x, y;
+            if (to_backbuffer(h, static_cast<short>(LOWORD(l)), static_cast<short>(HIWORD(l)), x, y)) chat_click(x, y);
+            flush_outbox();
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            if (!g_chat_open) break;
+            std::lock_guard<std::mutex> lock(g_mu);
+            g_chat.scroll_by(GET_WHEEL_DELTA_WPARAM(w) > 0 ? 3 : -3);
+            return 0;
+        }
+        case WM_MOUSEMOVE: case WM_LBUTTONUP: case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_XBUTTONDOWN: case WM_XBUTTONUP:
+            if (g_chat_open) return 0;   // chat has the mouse; Fable doesn't see it
+            break;
         }
     }
     return CallWindowProcW(o_WndProc, h, msg, w, display::hud::map_mouse(msg, l));
@@ -462,11 +822,27 @@ bool is_mouse(void* dev) {
     return false;
 }
 
+/** Mouse buttons as Fable reads them through DirectInput (bit n = button n), for sync. */
+std::atomic<unsigned> g_mouse_buttons{0};
+
 HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
     HRESULT hr = o_GetDeviceState(dev, size, data);
-    if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
+    if (SUCCEEDED(hr) && data && size >= 16 && is_mouse(dev)) {
+        // DIMOUSESTATE: lX, lY, lZ, then rgbButtons[4] at byte 12.
+        const unsigned char* b = static_cast<const unsigned char*>(data) + 12;
+        unsigned m = 0;
+        for (int i = 0; i < 4; ++i)
+            if (b[i] & 0x80) m |= 1u << i;
+        g_mouse_buttons = m;
+    }
+    if (SUCCEEDED(hr) && data && is_mouse(dev) && modsettings::is_open()) {
+        modsettings::on_mouse_state(data, size);   // the settings screen has the mouse, nothing under it
+        std::memset(data, 0, size);
+    } else if (SUCCEEDED(hr) && data && is_mouse(dev) && menu::active()) {
         menu::on_mouse_state(data, size);   // the menu reads the mouse, Fable's menu underneath doesn't
         std::memset(data, 0, size);
+    } else if (SUCCEEDED(hr) && data && is_mouse(dev) && g_chat_open) {
+        std::memset(data, 0, size);   // chat has the mouse
     }
     if (SUCCEEDED(hr) && data && is_keyboard(dev) && input_blocked()) std::memset(data, 0, size);
     return hr;
@@ -474,9 +850,29 @@ HRESULT WINAPI hk_GetDeviceState(void* dev, DWORD size, LPVOID data) {
 
 HRESULT WINAPI hk_GetDeviceData(void* dev, DWORD cb, void* rg, LPDWORD inout, DWORD flags) {
     HRESULT hr = o_GetDeviceData(dev, cb, rg, inout, flags);
-    if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
+    if (SUCCEEDED(hr) && inout && rg && cb >= 8 && is_mouse(dev) && !(flags & 0x1 /* DIGDD_PEEK */)) {
+        // Buffered DIDEVICEOBJECTDATA: dwOfs, dwData, ... ; DIMOFS_BUTTON0..3 are offsets 12..15.
+        unsigned m = g_mouse_buttons.load();
+        const unsigned char* p = static_cast<const unsigned char*>(rg);
+        for (DWORD i = 0; i < *inout; ++i, p += cb) {
+            DWORD ofs = 0, val = 0;
+            std::memcpy(&ofs, p, 4);
+            std::memcpy(&val, p + 4, 4);
+            if (ofs >= 12 && ofs <= 15) {
+                unsigned bit = 1u << (ofs - 12);
+                m = (val & 0x80) ? (m | bit) : (m & ~bit);
+            }
+        }
+        g_mouse_buttons = m;
+    }
+    if (SUCCEEDED(hr) && inout && is_mouse(dev) && modsettings::is_open()) {
+        if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) modsettings::on_mouse_data(rg, cb, *inout);
+        *inout = 0;
+    } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && menu::active()) {
         if (rg && !(flags & 0x1 /* DIGDD_PEEK */)) menu::on_mouse_data(rg, cb, *inout);
         *inout = 0;
+    } else if (SUCCEEDED(hr) && inout && is_mouse(dev) && g_chat_open) {
+        *inout = 0;   // chat has the mouse
     }
     if (SUCCEEDED(hr) && inout && is_keyboard(dev) && input_blocked()) *inout = 0;  // read and thrown away
     return hr;
@@ -631,4 +1027,52 @@ void log_stats() {
             g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags),
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
+bool input_blocked_now() { return input_blocked(); }
+unsigned mouse_buttons() { return g_mouse_buttons.load(); }
+
+void on_trade_frame(const std::string& text) {
+    json::Value m;
+    if (!json::parse(text, m) || !m.is_object()) return;
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade.on_frame(m, now_s());
+    flush_outbox();
+}
+
+void on_world_disconnected() {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade.on_disconnected(now_s());
+    g_world_out.clear();
+    flush_outbox();
+}
+
+void set_trade_targets(std::vector<ui::TradeTarget> targets) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_trade_targets = std::move(targets);
+}
+
+void post_world_frame(const std::string& json) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (g_world_in.size() < 256) g_world_in.push_back(json);
+}
+
+// Trade and party requests share one queue; either name drains it.
+std::vector<std::string> take_world_requests() { return take_world_outbox(); }
+
+std::vector<std::string> take_world_outbox() {
+    std::lock_guard<std::mutex> lock(g_mu);
+    std::vector<std::string> out;
+    out.swap(g_world_out);
+    return out;
+}
+
+void set_party_marks(std::vector<ui::PartyMark> marks) {
+    std::lock_guard<std::mutex> lock(g_mu);
+    g_party.set_marks(std::move(marks));
+}
+
+void clear_party() {
+    // Goes through the same queue as the server's frames, so it lands after any already queued.
+    post_world_frame("{\"t\":\"party\",\"id\":null}");
+}
+
 }  // namespace fo::overlay

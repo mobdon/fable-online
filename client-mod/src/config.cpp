@@ -6,6 +6,7 @@
 namespace fo {
 namespace {
 Config g_cfg;
+std::wstring g_ini;
 
 std::string narrow(const std::wstring& w) {
     if (w.empty()) return "";
@@ -54,7 +55,9 @@ std::wstring module_dir(HMODULE m) {
 void config_load(HMODULE self) {
     Config& c = g_cfg;
     std::wstring f = module_dir(self) + L"\\fable_online.ini";
+    g_ini = f;
     c.chat_enabled = ini_bool(f, L"chat", L"enabled", c.chat_enabled);
+    c.chat_hide_hud = ini_bool(f, L"chat", L"hide_hud", c.chat_hide_hud);
     set_server(c, narrow(ini_str(f, L"chat", L"server", L"")));
     c.name = narrow(ini_str(f, L"chat", L"name", L""));
     std::wstring key = ini_str(f, L"chat", L"open_key", L"");
@@ -67,6 +70,7 @@ void config_load(HMODULE self) {
     c.tag_full = ini_float(f, L"tags", L"full_distance", c.tag_full);
     c.tag_hidden = ini_float(f, L"tags", L"max_distance", c.tag_hidden);
     c.menu_enabled = ini_bool(f, L"menu", L"enabled", c.menu_enabled);
+    c.shop_filter = ini_bool(f, L"shops", L"filter", c.shop_filter);
     c.overlay_enabled = ini_bool(f, L"overlay", L"enabled", c.overlay_enabled);
     c.font_px = static_cast<int>(ini_float(f, L"overlay", L"font_px", static_cast<float>(c.font_px)));
     c.chat_rows = static_cast<int>(ini_float(f, L"overlay", L"chat_rows", static_cast<float>(c.chat_rows)));
@@ -89,10 +93,31 @@ void config_load(HMODULE self) {
     if (c.refresh_hz < -1 || c.refresh_hz > 1000) c.refresh_hz = 0;
     std::wstring vs = ini_str(f, L"display", L"vsync", L"game");
     c.vsync = vs == L"on" || vs == L"1" ? 1 : vs == L"off" || vs == L"0" ? 0 : -1;
+    c.camera_auto_center = ini_bool(f, L"display", L"camera_auto_center", c.camera_auto_center);
+    c.camera_shoulder = static_cast<float>(_wtof(ini_str(f, L"display", L"camera_shoulder", L"0").c_str()));
+    if (c.camera_shoulder > 3.0f || c.camera_shoulder < -3.0f) c.camera_shoulder = 0;
+    c.camera_latch = ini_bool(f, L"display", L"camera_latch", c.camera_latch);
+    c.camera_assist = ini_bool(f, L"display", L"camera_assist", c.camera_assist);
+    c.camera_smooth = ini_bool(f, L"display", L"camera_smooth", c.camera_smooth);
+    c.camera_shoulder_key = static_cast<int>(_wtoi(ini_str(f, L"display", L"camera_shoulder_key", L"122").c_str()));
+    std::wstring ms = ini_str(f, L"display", L"mouse_smoothing", L"off");
+    c.mouse_smoothing = ms == L"off" ? 0 : ms == L"game" ? -1 : _wtoi(ms.c_str());
+    if (c.mouse_smoothing < -1 || c.mouse_smoothing > 60) c.mouse_smoothing = 0;
     std::wstring hs = ini_str(f, L"display", L"hud_scale", L"off");
     c.hud_scale = hs == L"auto" ? 0.0f : hs == L"off" ? -1.0f : static_cast<float>(_wtof(hs.c_str()));
     if (c.hud_scale > 4.0f) c.hud_scale = 4.0f;
+    c.hud_bottom_scale = static_cast<float>(_wtof(ini_str(f, L"display", L"hud_bottom_scale", L"0").c_str()));
+    if (c.hud_bottom_scale < 0 || c.hud_bottom_scale > 4.0f) c.hud_bottom_scale = 0;
     c.low_latency = ini_bool(f, L"display", L"low_latency", c.low_latency);
+    c.aim_at_crosshair = ini_bool(f, L"display", L"aim_at_crosshair", c.aim_at_crosshair);
+    c.red_target = ini_bool(f, L"display", L"red_target", c.red_target);
+    std::wstring ch = ini_str(f, L"overlay", L"crosshair", L"off");
+    c.crosshair = ch == L"ring" ? Crosshair::Ring : ch == L"dot" ? Crosshair::Dot : ch == L"cross" ? Crosshair::Cross : Crosshair::Off;
+
+    c.dev_hotkeys = ini_bool(f, L"dev", L"hotkeys", c.dev_hotkeys);
+    c.show_position = ini_bool(f, L"dev", L"show_position", c.show_position);
+    c.god_mode = ini_bool(f, L"dev", L"god_mode", c.god_mode);
+    c.dev = env("FABLE_ONLINE_DEV") == "1";
 
     set_server(c, env("FABLE_ONLINE_CHAT_SERVER"));
     if (auto n = env("FABLE_ONLINE_NAME"); !n.empty()) c.name = n;
@@ -107,4 +132,10 @@ void config_load(HMODULE self) {
 }
 
 const Config& config() { return g_cfg; }
+Config& config_edit() { return g_cfg; }
+
+void config_write(const wchar_t* section, const wchar_t* key, const std::wstring& value) {
+    if (g_ini.empty()) return;
+    WritePrivateProfileStringW(section, key, value.c_str(), g_ini.c_str());
+}
 }  // namespace fo

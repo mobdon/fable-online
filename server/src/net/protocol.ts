@@ -5,12 +5,14 @@ import type { PlayerInput } from '../world/sim.js';
  * shared/protocol/messages.proto). The codec is isolated here so it can move to protobuf
  * binary frames without touching game code.
  *
- * Client -> server: hello, input, chat, interact, region_ready, ping. That is all a client
+ * Client -> server: hello, input, chat, interact, region_ready, ping (plus the requests
+ * below: quests, positions, shops, heals, travel, trade, law). That is all a client
  * can say: intent, never state. Positions, health, gold and items only ever flow
  * server -> client. "interact" names a thing the hero wants to use; the server decides
  * whether they can reach it and what happens.
  */
 export type ClientMessage =
+  /** `token` is the launcher's one-time join ticket, or the `resume` token from the last welcome. */
   | { t: 'hello'; protocol: number; exe_timestamp: string; token: string }
   | ({ t: 'input' } & PlayerInput)
   | { t: 'chat'; text: string }
@@ -20,11 +22,12 @@ export type ClientMessage =
   /** The client's Fable finished a quest. The server checks the reward before paying anything. */
   | { t: 'quest_complete'; quest: string; gold: number; renown: number; items: string[] }
   /**
-   * Dev only. The mod reporting where the local game put its hero, used until Fable's
-   * own input is mapped. The server throws it away unless trustClientPositions is on,
-   * because a position from a client is a position a cheat can choose.
+   * The mod reporting where the local game put its hero, used until Fable's own input is
+   * mapped. A position from a client is a position a cheat can choose, so with
+   * clientMovement 'checked' (the default) the server only takes moves the hero could have
+   * made (src/world/movement.ts) and answers anything else with `pos_correct`.
    */
-  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number }
+  | { t: 'hero_pos'; x: number; y: number; z: number; yaw?: number; area: number; load?: boolean }
   /**
    * Shops. `shop` is the shop building's UID from the level file, as the client's Fable knows it;
    * the server adds the region from where it has the hero. `key` is the client's idempotency key
@@ -33,7 +36,48 @@ export type ClientMessage =
   | { t: 'shop_open'; shop: string }
   | { t: 'shop_buy'; shop: string; def: string; qty: number; key: string }
   | { t: 'shop_sell'; shop: string; item: string; key: string }
+  /**
+   * The local game healed the hero by `share` of its max (a potion, food or Heal Life the mod
+   * cannot tell apart yet). The server decides what was used, spends it and heals by its own
+   * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
+   */
+  | { t: 'heal'; share: number; key: string }
+  /**
+   * Staff only (gm or admin account): spawn `count` hostile creatures next to the hero, in
+   * the hero's own channel, run by the server like any other monster. `def` empty = random
+   * from the defs the server already spawns. They don't respawn.
+   */
+  | { t: 'dev_spawn'; def: string; count: number }
+  | TradeRequest
+  | PartyRequest
+  /**
+   * Cullis Gate / Guild Seal travel. `to` is a gate's thing id, "guild" or "back" (to where
+   * the last seal jump left from). `from` names the gate the hero is standing in; without it
+   * this is a seal jump. `gates` asks for the list of gates this hero can travel to.
+   */
+  | { t: 'travel'; to: string; from?: string }
+  | { t: 'gates' }
   | LawRequest;
+
+/**
+ * Player trading (src/economy/trade.ts). The client names heroes and its own item IDs;
+ * the server checks reach, ownership and gold, and does the swap in the ledger.
+ */
+export type TradeRequest =
+  | { t: 'trade_request'; to: number }
+  | { t: 'trade_answer'; from: number; yes: boolean }
+  | { t: 'trade_offer'; gold: number; items: { id: string; qty?: number }[] }
+  | { t: 'trade_accept'; version: number }
+  | { t: 'trade_unaccept' }
+  | { t: 'trade_cancel' };
+
+/**
+ * Party requests (src/party/parties.ts). `name` is a hero name the player typed, so a
+ * malformed one is passed on as text and refused with a message, never a disconnect.
+ */
+export type PartyOp = 'invite' | 'accept' | 'decline' | 'leave' | 'kick' | 'lead' | 'regroup' | 'say';
+export type PartyRequest = { t: 'party'; op: PartyOp; name: string; text: string };
+const PARTY_OPS = new Set<PartyOp>(['invite', 'accept', 'decline', 'leave', 'kick', 'lead', 'regroup', 'say']);
 
 /**
  * What the mod reports to the law: what the player tried (steal, draw a weapon, answer a
@@ -115,6 +159,7 @@ export function decode(raw: string): ClientMessage {
         z: m.z,
         yaw: isNum(m.yaw) ? wrapAngle(m.yaw) : undefined,
         area: isNum(m.area) ? m.area >>> 0 : 0,
+        load: m.load === 1 || m.load === true,
       };
     }
     case 'ping':
@@ -126,20 +171,74 @@ export function decode(raw: string): ClientMessage {
     }
     case 'law':
       return decodeLaw(m);
+    case 'travel': {
+      const to = m.to === 'guild' || m.to === 'back' ? m.to : typeof m.to === 'string' && THING_ID.test(m.to) ? m.to : null;
+      if (!to) throw new ProtocolError('bad travel');
+      if (m.from !== undefined && (typeof m.from !== 'string' || !THING_ID.test(m.from))) throw new ProtocolError('bad travel');
+      return m.from === undefined ? { t: 'travel', to } : { t: 'travel', to, from: m.from as string };
+    }
+    case 'gates':
+      return { t: 'gates' };
+    case 'party': {
+      if (typeof m.op !== 'string' || !PARTY_OPS.has(m.op as PartyOp)) throw new ProtocolError('bad party op');
+      // eslint-disable-next-line no-control-regex
+      const clean = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, max) : '');
+      return { t: 'party', op: m.op as PartyOp, name: clean(m.name, 32), text: clean(m.text, CHAT_MAX) };
+    }
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
+    case 'heal':
+      if (!isNum(m.share) || m.share <= 0 || m.share > 2) throw new ProtocolError('bad heal');
+      return { t: 'heal', share: m.share, key: clientKey(m.key) };
     case 'shop_buy': {
       if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def)) throw new ProtocolError('bad def');
       const qty = isNum(m.qty) ? m.qty : 1;
       if (!Number.isInteger(qty) || qty < 1 || qty > 99) throw new ProtocolError('bad qty');
       return { t: 'shop_buy', shop: shopUid(m.shop), def: m.def, qty, key: clientKey(m.key) };
     }
+    case 'dev_spawn': {
+      const def = typeof m.def === 'string' ? m.def : '';
+      if (def && !/^[A-Z0-9_]{1,64}$/.test(def)) throw new ProtocolError('bad def');
+      const count = isNum(m.count) ? m.count : 1;
+      if (!Number.isInteger(count) || count < 1 || count > 10) throw new ProtocolError('bad count');
+      return { t: 'dev_spawn', def, count };
+    }
     case 'shop_sell':
       if (typeof m.item !== 'string' || m.item.length > 64) throw new ProtocolError('bad item');
       return { t: 'shop_sell', shop: shopUid(m.shop), item: m.item, key: clientKey(m.key) };
+    case 'trade_request':
+      return { t: 'trade_request', to: heroIdOf(m.to) };
+    case 'trade_answer':
+      return { t: 'trade_answer', from: heroIdOf(m.from), yes: m.yes === true };
+    case 'trade_offer': {
+      if (!isNum(m.gold) || !Number.isSafeInteger(m.gold) || m.gold < 0) throw new ProtocolError('bad gold');
+      if (!Array.isArray(m.items) || m.items.length > TRADE_ITEMS_MAX) throw new ProtocolError('bad items');
+      const items = m.items.map((x: unknown) => {
+        const o = (typeof x === 'string' ? { id: x } : x) as Record<string, unknown> | null;
+        if (!o || typeof o.id !== 'string' || !ITEM_ID.test(o.id)) throw new ProtocolError('bad item');
+        if (o.qty === undefined || o.qty === null) return { id: o.id };
+        if (!isNum(o.qty) || !Number.isInteger(o.qty) || o.qty < 1 || o.qty > 9999) throw new ProtocolError('bad qty');
+        return { id: o.id, qty: o.qty };
+      });
+      return { t: 'trade_offer', gold: m.gold, items };
+    }
+    case 'trade_accept':
+      if (!isNum(m.version) || !Number.isInteger(m.version) || m.version < 0) throw new ProtocolError('bad version');
+      return { t: 'trade_accept', version: m.version };
+    case 'trade_unaccept':
+      return { t: 'trade_unaccept' };
+    case 'trade_cancel':
+      return { t: 'trade_cancel' };
     default:
       throw new ProtocolError('unknown message');
   }
+}
+
+const TRADE_ITEMS_MAX = 16;
+const ITEM_ID = /^[0-9A-Za-z-]{8,64}$/;
+function heroIdOf(v: unknown): number {
+  if (!isNum(v) || !Number.isSafeInteger(v) || v < 1) throw new ProtocolError('bad hero');
+  return v;
 }
 
 const ID = /^[A-Za-z0-9_:.\-]{1,96}$/;
@@ -149,7 +248,7 @@ const idOf = (v: unknown, what: string): string => {
 };
 const keyOf = (v: unknown): string => {
   if (v === undefined) return `srv-${Math.random().toString(36).slice(2)}-${Date.now()}`;
-  if (typeof v !== 'string' || v.length < 8 || v.length > 128) throw new ProtocolError('bad key');
+  if (typeof v !== 'string' || v.length < 8 || v.length > 96) throw new ProtocolError('bad key');
   return v;
 };
 

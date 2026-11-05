@@ -1,5 +1,5 @@
 #pragma once
-// TCP connection to the chat service (server/chat). One JSON object per line.
+// TCP connection to Realm chat (server/src/chat, inside the game server). One JSON object per line.
 // Runs on its own thread; reconnects with backoff. The game thread only touches the queues.
 #include <string>
 #include <vector>

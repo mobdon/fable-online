@@ -114,13 +114,22 @@ export class TownSim implements RegionSim {
     return this.inner.law;
   }
 
+  get healing() {
+    return this.inner.healing;
+  }
+
+  combatState(heroId: number) {
+    return this.inner.combatState?.(heroId);
+  }
+
   addGuard(defName: string, at: Vec3): number {
     if (!this.inner.addGuard) throw new Error('this region has no town watch');
     return this.inner.addGuard(defName, at);
   }
 
-  placeHero(heroId: number, at: Vec3, yaw?: number): void {
-    this.inner.placeHero?.(heroId, at, yaw);
+  placeHero(heroId: number, at: Vec3, yaw?: number): boolean {
+    if (!this.inner.placeHero) return false;
+    return this.inner.placeHero(heroId, at, yaw) !== false;
   }
 
   dispose(): void {

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Authoritative Fable Online server: gateway, region channels, accounts, gold ledger, items, combat, spawns, loot.",
+  "description": "Authoritative Fable Online server: gateway, region channels, accounts, gold ledger, items, combat, spawns, loot, Realm chat, analytics.",
   "engines": {
     "node": ">=22.13"
   },
@@ -17,10 +17,16 @@
     "ai-bench": "tsx --disable-warning=ExperimentalWarning scripts/ai-bench.ts",
     "extract": "tsx --disable-warning=ExperimentalWarning scripts/extract-defs.ts",
     "extract-town": "tsx --disable-warning=ExperimentalWarning scripts/extract-town.ts",
-    "scoreboard-setup": "tsx --disable-warning=ExperimentalWarning scripts/scoreboard-setup.ts"
+    "scoreboard-setup": "tsx --disable-warning=ExperimentalWarning scripts/scoreboard-setup.ts",
+    "admin": "tsx --disable-warning=ExperimentalWarning scripts/admin.ts",
+    "walkers": "tsx --disable-warning=ExperimentalWarning scripts/walkers.ts",
+    "link-test": "tsx --disable-warning=ExperimentalWarning scripts/link-test.ts",
+    "chat-bot": "tsx --disable-warning=ExperimentalWarning scripts/chat-bot.ts",
+    "analytics-demo": "tsx --disable-warning=ExperimentalWarning scripts/analytics-demo.ts"
   },
   "dependencies": {
     "jpeg-js": "^0.4.4",
+    "prom-client": "^15.1.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {

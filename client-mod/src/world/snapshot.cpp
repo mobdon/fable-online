@@ -106,6 +106,9 @@ class Reader {
     size_t p_ = 0;
 };
 
+/** More creature defs than game.bin has; a longer list is cut here. */
+constexpr size_t kMaxSpawnDefs = 4096;
+
 bool sane(float v) { return std::isfinite(v) && std::fabs(v) < 1.0e6f; }
 
 /** Reads the fields of one entity object. Position is left at the closing brace. */
@@ -120,7 +123,7 @@ bool read_entity(Reader& r, EntityState& e) {
         if (key == "id") {
             if (!r.read_number(n)) return false;
             e.id = static_cast<uint32_t>(n);
-        } else if (key == "x" || key == "y" || key == "z" || key == "yaw" || key == "health" || key == "renown" ||
+        } else if (key == "x" || key == "y" || key == "z" || key == "yaw" || key == "health" || key == "max_health" || key == "renown" ||
                    key == "anim" || key == "kind_id") {
             if (!r.read_number(n)) return false;
             if (key == "x") { e.x = static_cast<float>(n); have_pos = true; }
@@ -128,6 +131,7 @@ bool read_entity(Reader& r, EntityState& e) {
             else if (key == "z") e.z = static_cast<float>(n);
             else if (key == "yaw") e.yaw = static_cast<float>(n);
             else if (key == "health") e.health = static_cast<float>(n);
+            else if (key == "max_health") e.maxHealth = static_cast<float>(n);
             else if (key == "renown") e.renown = static_cast<uint32_t>(n);
             else if (key == "anim") e.anim = n >= 0 && n <= 10 ? static_cast<Anim>(static_cast<uint8_t>(n)) : Anim::Idle;
         } else if (key == "def") {
@@ -185,6 +189,8 @@ FrameType frame_type(const std::string& json) {
     if (tag == "welcome") return FrameType::Welcome;
     if (tag == "enter_region") return FrameType::EnterRegion;
     if (tag == "error") return FrameType::Error;
+    if (tag == "pos_correct") return FrameType::PosCorrect;
+    if (tag == "pong") return FrameType::Pong;
     return FrameType::Unknown;
 }
 
@@ -237,7 +243,54 @@ bool parse_welcome(const std::string& json, Welcome& out) {
         Reader r(json);
         if (seek_key(r, "tick_rate") && r.read_number(n) && n > 0 && n <= 120) out.tickRate = static_cast<uint32_t>(n);
     }
+    {
+        Reader r(json);
+        if (seek_key(r, "resume")) r.read_string(out.resume);
+        if (out.resume.size() > 256) out.resume.clear();
+    }
+    {
+        Reader r(json);
+        std::string mode;
+        if (seek_key(r, "client_move") && r.read_string(mode) && (mode == "off" || mode == "checked" || mode == "trusted"))
+            out.clientMove = mode;
+    }
+    {
+        // A flat array of def names. Anything that is not a string ends the list.
+        Reader r(json);
+        if (seek_key(r, "spawn_defs") && r.eat('[')) {
+            std::string def;
+            while (out.spawnDefs.size() < kMaxSpawnDefs && r.read_string(def)) {
+                out.spawnDefs.push_back(def);
+                if (!r.eat(',')) break;
+            }
+        }
+    }
     return out.playerId != 0;
+}
+
+bool parse_pos_correct(const std::string& json, PosCorrect& out) {
+    if (frame_type(json) != FrameType::PosCorrect) return false;
+    out = PosCorrect{};
+    const char* keys[3] = {"x", "y", "z"};
+    float* dst[3] = {&out.x, &out.y, &out.z};
+    for (int i = 0; i < 3; ++i) {
+        Reader r(json);
+        double n = 0;
+        if (!seek_key(r, keys[i]) || !r.read_number(n) || !std::isfinite(n) || std::fabs(n) > 1e6) return false;
+        *dst[i] = static_cast<float>(n);
+    }
+    Reader r(json);
+    if (seek_key(r, "reason")) r.read_string(out.reason);
+    Reader ra(json);
+    double area = 0;
+    if (seek_key(ra, "area") && ra.read_number(area) && area >= 0 && area <= 4294967295.0) out.area = static_cast<uint32_t>(area);
+    return true;
+}
+
+bool parse_pong(const std::string& json, double& n) {
+    if (frame_type(json) != FrameType::Pong) return false;
+    Reader r(json);
+    return seek_key(r, "n") && r.read_number(n);
 }
 
 bool parse_enter_region(const std::string& json, std::string& region, float& x, float& y, float& z) {

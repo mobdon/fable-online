@@ -9,7 +9,11 @@ npm install
 npm run dev          # http://localhost:7777, game socket ws://localhost:7777/play
 npm test             # economy invariants, accounts, channels, combat, spawns, loot, quests, end-to-end join
 npm run bots -- 1000 20   # 1,000 bots over real WebSockets for 20 s
+npm run walkers -- --near Mob   # bot players walking around a hero on a running server
+npm run admin -- list           # heroes and where they are
 ```
+
+To host a test server on a Windows PC, use `ops/local-host/` (README there).
 
 ### Game data from your own install
 
@@ -39,10 +43,10 @@ Needs Node 22.13 or newer (uses the built-in `node:sqlite`).
 ## The rules it enforces
 
 **The server owns everything.** A client can send exactly these things: `hello` (a one-time
-join ticket), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id of a door,
-chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server checks,
-below), and `ping`. It never sends a position,
-health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
+join ticket or resume token), `input` (stick, buttons, camera yaw), `chat`, `interact` (the id
+of a door, chest or item it wants to use), `region_ready`, `quest_complete` (a claim the server
+checks, below), `hero_pos` (where its Fable put the hero, accepted only if the hero could have
+got there: `docs/connection.md`), and `ping`. It never sends health, gold or an item. The stick is clamped to length 1, input `seq` must go up,
 inputs are rate limited, and junk frames disconnect. The hero's region and position come
 from the database on join and are written back by the server.
 
@@ -59,8 +63,14 @@ from the database on join and are written back by the server.
   Items are moved, never copied. Split and merge conserve quantity.
 - Prices live in the server's item catalog. It refuses to load if any item sells back for
   more than half its buy price, so buy-then-sell can never make gold.
-- Player trades execute both sides in one transaction, against the exact offer both players
-  accepted. Changing an offer clears both accepts.
+- Player trades execute both sides in one transaction, against the exact offer version both
+  players accepted. Changing an offer clears both accepts, and an accept is refused for 2 s
+  after a change. Inside the swap the server re-checks ownership, gold, stolen marks, staff
+  gear, prison and wanted level; if anything fails nothing moves and the window stays open.
+  Both heroes must be in the same channel within 10 m, and walking away, logging out or 5
+  quiet minutes closes the window. Part of a stack is split off into a new item ID. Nothing
+  sits in escrow, so there is nothing to roll back. Socket messages: `trade_*` in
+  shared/protocol/messages.proto.
 - Resurrection Phials (and anything marked untradeable) can't be bought, sold or traded.
 - `economy.audit()` re-derives every balance from the ledger and every stack from its
   history. The server refuses to start if it fails. `GET /admin/v1/economy/audit` runs it live.
@@ -126,13 +136,14 @@ platinum set never drops.
 | `src/data/` | game.bin / names.bin reader and the extractor |
 | `src/law/` | Crime records, fines, bribes, kick-outs, jail and Bargate sentences, stealing rules, and the town watch that runs guards ([docs/law.md](../docs/law.md)) |
 | `src/net/` | HTTP launcher API, game WebSocket, protocol validation |
-| `src/analytics/` | Typed game events written as JSON lines to `data/events.jsonl` |
+| `src/analytics/` | Typed game events (JSON lines in `data/events.jsonl`), and the bridge that feeds them to Prometheus metrics (`:9464/metrics`) and the economy watchdog ([README](src/analytics/README.md)) |
+| `src/chat/` | Realm chat: channels, whispers, moderation, flood control and name tags, on TCP 7781 |
 
 ## HTTP API
 
 Launcher contract (`/launcher/v1`): `GET status`, `GET news`, `GET manifest?channel=live`,
 `POST register` (logs straight in, same reply as login), `POST login`, `POST refresh`, `POST logout`, `GET heroes`, `POST heroes`,
-`POST join {region, client_version, hero_id?}` which returns `{ticket, host, port}`. The mod
+`POST join {region, client_version, hero_id?}` which returns `{ticket, host, port, chat: {host, port, token}}`. The mod
 sends the ticket as `Hello.token`; it works once, for 60 seconds. News and manifests are read
 from `content/news.json` and `content/manifest-<channel>.json`.
 
@@ -160,10 +171,12 @@ Admin (`/admin/v1`, admin accounts only): `GET stats`, `GET economy/audit`.
 - **Region graph** comes from `shared/defs/regions.json`, which you generate from your own
   install with `tools/extractor/regions.mjs`. Without it the server uses a small built-in map.
 
-## chat/
+## Realm chat
 
-Chat channels, whispers, moderation, flood control and name tags. Runs on its own so chat
-survives region server restarts. See `chat/` and `../shared/protocol/chat.md`.
-Hooks: `ChatHub.updateHero()` (region server: positions, renown, PvP flag),
-`ChatHub.setParty()` (party system), the `EventSink` passed to `ChatHub` (analytics),
-and `auth.ts` (gateway login tokens).
+Chat channels, whispers, moderation, flood control and name tags (`src/chat/`), run by the game
+server on its own TCP port (`FO_CHAT_PORT`, 7781). Protocol: `../shared/protocol/chat.md`.
+`RealmChat` (`src/chat/realm-chat.ts`) signs the chat login token returned by `/join` (there is no
+login by name), and five times a second copies each online hero's channel, Fable area, position,
+renown and PvP flag from the world into the hub, so the client's own position reports are
+ignored. Chat events (logins, message counts, reports, moderation) go to the game event log and
+the analytics. Hook left for the party system: `ChatHub.setParty()`.

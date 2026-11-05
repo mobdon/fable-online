@@ -10,15 +10,21 @@
 #include <cstdlib>
 #include <cstring>
 #include "devkit.h"
+#include "modsettings/modsettings.h"
 #include "herolook.h"
 #include <string>
 #include <thread>
 #include "config.h"
 #include "game/hero.h"
+#include "game/shop_stock_hook.h"
+#include "crash.h"
 #include "log.h"
 #include "net/chat_client.h"
 #include "display/hud_scale.h"
+#include "display/mouse_look.h"
 #include "display/present.h"
+#include "display/target_colour.h"
+#include "game/pause_menu.h"
 #include "display/widescreen.h"
 #include "menu/menu.h"
 #include "overlay/overlay.h"
@@ -46,20 +52,26 @@ Mode read_mode() {
 void online_thread() {
     const fo::Config& cfg = fo::config();
     std::thread(fo::overlay::install_late).detach();
-    if (cfg.chat_enabled) {
-        std::string hello = "{\"t\":\"hello\",\"v\":1";
-        if (!cfg.token.empty()) hello += ",\"token\":" + fo::json::quote(cfg.token);
-        else hello += ",\"name\":" + fo::json::quote(cfg.name);
-        fo::log("chat: server %s:%u, %s", cfg.chat_host.c_str(), cfg.chat_port,
-                cfg.token.empty() ? ("dev login as " + cfg.name).c_str() : "token login");
-        fo::net::chat_start(cfg.chat_host, cfg.chat_port, hello + "}");
+    // Realm chat only takes the token the game server signs in /join, which the launcher
+    // passes as FABLE_ONLINE_TOKEN. Without one there is nothing to log in with.
+    if (cfg.chat_enabled && cfg.token.empty()) {
+        fo::log("chat: no login token (start Fable from the launcher); Realm chat is off");
+    } else if (cfg.chat_enabled) {
+        std::string hello = "{\"t\":\"hello\",\"v\":1,\"token\":" + fo::json::quote(cfg.token) + "}";
+        fo::log("chat: server %s:%u, token login", cfg.chat_host.c_str(), cfg.chat_port);
+        fo::net::chat_start(cfg.chat_host, cfg.chat_port, hello);
     }
     fo::game::HeroPos last;
     unsigned ticks = 0;
     bool was_connected = false;
     while (g_running.load()) {
         Sleep(200);
-        fo::game::HeroPos p = fo::game::hero_read();
+        fo::game::HeroPos p;
+        try {
+            p = fo::game::hero_read();
+        } catch (...) {
+            fo::log("hero: read failed; trying again");
+        }
         fo::overlay::set_hero(p);
         // Interim (dev servers only): report our position so others see our name tag.
         // Production servers ignore this; the region server owns positions.
@@ -72,7 +84,7 @@ void online_thread() {
         }
         was_connected = connected;
         ++ticks;
-        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); if (ticks < 200) fo::display::log_status(); }
+        if (ticks == 50 || ticks == 150 || ticks % 1500 == 0) { fo::overlay::log_stats(); fo::menu::log_status(); if (ticks < 200) fo::display::log_status(); if (ticks == 150) fo::game::shop_stock::log_status(); }
         if (ticks % 50 == 0 && (ticks <= 1500 || ticks % 1500 == 0)) fo::display::log_frame_rate();  // 10 s, 30 s, then every 5 min
     }
     fo::net::chat_stop();
@@ -80,6 +92,7 @@ void online_thread() {
 
 DWORD WINAPI main_thread(LPVOID) {
     fo::log_open();
+    fo::crash::install();
     HMODULE exe = GetModuleHandleW(nullptr);
     wchar_t path[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, path, MAX_PATH);
@@ -99,6 +112,7 @@ DWORD WINAPI main_thread(LPVOID) {
 
     char dev[4] = {};
     if (GetEnvironmentVariableA("FABLE_ONLINE_DEV", dev, sizeof(dev)) > 0 && dev[0] == '1') fo::devkit::install();
+    fo::modsettings::install();   // the Mod settings screen's game-thread work
 
     std::thread online;
     if (g_online) online = std::thread(online_thread);
@@ -141,9 +155,14 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {
         fo::config_load(module);
         fo::menu::set_module(module);
         g_online = read_mode() == Mode::Client;
+        // Import-table writes only; the filtered game.bin is built when the game first opens it.
+        if (g_online) fo::game::shop_stock::install(module);
         if (g_online) fo::overlay::install_early();
         if (g_online) fo::display::install();   // a few code bytes and a VirtualAlloc: fine here
         if (g_online) fo::display::hud::install();
+        if (g_online) fo::display::mouse_look::install();
+        if (g_online) fo::display::target_colour::install();
+        if (g_online) fo::game::pause_menu::install();
         // Never do real work inside DllMain (loader lock): hand off to a thread.
         g_thread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr);
         break;

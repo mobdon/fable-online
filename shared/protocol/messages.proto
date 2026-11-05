@@ -22,9 +22,15 @@ message Ping         { uint32 n = 1; }
 // The player's own Fable finished a quest. quest = OBJECT_QUEST_CARD_* or a quest script name.
 // The server pays only what that quest can pay, once (see server/src/economy/quests.ts). 1 per 5 s, burst 3.
 message QuestComplete { string quest = 1; uint32 gold = 2; uint32 renown = 3; repeated string items = 4; }
+// Cullis Gate / Guild Seal travel (docs/world-objects.md). to = gate thing id, "guild" or "back";
+// from = the gate the hero stands in, empty for a seal jump. 1 per s, burst 3.
+message Travel       { string to = 1; string from = 2; }
+message GatesRequest { }
 
 // ---- server -> client --------------------------------------------------
-message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6; }
+message Welcome      { uint32 player_id = 1; uint32 region_uid = 2; string name = 3; string phase = 4; uint32 renown = 5; uint32 tick_rate = 6;
+                       // Creature defs the server spawns; the mod drops the level files' own copies of them.
+                       repeated string spawn_defs = 10; }
 message EnterRegion  { uint32 region_uid = 1; float x = 2; float y = 3; float z = 4; string region = 5; string channel = 6; }
 // One entity in a region. `kind` is "hero" or "creature"; a creature carries the Fable def
 // name the mod spawns a stand-in from, a hero carries the name and renown for its tag.
@@ -32,6 +38,7 @@ message EnterRegion  { uint32 region_uid = 1; float x = 2; float y = 3; float z 
 message EntityState  {
   uint32 id = 1; uint32 def_id = 2; float x = 3; float y = 4; float z = 5; float yaw = 6;
   uint32 anim = 7; float health = 8; string kind = 9; string def = 10; string name = 11; uint32 renown = 12;
+  float max_health = 13;  // heroes in combat regions only
 }
 // Only the entities within the server's interest radius of the receiving player.
 message WorldTick    { uint32 tick = 1; uint32 last_input_seq = 2; repeated EntityState entities = 3; uint32 removed = 4; }
@@ -39,4 +46,34 @@ message ChatOut      { uint32 from = 1; string text = 2; string name = 3; }
 message Pong         { uint32 n = 1; }
 message Error        { string error = 1; string message = 2; }
 // EntityState.def_id: 0 for heroes, fableHash(creature def name) for creatures. anim 2 = dead.
+message Gate         { string id = 1; string region = 2; bool guild = 3; }
+message Gates        { repeated Gate gates = 1; bool guild = 2; string back_region = 3; }
+message GateUnlocked { string id = 1; string region = 2; }
+message TravelResult { bool ok = 1; string to = 2; string region = 3; string error = 4; repeated uint32 party = 5; uint32 with = 6; uint32 left_behind_by = 7; }
 message QuestReward  { string quest = 1; bool ok = 2; uint32 gold = 3; uint32 renown = 4; repeated string items = 5; string reason = 6; }
+
+// ---- player trading (server/src/economy/trade.ts) ------------------------
+// Client -> server. The client names heroes and its own item IDs; the server checks reach
+// (same channel, 10 m), ownership, gold, stolen marks, staff gear and the law, and does the
+// swap in one ledger transaction. 4/s burst 10; trade_request 1 per 5 s, burst 3.
+message TradeRequest  { uint32 to = 1; }                    // ask a hero to trade
+message TradeAnswer   { uint32 from = 1; bool yes = 2; }    // answer an invite
+message TradeOfferItem { string id = 1; uint32 qty = 2; }   // qty left out = whole stack
+message TradeOffer    { uint32 gold = 1; repeated TradeOfferItem items = 2; } // max 16 items; replaces the whole offer
+message TradeAccept   { uint32 version = 1; }               // accept the version shown; refused for settle_ms after a change
+message TradeUnaccept { }
+message TradeCancel   { }
+// Server -> client.
+message TradeInvite   { uint32 from = 1; string name = 2; uint32 expires_ms = 3; }
+message TradeItem     { string item = 1; string def = 2; uint32 qty = 3; }
+message TradeSideView { uint32 gold = 1; repeated TradeItem items = 2; }
+message TradeAccepted { bool me = 1; bool them = 2; }
+// The whole window as this player sees it, after every change. `stock` (what this player may
+// put in) comes when the window opens and after a failed swap.
+message TradeState    { string trade = 1; uint32 with = 2; string name = 3; uint32 version = 4; uint32 settle_ms = 5;
+                        TradeSideView mine = 6; TradeSideView theirs = 7; TradeAccepted accepted = 8; uint32 gold = 9;
+                        repeated TradeItem stock = 10; }
+message TradeDone     { string trade = 1; uint32 gold = 2; }     // swap done; gold = new balance
+message TradeClosed   { string trade = 1; string reason = 2; uint32 by = 3; } // cancelled, left, too_far, expired, blocked
+message TradeError    { string error = 1; string message = 2; }  // window stays open, both ticks cleared
+// Also: trade_asked {to, name}, trade_declined {by, name}, trade_invite_gone {from}.

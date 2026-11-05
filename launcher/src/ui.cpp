@@ -271,7 +271,7 @@ void start_play() {
         if (!api::join(c, s, region, version, t, err)) {
             r->error = widen(err);
         } else {
-            LaunchResult lr = launch_fable(game, self_dir() + L"\\fable_online.dll", {
+            std::vector<std::pair<std::wstring, std::wstring>> env = {
                 {L"FABLE_ONLINE_MODE", L"client"},
                 {L"FABLE_ONLINE_PROBE", L"0"},
                 {L"FABLE_ONLINE_GATEWAY", widen(c.gateway)},
@@ -280,7 +280,13 @@ void start_play() {
                 {L"FABLE_ONLINE_TICKET", widen(t.ticket)},
                 {L"FABLE_ONLINE_HOST", widen(t.host)},
                 {L"FABLE_ONLINE_PORT", std::to_wstring(t.port)},
-            });
+            };
+            // Realm chat logs in with the server's token only; there is no login by name.
+            if (!t.chat_token.empty() && t.chat_port > 0) {
+                env.push_back({L"FABLE_ONLINE_TOKEN", widen(t.chat_token)});
+                env.push_back({L"FABLE_ONLINE_CHAT_SERVER", widen(t.chat_host) + L":" + std::to_wstring(t.chat_port)});
+            }
+            LaunchResult lr = launch_fable(game, self_dir() + L"\\fable_online.dll", env);
             r->ok = lr.ok;
             r->pid = lr.pid;
             r->error = lr.error;

@@ -1,18 +1,20 @@
 # Chat and name tag protocol (version 1)
 
-The chat service (`server/chat/`) and the mod (`client-mod/src/net/`, `client-mod/src/ui/`)
-talk over TCP, one JSON object per line (UTF-8, `\n` at the end). Every object has a `t` (type).
-Default port **7781**. TLS will sit in front of it (gateway or stunnel) before public servers.
+Realm chat runs inside the game server (`server/src/chat/`) on its own TCP port. It and the mod
+(`client-mod/src/net/`, `client-mod/src/ui/`) talk one JSON object per line (UTF-8, `\n` at the
+end). Every object has a `t` (type). Default port **7781** (`FO_CHAT_PORT`). TLS will sit in front
+of it before public servers.
 
 This is separate from the game protocol in `messages.proto` on purpose: chat is low-rate,
 text-only, and has to keep working while a region server restarts.
 
 ## Login
 
-| Mode | How | When |
-| --- | --- | --- |
-| Dev | `{"t":"hello","v":1,"name":"Hal"}` | `CHAT_TOKEN_SECRET` is not set on the server |
-| Production | `{"t":"hello","v":1,"token":"<gateway token>"}` | the gateway signs a token at login (HMAC-SHA256, see `server/chat/src/auth.ts`); the launcher passes it to the mod as `FABLE_ONLINE_TOKEN` |
+`{"t":"hello","v":1,"token":"<token>"}`. The token comes from `POST /launcher/v1/join`, whose reply
+has `"chat":{"host","port","token"}`. It is signed by the game server (HMAC-SHA256, see
+`server/src/chat/auth.ts`) with the account id, hero name, role and renown, and lasts 12 hours
+(`FO_CHAT_TOKEN_TTL_MS`). The launcher passes it to the mod as `FABLE_ONLINE_TOKEN`, and the address
+as `FABLE_ONLINE_CHAT_SERVER`. There is no login by name: a hello without a valid token is refused.
 
 Reply: `{"t":"welcome","v":1,"id":7,"name":"Hal","renown":0,"motd":"...","channels":["say",...]}`,
 or an `err` and the connection closes (`auth_failed`, `bad_name`, `name_taken`, `forbidden` (banned), `version`).
@@ -25,7 +27,7 @@ Hero names: 3 to 16 characters, letters, digits, spaces, `'` and `-`, starting w
 | --- | --- | --- |
 | `say` | `ch`, `text` | `ch` is one of the channels below. `text` up to 200 characters |
 | `whisper` | `to`, `text` | to a hero name, any region |
-| `pos` | `region`, `x`, `y`, `z` | **dev only**. Ignored in production, where region servers own positions |
+| `pos` | `region`, `x`, `y`, `z` | ignored: the game server sends chat each hero's world position, region and area |
 | `ignore` | `name`, `on` | per session for now; saved with the account once persistence exists |
 | `report` | `name`, `reason` | goes to the analytics event log for moderators |
 | `mod` | `action` (`mute`, `unmute`, `kick`, `ban`), `name`, `minutes?`, `reason?` | moderators and admins only |
@@ -39,7 +41,7 @@ Hero names: 3 to 16 characters, letters, digits, spaces, `'` and `-`, starting w
 | `region` | everyone in your region (Bowerstone, Oakvale, ...) | 3 s |
 | `realm` | everyone online in the realm (Realm chat) | 10 s |
 | `trade` | everyone online | 30 s |
-| `party` | your party (party system: later) | none |
+| `party` | your party. Parties are run by the world server (docs/parties.md), and the mod sends party chat there; this channel is used only once a server feeds `setParty` | none |
 | `guild` | your guild: every guild, sub guilds included, is its own channel (`guildId` from the login token or the region server) | none |
 | `whisper` | one hero | none |
 

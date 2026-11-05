@@ -66,7 +66,7 @@ struct ObjectChange {
     What what;
 };
 
-enum class ObjectFrame { None, Objects, Object, Loot, Refused };
+enum class ObjectFrame { None, Objects, Object, Loot, Refused, Ok };
 
 /** A request for the same thing is not sent again while the last one is unanswered for this long. */
 constexpr uint32_t kRequestRetryMs = 1000;
@@ -89,6 +89,8 @@ class WorldObjects {
     std::vector<ObjectChange> drain_changes();
     std::vector<Loot> drain_loot();
     std::vector<Refusal> drain_refusals();
+    /** Thing ids the server accepted with a plain {"t":"ok","thing":...}. */
+    std::vector<std::string> drain_acks();
 
     /**
      * The hero tried to use a thing. Fills `frame` with what to send and returns true, or
@@ -119,6 +121,7 @@ class WorldObjects {
     std::vector<ObjectChange> changes_;
     std::vector<Loot> loot_;
     std::vector<Refusal> refusals_;
+    std::vector<std::string> acks_;
     RegionChange region_;
     bool loading_ = false;
     uint32_t loadingSinceMs_ = 0;

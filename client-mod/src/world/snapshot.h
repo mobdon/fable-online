@@ -38,6 +38,8 @@ struct EntityState {
     float yaw = 0;
     Anim anim = Anim::Idle;
     float health = 0;
+    /** Heroes in combat regions only: the server's max health. 0 when the frame has none. */
+    float maxHealth = 0;
     uint32_t renown = 0;
 };
 
@@ -53,9 +55,26 @@ struct Welcome {
     uint32_t playerId = 0;
     std::string name;
     uint32_t tickRate = 15;
+    /** One-time token to reconnect with after this connection drops (no new launcher ticket needed). */
+    std::string resume;
+    /** What the server does with position reports: "off", "checked" or "trusted". */
+    std::string clientMove = "off";
+    /**
+     * The creature defs the server spawns itself (spawn_defs). Empty when the server runs no
+     * monsters, or is older than this field: the local level loader then places its own.
+     */
+    std::vector<std::string> spawnDefs;
 };
 
-enum class FrameType { Unknown, Tick, Welcome, EnterRegion, Error };
+/** The server refused a position report and says where it has the hero. */
+struct PosCorrect {
+    float x = 0, y = 0, z = 0;
+    std::string reason;
+    /** The area the server believes the hero is in (game::area_id hash), 0 if it does not know. */
+    uint32_t area = 0;
+};
+
+enum class FrameType { Unknown, Tick, Welcome, EnterRegion, Error, PosCorrect, Pong };
 
 FrameType frame_type(const std::string& json);
 /** Entities with a non-finite or absurd coordinate are dropped, not clamped. */
@@ -63,6 +82,9 @@ bool parse_tick(const std::string& json, Tick& out);
 bool parse_welcome(const std::string& json, Welcome& out);
 /** `region` of an enter_region frame, plus the spawn point the server picked. */
 bool parse_enter_region(const std::string& json, std::string& region, float& x, float& y, float& z);
+bool parse_pos_correct(const std::string& json, PosCorrect& out);
+/** The `n` of a pong frame: whatever the matching ping sent, here the send time in ms. */
+bool parse_pong(const std::string& json, double& n);
 /** The `error`/`message` pair of an error frame. */
 bool parse_error(const std::string& json, std::string& code, std::string& message);
 

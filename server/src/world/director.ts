@@ -12,7 +12,9 @@ const SKY_RESYNC_MS = 60_000;
 
 export type PersistFn = (heroId: number, region: string, pos: Vec3) => void;
 
-export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law';
+/** `client`: the client's own Fable already loaded the region (see Director.follow). */
+/** `party`: moved to another channel of the same region to be with the hero's party (Director.moveToChannel). */
+export type TransferVia = 'exit' | 'door' | 'cullis_gate' | 'law' | 'client' | 'party';
 
 /** Extra detail for a region change, passed through to the client's enter_region. */
 export interface ArrivalInfo {
@@ -34,6 +36,9 @@ export interface DirectorHooks {
   onLeave?(ch: Channel, heroId: number): void;
   onClose?(ch: Channel): void;
 }
+
+/** No moving to the party's channel for this long after dealing or taking a hit. */
+export const PARTY_MOVE_COMBAT_LOCK_MS = 10_000;
 
 /** How long a hero may take to load the next region before the server unfreezes them anyway. */
 export const REGION_LOAD_TIMEOUT_MS = 30_000;
@@ -82,6 +87,11 @@ export class Director {
   lastTickMs = 0;
   hooks: DirectorHooks = {};
   readonly policies: DirectorPolicy[] = [];
+  /**
+   * Heroes this hero should share a channel with (their online party members). Placement
+   * puts a hero into a channel holding them, past the soft cap and up to the hard cap.
+   */
+  companions?: (heroId: number) => Iterable<number>;
 
   constructor(
     private cfg: ServerConfig,
@@ -115,7 +125,8 @@ export class Director {
   }
 
   /** Put a hero into the world. Region and position come from the database, never the client. */
-  join(hero: Hero, link: PlayerLink): Channel {
+  /** `resumed`: the same game session reconnecting, so its Fable still has the hero where the server does. */
+  join(hero: Hero, link: PlayerLink, resumed = false): Channel {
     if (this.where.has(hero.id)) throw new GameError('already_online', 'That hero is already in the world', 409);
     let region: string = hero.phase === 'world' ? hero.region : STAGE_REGIONS[hero.phase];
     let solo = hero.phase !== 'world';
@@ -129,8 +140,11 @@ export class Director {
     }
     const def = this.regions.get(region) ?? this.regions.get(STAGE_REGIONS.world);
     if (!def) throw new GameError('no_region', `Unknown region ${region}`, 500);
-    const ch = solo ? this.openPrivate(def.name, hero.id) : this.pickShared(def.name);
-    this.place(ch, link, { x: hero.x, y: hero.y, z: hero.z });
+    const ch = solo ? this.openPrivate(def.name, hero.id) : this.pickShared(def.name, hero.id);
+    const at = { x: hero.x, y: hero.y, z: hero.z };
+    // The client's Fable loads its own save, which need not be where the server last had the
+    // hero, so the first position report may re-anchor them (see ServerConfig.joinAnchor).
+    this.place(ch, link, at, undefined, isOrigin(at) || (this.cfg.joinAnchor && !resumed) ? Infinity : 0);
     return ch;
   }
 
@@ -170,14 +184,79 @@ export class Director {
     const link = from.players.get(heroId)!;
     // Pick (or open) the target before leaving, so a full region leaves the hero where they are.
     const priv = solo ?? (via === 'law' ? false : from.kind === 'private');
-    const target = priv ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion);
+    const target = priv ? this.openPrivate(toRegion, heroId) : this.pickShared(toRegion, heroId);
     from.remove(heroId);
     this.where.delete(heroId);
     this.hooks.onLeave?.(from, heroId);
     if (from.kind === 'private') this.closeChannel(from);
     this.persist(heroId, toRegion, at);
-    target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
-    this.place(target, link, at, { ...info, via, from: from.region.name });
+    // A client that loaded the region itself is already there: no wait, and the next report
+    // comes from where it just was.
+    if (via !== 'client') target.loading.set(heroId, Date.now() + REGION_LOAD_TIMEOUT_MS);
+    // An arrival at the origin means "anywhere" (the law's moves); otherwise allow the
+    // difference between the server's entrance and where the client's Fable puts the hero.
+    this.place(target, link, at, { ...info, via, from: from.region.name }, isOrigin(at) ? Infinity : target.moveRules.arrivalSlack);
+    return target;
+  }
+
+  /**
+   * The client's Fable loaded another region by itself (the hero walked out of town) and the
+   * server did not send it there. If the reported position lies in a region the server runs,
+   * move the hero's server side to that region's shared channel, with no load on the client.
+   * Returns the new channel, or undefined when nothing changed. Until the client's exits are
+   * hooked this is how the server keeps up; the move guard has already accepted the position.
+   */
+  /** `at` is the client's world position (Fable's own coordinates). */
+  follow(heroId: number, at: Vec3): Channel | undefined {
+    const ch = this.where.get(heroId);
+    if (!ch || ch.kind === 'private' || !this.regions.canLocate) return undefined;
+    const region = this.regions.locate(at.x, at.y);
+    if (!region || region === this.regions.canonical(ch.region.name)) return undefined;
+    const from = ch.region.name;
+    try {
+      const o = this.regions.origin(region);
+      const to = this.transfer(heroId, region, { ...at, x: at.x - o.x, y: at.y - o.y }, 'client');
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, channelId: to.id });
+      return to;
+    } catch (e) {
+      this.events.emit({ type: 'region_follow', heroId, from, to: region, refused: (e as Error).message });
+      return undefined;
+    }
+  }
+
+  /**
+   * Move a hero into another shared channel of the region they are in, to be with their party.
+   * The client's Fable already has the region loaded, so there is no load: the hero keeps
+   * their spot and only the heroes and monsters around them change.
+   */
+  moveToChannel(heroId: number, channelId: string): Channel {
+    const from = this.where.get(heroId);
+    if (!from) throw new GameError('offline', 'Hero is not in the world');
+    const target = this.channels.get(channelId);
+    if (!target || target.kind !== 'shared') throw new GameError('no_channel', 'That place is gone');
+    if (from === target) return from;
+    if (from.kind !== 'shared') throw new GameError('private', 'You are in a place of your own');
+    if (target.region.name !== from.region.name) throw new GameError('not_here', 'Your party is in another region');
+    if (from.loading.has(heroId)) throw new GameError('busy', 'Wait until you have arrived');
+    // Same lock as Cullis Gates: hopping channels mid-fight would drop the monsters, guards
+    // and heroes the hero is fighting.
+    const fight = from.sim.combatState?.(heroId);
+    if (fight && !fight.alive) throw new GameError('dead', 'You cannot move while down');
+    if (fight && fight.lastHitAt && Date.now() - fight.lastHitAt < PARTY_MOVE_COMBAT_LOCK_MS)
+      throw new GameError('in_combat', 'You cannot join your party in the middle of a fight');
+    if (target.count >= this.cfg.channelHardCap) throw new GameError('channel_full', 'That place is full');
+    for (const p of this.policies) {
+      const err = p.canEnter?.(heroId, from.region.name, target.region.name, 'party');
+      if (err) throw err;
+    }
+    const at = from.sim.position(heroId);
+    if (!at) throw new GameError('busy', 'Wait until you have arrived');
+    const link = from.players.get(heroId)!;
+    from.remove(heroId);
+    this.where.delete(heroId);
+    this.hooks.onLeave?.(from, heroId);
+    this.events.emit({ type: 'party_regroup', heroId, from: from.id, to: target.id });
+    this.place(target, link, at, { via: 'party', from: from.region.name }, 0);
     return target;
   }
 
@@ -259,18 +338,18 @@ export class Director {
 
   // ---------------------------------------------------------------- internals
 
-  private place(ch: Channel, link: PlayerLink, at: Vec3, change?: ArrivalInfo & { via: TransferVia; from: string }): void {
-    ch.add(link, at);
+  private place(ch: Channel, link: PlayerLink, at: Vec3, change?: ArrivalInfo & { via: TransferVia; from: string }, anchor = 0): void {
+    ch.add(link, at, anchor);
     this.where.set(link.heroId, ch);
     if (!change) this.events.emit({ type: 'player_connected', heroId: link.heroId, channelId: ch.id });
     this.events.emit({ type: 'region_enter', heroId: link.heroId, region: ch.region.name, channelId: ch.id, private: ch.kind === 'private' });
     // The sim may have snapped the hero onto its ground; tell the client where they really are.
-    const p = ch.sim.position(link.heroId) ?? at;
+    const p = ch.toWorld(ch.sim.position(link.heroId) ?? at);
     const msg: Record<string, unknown> = { t: 'enter_region', region: ch.region.name, region_uid: ch.region.uid, channel: ch.id, x: p.x, y: p.y, z: p.z };
     if (change) {
       msg.from = change.from;
       msg.via = change.via;
-      msg.loading = true;
+      msg.loading = change.via !== 'client' && change.via !== 'party';
       if (change.entrance) msg.entrance = change.entrance;
       if (change.thing) msg.thing = change.thing;
       if (change.yaw !== undefined) msg.yaw = change.yaw;
@@ -292,9 +371,20 @@ export class Director {
     if (ch.count) ch.broadcast(JSON.stringify({ t: 'sky', ...this.clock!.sky(ch.region.name, now) }));
   }
 
-  private pickShared(region: string): Channel {
+  private pickShared(region: string, heroId?: number): Channel {
     const list = this.shared.get(region) ?? [];
     let best: Channel | undefined;
+    // With the party first: the channel of this region holding most of the hero's party.
+    if (heroId !== undefined && this.companions) {
+      const counts = new Map<Channel, number>();
+      for (const id of this.companions(heroId)) {
+        const c = this.where.get(id);
+        if (c && c.kind === 'shared' && c.region.name === region && c.count < this.cfg.channelHardCap) counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+      let n = 0;
+      for (const [c, k] of counts) if (k > n) [best, n] = [c, k];
+      if (best) return best;
+    }
     for (const c of list) if (c.count < this.cfg.channelSoftCap && (!best || c.count > best.count)) best = c;
     if (best) return best;
     if (this.sharedCount() < this.cfg.maxChannels) return this.openShared(region);
@@ -309,6 +399,7 @@ export class Director {
     this.nextIndex.set(region, n);
     const id = `${region}#${n}`;
     const ch = new Channel(id, def, 'shared', this.simFactory(def, id), undefined, this.cfg.interestRadius);
+    ch.origin = this.regions.origin(region);
     this.channels.set(id, ch);
     this.shared.set(region, [...(this.shared.get(region) ?? []), ch]);
     this.events.emit({ type: 'channel_open', channelId: id, region, private: false });
@@ -321,6 +412,7 @@ export class Director {
     const def = this.regions.get(region)!;
     const id = `${region}~${heroId}`;
     const ch = new Channel(id, def, 'private', this.simFactory(def, id), heroId, this.cfg.interestRadius);
+    ch.origin = this.regions.origin(region);
     this.channels.set(id, ch);
     this.privateCount++;
     this.events.emit({ type: 'channel_open', channelId: id, region, private: true });
@@ -344,3 +436,5 @@ export class Director {
     return this.channels.size - this.privateCount;
   }
 }
+
+const isOrigin = (p: Vec3) => p.x === 0 && p.y === 0 && p.z === 0;

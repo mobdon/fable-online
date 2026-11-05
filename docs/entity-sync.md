@@ -60,11 +60,9 @@ with guards, villagers and shopkeepers.
 
 ## Positions during the first tests
 
-The server is authoritative, and a client may only ever send intent. Fable's own input is
-not mapped yet, so the mod can report where the local game put its hero
-(`hero_pos`), and the server throws that away unless it is started with
-`FO_TRUST_CLIENT_POS=1`. With that on, a client could put its hero anywhere in the region,
-so it belongs on a test machine and nowhere else. The attempt is recorded either way.
+The server is authoritative. Fable's own input is not mapped yet, so the mod reports where
+the local game put its hero (`hero_pos`), and the server only accepts moves the hero could
+have made, correcting the client otherwise. See `docs/connection.md`.
 
 ## Trying it
 

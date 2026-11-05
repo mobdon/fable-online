@@ -22,12 +22,22 @@ struct PuppetStats {
     uint32_t parked = 0;
     uint32_t lost = 0;  // the engine freed the thing under us
     uint32_t live = 0;
+    uint32_t animsPlayed = 0;
+    uint32_t animsRefused = 0;  // the engine fields the animation code reads were not valid
+    uint32_t healthLogs = 0;
+    uint32_t described = 0;
 };
+
+/** What a puppet is playing, picked from the server's anim field (world::Anim). */
+enum class Gait : uint8_t { None, Idle, Walk, Run, Attack, Alert, Hit, Death, Leap, Block, Taunt };
 
 class PuppetPool {
   public:
     /** `heroDef` is the creature def used to stand in for another player. */
     explicit PuppetPool(std::string heroDef) : heroDef_(std::move(heroDef)) {}
+
+    /** Off: puppets are only moved, never animated (the behaviour before gaits). */
+    void set_animate(bool on) { animate_ = on; }
 
     /** Applies one round of table output. Must run on a thread that may call the engine. */
     void sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
@@ -36,29 +46,56 @@ class PuppetPool {
     /** Parks every puppet and drops the pool: on a region change or on disconnect. */
     void clear_all();
 
+    /**
+     * No new puppets until `ms` from now. Creating creatures while Fable is still loading an
+     * area, or just after it freed the old ones, crashes its renderer. Spawns asked for in the
+     * meantime wait and go out one at a time afterwards.
+     */
+    void hold(uint32_t nowMs, uint32_t ms);
+    bool holding(uint32_t nowMs) const { return static_cast<int32_t>(holdUntil_ - nowMs) > 0; }
+
     const PuppetStats& stats() const { return stats_; }
     size_t live_count() const { return live_.size(); }
 
   private:
     struct Puppet {
+        world::Spawn spawn;
         script::ThingRef ref;
         std::string def;
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        float lastHealth = -1;
+        Gait gait = Gait::None;
+        Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
+        uint32_t wantedSinceMs = 0;
+        uint32_t lastAnimMs = 0;
+        uint32_t animSeq = 0;
+        uint32_t strikes = 0;  // alternates left and right swings
+        uint32_t createdMs = 0;  // shown (made or taken from the pool) at this time
+        bool described = false;
+        bool animOk = false;  // the last animation was taken
+        uint32_t flinchUntilMs = 0;
+        uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);
     void park(uint32_t id);
     void drive(const world::Pose& p, uint32_t nowMs);
+    void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
     const std::string& def_for(const world::Spawn& s) const;
 
     std::string heroDef_;
+    bool animate_ = true;
     std::unordered_map<uint32_t, Puppet> live_;
     /** Parked puppets by def, ready to be shown again instead of spawning another. */
     std::unordered_multimap<std::string, Puppet> pool_;
     PuppetStats stats_;
     uint32_t nextName_ = 1;
+    /** Entities waiting for a puppet (held, or lost to an area load and to be made again). */
+    std::unordered_map<uint32_t, world::Spawn> pending_;
+    uint32_t holdUntil_ = 0;
+    uint32_t lastSpawnMs_ = 0;
 };
 
 }  // namespace fo::game

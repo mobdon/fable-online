@@ -15,6 +15,7 @@
 //     region-exit things in the .tng next to them.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const game = args.find((a) => !a.startsWith('--'));
@@ -25,7 +26,7 @@ if (!game) {
   process.exit(1);
 }
 const levels = path.join(game, 'data', 'Levels');
-const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, '..', '..', 'shared', 'defs', 'nav');
 
 /** Real thing UID = stored value + this (the .lev stores the low part only). */
@@ -210,4 +211,4 @@ function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))) main();
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) main();

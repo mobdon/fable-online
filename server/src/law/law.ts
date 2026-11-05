@@ -98,7 +98,7 @@ export class Law {
     economy.policies.push({
       item: (itemId, use) =>
         this.isMarked(itemId) ? new GameError('stolen', use === 'sell' ? 'Traders will not buy stolen goods' : 'Stolen goods cannot be traded') : null,
-      service: (heroId) => this.serviceBlock(heroId, 'shop'),
+      service: (heroId, service) => this.serviceBlock(heroId, service),
     });
   }
 
@@ -316,7 +316,7 @@ export class Law {
     let kick = 0;
     for (const c of open) kick = Math.max(kick, c.level >= 2 ? this.rules.crimes[c.kind].kickMinutes : 0);
     this.db.tx(() => {
-      const tx = paid > 0 ? this.economy.spend(heroId, paid, 'crime', key).txId : null;
+      const tx = paid > 0 ? this.spendOnce(heroId, paid, key) : null;
       for (const c of open) this.db.run("UPDATE law_crimes SET settled = 'paid', settled_at = ?, settled_tx = ? WHERE id = ?", this.clock(), tx, c.id);
     });
     this.events.emit({ type: 'fine_paid', heroId, gold: paid, crimes: open.length });
@@ -354,8 +354,7 @@ export class Law {
     if (price === null) throw new GameError('no_bribe', 'The guards will not take a bribe for that');
     const open = this.openCrimes(heroId, town);
     this.db.tx(() => {
-      const { txId, replayed } = this.economy.spend(heroId, price, 'crime', key);
-      if (replayed) return;
+      const txId = this.spendOnce(heroId, price, key);
       for (const c of open) this.db.run("UPDATE law_crimes SET settled = 'bribed', settled_at = ?, settled_tx = ? WHERE id = ?", this.clock(), txId, c.id);
       this.ensureRow(heroId);
       this.db.run('UPDATE law_heroes SET bribes_today = bribes_today + 1 WHERE hero_id = ?', heroId);
@@ -413,8 +412,8 @@ export class Law {
     return s ? { region: this.cellFor(s), private: s.prison === 'jail' } : undefined;
   }
 
-  /** Shops, Cullis Gates and property actions are refused while wanted or in prison. */
-  serviceBlock(heroId: number, service: 'shop' | 'cullis_gate' | 'property'): GameError | null {
+  /** Shops, trading, Cullis Gates and property actions are refused while wanted or in prison. */
+  serviceBlock(heroId: number, service: 'shop' | 'trade' | 'cullis_gate' | 'property'): GameError | null {
     if (this.openSentence(heroId)) return new GameError('in_prison', 'You are serving a sentence', 403);
     if (this.wantedLevel(heroId) >= this.rules.servicesBlockedAt) return new GameError('wanted', `You are wanted (${service} refused)`, 403);
     return null;
@@ -471,7 +470,7 @@ export class Law {
     const s = this.openSentence(heroId);
     if (!s || s.prison !== 'jail') throw new GameError('no_payout', 'Only a jail sentence can be paid off', 409);
     const price = Math.max(1, Math.ceil(s.fines * (1 + this.rules.jail.earlyReleaseSurcharge)));
-    this.economy.spend(heroId, price, 'crime', key);
+    this.spendOnce(heroId, price, key);
     this.release(heroId, 'paid');
     return { paid: price };
   }
@@ -491,7 +490,7 @@ export class Law {
     const s = this.openSentence(heroId)!;
     const left = Math.ceil((s.total_ms - s.served_ms) / 2);
     this.db.tx(() => {
-      this.economy.spend(heroId, price, 'crime', key);
+      this.spendOnce(heroId, price, key);
       this.db.run('UPDATE law_sentences SET warden_used = 1, total_ms = served_ms + ? WHERE id = ?', left, s.id);
     });
     this.events.emit({ type: 'warden_paid', heroId, gold: price });
@@ -606,7 +605,9 @@ export class Law {
       if (spotted) {
         crime = this.record(heroId, req.pickpocket ? 'pickpocket' : 'theft', { town: req.town, value, victim: req.shop });
       } else {
-        itemId = this.economy.mintItem(heroId, req.defId, 1, 'stolen', key).itemId;
+        const m = this.economy.mintItem(heroId, req.defId, 1, 'stolen', key);
+        if (m.replayed) throw new GameError('key_reused', 'That key was already used', 409);
+        itemId = m.itemId;
         this.db.run('INSERT INTO law_stolen (item_id, hero_id, value, until) VALUES (?, ?, ?, ?)', itemId, heroId, value, now + r.markHours * 3600_000);
         this.db.run('UPDATE law_heroes SET stolen_today = stolen_today + ? WHERE hero_id = ?', value, heroId);
       }
@@ -636,6 +637,17 @@ export class Law {
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * Spend gold for a law service. A retry of a payment that already went through never gets
+   * this far (the fine is settled, the sentence is over, the warden was used), so a replayed
+   * key here is an old key on a new payment: refuse it instead of granting the service free.
+   */
+  private spendOnce(heroId: number, amount: number, key: string): number {
+    const r = this.economy.spend(heroId, amount, 'crime', key);
+    if (r.replayed) throw new GameError('key_reused', 'That payment key was already used', 409);
+    return r.txId;
+  }
 
   private ensureRow(heroId: number): void {
     this.db.run('INSERT OR IGNORE INTO law_heroes (hero_id) VALUES (?)', heroId);

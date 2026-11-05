@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <utility>
 #include <vector>
 #include "json.h"
 
@@ -49,6 +50,14 @@ public:
     void system(const std::string& text, double now, uint32_t color = kColorSystem);
 
     std::vector<std::string> take_outbox();    // JSON lines, without the trailing newline
+    // Commands for other parts of the mod, not the chat server: ("barter", "Name").
+    std::vector<std::pair<std::string, std::string>> take_local();
+    // Party requests and party chat: these go to the world server, which owns parties
+    // (server/src/party/parties.ts), not to the chat service.
+    std::vector<std::string> take_world_outbox();
+    // A party chat line from the world server, and the party's own notices.
+    void party_line(const std::string& from, const std::string& text, double now);
+    void party_note(const std::string& text, double now, bool error = false);
     std::vector<VisibleLine> visible(size_t rows, double now) const;
 
     std::string input_utf8() const;
@@ -60,6 +69,11 @@ public:
     ChatTab tab() const { return tab_; }
     size_t scrolled() const { return scroll_; }  // lines up from the newest
     void set_tab(ChatTab t);
+    // Mouse: clicking a hero's name in the list makes them the one you whisper to; the wheel
+    // scrolls the conversation (positive = older); clicking in the edit box moves the cursor.
+    void whisper_to(const std::string& name);
+    void scroll_by(int lines);
+    void set_cursor(size_t at);
     bool unread(ChatTab t) const { return (unread_ >> static_cast<int>(t)) & 1; }
 
     // Heroes you have whispered with, most recent first: the contact list of the chat window.
@@ -68,6 +82,8 @@ public:
     const std::string& whisper_target() const { return whisper_to_; }
 
     bool tags_enabled() const { return tags_enabled_; }
+    /** True once after "/settings" (also /mod, /options): open the Mod settings screen. */
+    bool take_settings_request() { bool r = settings_requested_; settings_requested_ = false; return r; }
     const std::string& me() const { return me_; }
 
     // Fable's HUD palette: parchment text, pewter, the chrome blue of its logo.
@@ -86,6 +102,8 @@ private:
     void push(std::string text, uint32_t color, double now, uint8_t tabs = 0xFF);
     void send_say(const std::string& ch, const std::string& text);
     void send_whisper(const std::string& to, const std::string& text);
+    void send_party(const char* op, const std::string& name = "", const std::string& text = "");
+    bool party_command(const std::string& cmd, std::string rest, double now, bool after_party);
     void remember_contact(const std::string& name);
 
     bool open_ = false;
@@ -100,7 +118,10 @@ private:
     std::vector<std::u32string> history_;
     size_t history_pos_ = 0;
     std::vector<std::string> outbox_;
+    std::vector<std::pair<std::string, std::string>> local_;
+    std::vector<std::string> world_outbox_;
     bool tags_enabled_ = true;
+    bool settings_requested_ = false;
     ChatTab tab_ = ChatTab::All;
     uint8_t unread_ = 0;
     std::deque<std::string> contacts_;

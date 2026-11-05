@@ -10,6 +10,7 @@
 #include "../config.h"
 #include "../log.h"
 #include "menu_model.h"
+#include "../modsettings/modsettings.h"
 
 namespace fo::menu {
 namespace {
@@ -455,6 +456,10 @@ void handle(Action a) {   // caller holds g_mu
     case Action::Options:
         g_active = false;
         fo::log("menu: Options; showing Fable's own options menu");
+        break;
+    case Action::ModSettings:
+        fo::log("menu: Mod settings");
+        modsettings::open(modsettings::kExtras);
         break;
     case Action::Quit:
         fo::log("menu: Leave Albion; closing the game");

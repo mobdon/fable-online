@@ -31,6 +31,12 @@ public:
     // Fable's pewter scroll bar (its menu buttons): ornate ends when `ends`, warm when `on`.
     // Returns the width of one end piece at this height, so callers can inset text.
     float bar(float x, float y, float w, float h, float alpha, bool on, bool ends);
+    // A ring centred on (cx, cy) between radii r0 and r1, with soft edges `feather` pixels wide.
+    void ring(float cx, float cy, float r0, float r1, float feather, uint32_t argb);
+    // A rectangle with soft edges, for marks that must not look like hard pixels.
+    void soft_rect(float x, float y, float w, float h, float feather, uint32_t argb);
+    // A mouse pointer with its tip at (x, y): parchment arrow with a dark edge.
+    void pointer(float x, float y, float size);
     // A thin pewter rule, like the dividers in Fable's menus.
     void rule(float x, float y, float w, float alpha);
     // UTF-8 text with Fable's soft black shadow (or a full outline for name tags).
@@ -48,6 +54,7 @@ private:
     struct FaceInfo { const assets::Font* font = nullptr; Rect at; };
 
     bool build_atlas(const assets::UiArt* art, int fallback_px);
+    void tri(float x0, float y0, uint32_t c0, float x1, float y1, uint32_t c1, float x2, float y2, uint32_t c2);
     void quad(float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, uint32_t c);
     void sprite(const Rect& r, float x, float y, float w, float h, uint32_t c);
     const assets::Glyph& glyph(Face f, char32_t c) const;
