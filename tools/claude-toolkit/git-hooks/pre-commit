@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# commit-guard: refuse archives and C2PA-stamped PNGs before they reach a commit (the shared mount stamps PNGs on disk),
+# plus graphify-out/ changes and files whose line endings flipped (CRLF <-> LF).
+# install-all.sh copies this to the local clone's .git/hooks/pre-commit; every worktree of that clone shares it.
+bad=0
+while IFS= read -r -d '' f; do
+  case "$f" in
+    *.zip) echo "pre-commit: refusing $f (archive: never commit build outputs)" >&2; bad=1; continue ;;
+    graphify-out/*) [ "${GRAPHIFY_COMMIT:-}" = 1 ] || { echo "pre-commit: refusing $f (graphify output: \`git checkout -- graphify-out\` first; GRAPHIFY_COMMIT=1 git commit ... only for a deliberate graph refresh)" >&2; bad=1; continue; } ;;
+  esac
+  # A scripted rewrite (Python open().read()/write()) silently turns CRLF into LF and the whole file into a diff.
+  if [ "${EOL_CHANGE:-}" != 1 ] && git cat-file -e "HEAD:$f" 2>/dev/null && ! git diff --cached --numstat -- "$f" | grep -q $'^-\t-'; then
+    h=$(git cat-file -p "HEAD:$f" | grep -c $'\r$'); n=$(git cat-file -p ":$f" | grep -c $'\r$')
+    if { [ "$h" -gt 0 ] && [ "$n" = 0 ]; } || { [ "$h" = 0 ] && [ "$n" -gt 0 ]; }; then
+      echo "pre-commit: refusing $f (line endings changed: $h CRLF lines before, $n now; rewrite with open(f, newline='') both ways, or EOL_CHANGE=1 git commit ... if intended)" >&2; bad=1; continue
+    fi
+  fi
+  case "$f" in
+    *.png|*.PNG) if git cat-file -p ":$f" | grep -aq -e 'caBX' -e 'c2pa'; then
+        echo "pre-commit: refusing $f (C2PA/JUMBF metadata stamped by the shared mount; take the PNG from a clean clone)" >&2; bad=1
+      fi ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+exit $bad
