@@ -96,6 +96,7 @@ class PuppetPool {
         uint32_t scriptedRetryMs = 0;
         uint32_t deadSinceMs = 0;  // the server said it died at this time (0: alive)
         Pos diedAt;                // where it fell; it is kept there
+        bool leaving = false;      // the server removed it while its death was showing: parked once hidden
     };
 
     bool spawn_for(const world::Spawn& s, uint32_t nowMs);
@@ -106,6 +107,8 @@ class PuppetPool {
     void try_scripted_mode(Puppet& p, uint32_t nowMs);
     bool may_remove() const;
     void drive(const world::Pose& p, uint32_t nowMs);
+    void hold_corpse(Puppet& p, uintptr_t thing, const world::Pose& pose, uint32_t nowMs);
+    void finish_leaving(uint32_t nowMs);
     void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
     const std::string& def_for(const world::Spawn& s) const;
 
