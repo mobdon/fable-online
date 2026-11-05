@@ -25,6 +25,41 @@ test('childhood and Guild training get private solo instances', () => {
   assert.equal(app.director.stats().privateInstances, 1);
 });
 
+test('a move inside a solo instance keeps its channel running', () => {
+  const app = testApp();
+  const kid = makeHero(app, 'childhood').hero;
+  const inbox: string[] = [];
+  const c1 = app.director.join(kid, link(kid.id, inbox));
+  const c2 = app.director.transfer(kid.id, c1.region.name, { x: 1, y: 2, z: 0 }, 'door');
+  assert.equal(c2.kind, 'private');
+  assert.equal(app.director.channelOf(kid.id), c2);
+  assert.equal(app.director.stats().privateInstances, 1);
+  c2.loading.clear();
+  inbox.length = 0;
+  app.director.tick(50);
+  assert.ok(inbox.some((f) => JSON.parse(f).t === 'tick'), 'the channel is still stepped');
+  app.director.leave(kid.id);
+  assert.equal(app.director.stats().privateInstances, 0);
+});
+
+test('a hero still loading a region gets no entity frames until it is ready', () => {
+  const app = testApp();
+  const h = makeHero(app).hero;
+  const other = makeHero(app).hero;
+  const inbox: string[] = [];
+  app.director.join(h, link(h.id, inbox));
+  app.director.join(other, link(other.id));
+  app.director.transfer(h.id, 'LookoutPoint', { x: 1, y: 2, z: 0 }, 'exit');
+  app.director.transfer(other.id, 'LookoutPoint', { x: 3, y: 2, z: 0 }, 'exit');
+  app.director.regionReady(other.id, 'LookoutPoint');
+  inbox.length = 0;
+  app.director.tick(50);
+  assert.equal(inbox.filter((f) => JSON.parse(f).t === 'tick').length, 0, 'nothing while loading');
+  app.director.regionReady(h.id, 'LookoutPoint');
+  app.director.tick(50);
+  assert.equal(inbox.filter((f) => JSON.parse(f).t === 'tick').length, 1);
+});
+
 test('shared channels fill to the soft cap, then scale out, then overflow to the hard cap', () => {
   const app = testApp({ channelSoftCap: 10, channelHardCap: 12, maxChannels: 3 });
   const heroes = Array.from({ length: 36 }, () => makeHero(app).hero);

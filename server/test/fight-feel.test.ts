@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CombatSim, BUTTONS } from '../src/world/combat-sim.js';
+import { CombatSim, BUTTONS, DEATH } from '../src/world/combat-sim.js';
 import { FALLBACK_DATA } from '../src/data/game-data.js';
 import { MemorySink } from '../src/analytics/events.js';
 import { monsterAi } from '../src/world/ai/combat-ai.js';
@@ -37,6 +37,20 @@ test('a test spawn comes straight for the hero who made it', () => {
   for (; t < 6000 && b.anim !== Anim.Attack; t += TICK) sim.step(TICK);
   assert.ok(t < 4500, `first swing after ${t} ms`);
   assert.ok(Math.hypot(b.pos.x, b.pos.y) < 3);
+});
+
+test('a test bandit chases the hero, lands hits within seconds, each taking the share of health it takes in Fable', () => {
+  const sim = arena();
+  sim.devSpawn(1, BANDIT, 12);
+  const h = hero(sim);
+  let t = 0;
+  for (; t < 10_000 && h.health === h.maxHealth; t += TICK) sim.step(TICK);
+  assert.ok(t < 8000, `first hit after ${t} ms`);
+  // Fable units: weapon damage times the creature's power, against a 35-health starting hero.
+  const def = FALLBACK_DATA.creatures[BANDIT]!;
+  const fableShare = (FALLBACK_DATA.items[def.weapon!]!.weapon!.damage * def.attackScale) / 35;
+  const share = (h.maxHealth - h.health) / h.maxHealth;
+  assert.ok(Math.abs(share - fableShare) <= 0.5 / h.maxHealth + 1e-9, `one hit took ${share}, Fable's is ${fableShare}`);
 });
 
 test('a bandit winds up before each hit, swings in short flurries and pauses between them', () => {
@@ -111,7 +125,7 @@ test('hero swings: a press late in the last swing is kept, and aim is as forgivi
   press(sim, yaw);
   const afterFirst = b.health;
   assert.ok(afterFirst < 1000, 'aim snapped onto the bandit');
-  sim.step(BALANCE.cooldownMs.unarmed! - BALANCE.swingBufferMs + 100); // inside the buffer
+  sim.step(Math.max(TICK, BALANCE.cooldownMs.unarmed! - BALANCE.swingBufferMs + 100)); // inside the buffer
   b.blocking = false;
   press(sim, yaw);
   assert.equal(b.health, afterFirst, 'not yet: the swing is queued');
@@ -152,4 +166,72 @@ test('a test monster killed by its hero is logged with the damage that did it', 
   assert.equal(kill!.heroId, 1);
   assert.equal(kill!.killer, 'hero:1');
   assert.ok(kill!.heroDamage! > 0);
+});
+
+test('a flourish being charged when the hero falls is gone when they get up', () => {
+  const sim = arena();
+  sim.addHero(2, { x: 0, y: 1, z: 0 });
+  const h = sim.hero(1)!;
+  const other = sim.hero(2)!;
+  h.pvp = other.pvp = true;
+  sim.applyInput(1, { seq: 0, moveX: 0, moveY: 0, buttons: BUTTONS.ATTACK, cameraYaw: 0 });
+  for (let t = 0; t < 300; t += TICK) sim.step(TICK);
+  h.health = 1;
+  other.yaw = Math.PI;
+  assert.ok(sim.combat.attack(2, 1, 'light').ok);
+  assert.equal(h.alive, false);
+  for (let t = 0; t < DEATH.respawnMs + 2000; t += TICK) sim.step(TICK);
+  assert.equal(h.alive, true);
+  assert.equal(h.chargeMs, 0, 'no charge carried through death');
+});
+
+test('hero swings: a press while flinching is held and fires when the flinch ends, shown only then', () => {
+  const sim = arena();
+  sim.devSpawn(1, BANDIT, 2);
+  const b = bandit(sim);
+  b.maxHealth = b.health = 1000;
+  const h = hero(sim);
+  const yaw = Math.atan2(-b.pos.x, b.pos.y);
+  h.stunnedMs = BALANCE.flinchMs;
+  press(sim, yaw);
+  sim.step(TICK);
+  assert.notEqual(h.anim, Anim.Attack, 'no swing shown while it cannot land');
+  assert.equal(b.health, 1000);
+  let swung = false;
+  for (let t = 0; t < BALANCE.flinchMs + 100; t += TICK) {
+    b.blocking = false;
+    sim.step(TICK);
+    swung ||= h.anim === Anim.Attack;
+  }
+  assert.ok(b.health < 1000, 'the held swing landed');
+  assert.ok(swung, 'and was shown when it fired');
+});
+
+test('hero swings: only one press is held, and one pressed too early is dropped without a swing anim', () => {
+  const sim = arena();
+  sim.devSpawn(1, BANDIT, 2);
+  const b = bandit(sim);
+  b.maxHealth = b.health = 1000;
+  const h = hero(sim);
+  const yaw = Math.atan2(-b.pos.x, b.pos.y);
+  // Knocked down for longer than a press is held: dropped, and no swing shown.
+  h.stunnedMs = 2000;
+  press(sim, yaw);
+  sim.step(TICK);
+  assert.notEqual(h.anim, Anim.Attack);
+  h.stunnedMs = 0;
+  for (let t = 0; t < 1000; t += TICK) sim.step(TICK);
+  assert.equal(b.health, 1000, 'the early press never fired');
+  // Spam during one cooldown: at most one extra swing.
+  b.blocking = false;
+  press(sim, yaw);
+  const first = 1000 - b.health;
+  assert.ok(first > 0);
+  for (let i = 0; i < 5; i++) press(sim, yaw);
+  for (let t = 0; t < 2000; t += TICK) {
+    b.blocking = false;
+    b.stunnedMs = 0;
+    sim.step(TICK);
+  }
+  assert.ok(1000 - b.health <= first * 2 + 1, `took ${1000 - b.health}, one hit is ${first}`);
 });

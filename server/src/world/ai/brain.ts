@@ -268,10 +268,12 @@ export class AiDirector implements AiHooks {
         this.world.combat.setBlocking(b.c.id, false);
       }
       if (b.c.stunnedMs > 0) {
-        // Staggered: combat owns the animation, and a swing being wound up is lost.
+        // Staggered: it stops where it is and flinches, and a swing being wound up is lost.
         if (b.swingAt) this.cancelSwing(b);
+        b.c.anim = Anim.Hit;
         continue;
       }
+      if (b.c.anim === Anim.Hit) b.c.anim = b.state === 'idle' || b.state === 'wander' || b.state === 'return' ? Anim.Idle : Anim.Alert;
       if (b.swingAt && this.now >= b.swingAt) this.land(b);
       else if (b.swingAt) {
         // Track the target through the first part of the wind-up, then commit to the line.
@@ -359,7 +361,7 @@ export class AiDirector implements AiHooks {
       }
       case 'return':
         if (!b.goal) {
-          if (dist(b.c.pos, b.home) > 1.5) this.goTo(b, b.home, b.p.runSpeed, Anim.Run);
+          if (!this.reached(b, b.home)) this.goTo(b, b.home, b.p.runSpeed, Anim.Run);
           else {
             if (b.leashed) b.c.health = b.c.maxHealth;
             b.leashed = false;
@@ -384,7 +386,7 @@ export class AiDirector implements AiHooks {
     if (b.state === 'wander' && b.goal) return;
     if (b.state === 'idle' && this.now < b.stateUntil) return;
     const atEnd = pt.at === 0 || pt.at === pt.route.length - 1;
-    if (b.state === 'wander' && atEnd && dist(b.c.pos, pt.route[pt.at]!) < 1.5) {
+    if (b.state === 'wander' && atEnd && this.reached(b, pt.route[pt.at]!)) {
       // Reached the end of the beat: stand a moment, then turn back.
       b.state = 'idle';
       b.c.anim = Anim.Idle;
@@ -392,7 +394,7 @@ export class AiDirector implements AiHooks {
       pt.dir = pt.at === 0 ? 1 : -1;
       return;
     }
-    if (dist(b.c.pos, pt.route[pt.at]!) < 1.5) {
+    if (this.reached(b, pt.route[pt.at]!)) {
       if (pt.at + pt.dir < 0 || pt.at + pt.dir >= pt.route.length) pt.dir = pt.dir === 1 ? -1 : 1;
       pt.at += pt.dir;
     }
@@ -741,6 +743,16 @@ export class AiDirector implements AiHooks {
       }
     }
     return best;
+  }
+
+  /**
+   * Close enough to a spot to call it reached. Paths end where the spot snaps onto the
+   * ground, so a spot off the navmesh (a route point in a wall) counts as reached there.
+   */
+  private reached(b: Brain, p: Point2): boolean {
+    if (dist(b.c.pos, p) < 1.5) return true;
+    const end = this.world.nav?.snap(p, 4);
+    return !!end && dist(b.c.pos, end) < 1.5;
   }
 
   private goTo(b: Brain, p: Point2, speed: number, anim: number, straight = false): void {

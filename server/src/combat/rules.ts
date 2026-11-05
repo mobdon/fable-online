@@ -21,11 +21,15 @@ export const BALANCE = {
   xpGeneralShare: 0.5,
   /** Each Skill level adds this share to ranged damage. */
   skillPerLevel: 0.15,
-  /**
-   * Creatures use their weapon damage times their power times this. At 1 a bandit leader
-   * swing takes about a tenth of a starting hero's 100 health, near Fable's own feel.
-   */
+  /** Creatures use their weapon damage times their power times this (Fable's own numbers at 1). */
   creatureScale: 1,
+  /**
+   * Server hero health per point of Fable hero health. Creature damage comes from game.bin in
+   * Fable's units, but a starting hero has 100 health here against 35 in Fable, so creature
+   * hits on heroes are multiplied by this to take the same share of health as in Fable.
+   * Creature-on-creature hits (the town watch) stay in Fable's units.
+   */
+  heroHealthPerFable: 100 / 35,
   /** Weapon damage a creature without a weapon (claws, fists) counts as. */
   creatureUnarmed: 2,
 
@@ -41,8 +45,8 @@ export const BALANCE = {
    */
   heroMeleeCone: (Math.PI * 5) / 9,
   heroReachSlack: 0.7,
-  /** A hero swing pressed this close to the end of the last one is held and fired when it ends. */
-  swingBufferMs: 400,
+  /** A hero swing pressed this close to the end of the last one (or of a flinch) is held and fired when it ends. */
+  swingBufferMs: 600,
 
   cooldownMs: { light: 550, heavy: 850, unarmed: 450, ranged: 900, flourish: 1200 } as Record<string, number>,
   /** Hold attack this long and release for a flourish. */

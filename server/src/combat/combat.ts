@@ -125,6 +125,7 @@ export class CombatSystem implements CombatPort {
     if (!t || !t.alive || !this.canHarm(a, t) || !inReach(a, t, ranged)) return { ok: true, hit: false, reason: 'miss' };
 
     let dmg = baseDamage(a as Hero, ranged) * (kind === 'flourish' ? BALANCE.flourishMultiplier : 1);
+    if (a.kind === 'creature' && t.kind === 'hero') dmg *= BALANCE.heroHealthPerFable;
     let blocked = false;
     if (t.blocking && angleDiff(facingAngle(t), angleTo(t, a)) <= BALANCE.blockCone) {
       if (kind === 'flourish') t.blocking = false; // a flourish smashes through a guard

@@ -71,10 +71,13 @@ export interface WorldServices {
   law?: LawServices;
   /**
    * A hero who died without a phial gets back up here: move them to their respawn point
-   * (the nearest Cullis Gate, src/world/travel/travel.ts). Called after the channel's step,
-   * never during it. Returns false when it could not move them: they stay at their home.
+   * (the Cullis Gate nearest `fell`, where they died: src/world/travel/travel.ts). Called
+   * after the channel's step, never during it. Returns false when it could not move them:
+   * they are put back at their channel entry point and `moved` is called.
    */
-  respawn?: (heroId: number) => boolean;
+  respawn?: (heroId: number, fell: Vec3) => boolean;
+  /** The server moved a hero inside the channel on its own (not a region change): tell the client. */
+  moved?: (heroId: number, at: Vec3) => void;
   /** Walkable ground for the guards (the region's navmesh); without it they walk straight lines. */
   nav?: (region: string) => NavMesh | undefined;
 }
@@ -112,7 +115,25 @@ interface HeroSlot {
   actAnim: number;
   /** A swing pressed just before the last one finished, fired when it does. */
   queued: AttackKind | null;
+  /** The held press is dropped if it has not fired within this many ms (a longer stun came). */
+  queuedMs: number;
+  /** ms since the hero last dealt or took a hit (sim time), for health regeneration. */
+  calmMs: number;
 }
+
+/** Health comes back slowly out of combat: after calmMs without a hit, sharePerSec of max per second. */
+export const HEALTH_REGEN = { calmMs: 10_000, sharePerSec: 0.02 };
+
+/** A hero's health and Will as shares of their maxima, kept from one channel to the next. */
+export interface CarriedVitals {
+  health: number;
+  will: number;
+  at: number;
+}
+/** A record older than this is dropped: a hero back after a long break starts fresh. */
+export const CARRY_EXPIRE_MS = 30 * 60_000;
+/** Health share a hero who left while down comes back with (the same as a respawn). */
+const RESPAWN_HEALTH_SHARE = 0.5;
 
 /** How long other players see a hero's swing and flinch. */
 const SWING_SHOW_MS = 450;
@@ -147,6 +168,8 @@ export class CombatSim implements RegionSim {
     readonly region: RegionDef,
     readonly channelId: string,
     private s: WorldServices,
+    /** Shared by every channel of one app: health and Will survive a channel change or reconnect. */
+    private carried: Map<number, CarriedVitals> = new Map(),
   ) {
     const hooks: AiHooks = {
       onSpawn: (c) => this.ai?.onSpawn?.(c),
@@ -162,7 +185,10 @@ export class CombatSim implements RegionSim {
       const now = Date.now();
       if (a.kind === 'hero') this.lastHit.set(a.id, now);
       if (t.kind === 'hero') this.lastHit.set(t.id, now);
+      const by = a.kind === 'hero' ? this.heroes.get(a.id) : undefined;
+      if (by) by.calmMs = 0;
       const slot = t.kind === 'hero' ? this.heroes.get(t.id) : undefined;
+      if (slot) slot.calmMs = 0;
       if (slot && !killed && slot.actAnim !== Anim.Attack) this.showAct(slot, Anim.Hit, FLINCH_SHOW_MS);
     });
     this.spawns = new SpawnManager(s.spawns.regions[region.name], s.data, this.combat, hooks, s.spawnOptions);
@@ -373,7 +399,13 @@ export class CombatSim implements RegionSim {
     const hero = heroCombatant(heroId, at, this.s.data, l, (i) => {
       if (i.reason === 'staff_only') this.s.events.emit({ type: 'staff_item_blocked', heroId, defId: i.defId, action: 'equip', actor: `hero:${heroId}` });
     });
-    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null });
+    const c = this.carried.get(heroId);
+    this.carried.delete(heroId);
+    if (c && Date.now() - c.at <= CARRY_EXPIRE_MS) {
+      hero.health = Math.max(1, Math.round(hero.maxHealth * c.health));
+      hero.will = Math.round(hero.maxWill * c.will);
+    }
+    this.heroes.set(heroId, { hero, move: [0, 0], buttons: 0, home: { ...at }, downMs: null, phial: false, actMs: 0, actAnim: 0, queued: null, queuedMs: 0, calmMs: 0 });
     this.combat.add(hero);
   }
 
@@ -417,6 +449,14 @@ export class CombatSim implements RegionSim {
 
   removeHero(heroId: number): Vec3 | undefined {
     const h = this.heroes.get(heroId);
+    if (h) {
+      const now = Date.now();
+      for (const [id, c] of this.carried) if (now - c.at > CARRY_EXPIRE_MS) this.carried.delete(id);
+      const hero = h.hero;
+      const health = !hero.alive ? RESPAWN_HEALTH_SHARE : hero.maxHealth > 0 ? hero.health / hero.maxHealth : 1;
+      const will = hero.maxWill > 0 ? hero.will / hero.maxWill : 1;
+      this.carried.set(heroId, { health, will, at: now });
+    }
     this.heroes.delete(heroId);
     this.law?.heroLeft(heroId);
     this.charging.delete(heroId);
@@ -453,9 +493,13 @@ export class CombatSim implements RegionSim {
       this.charging.delete(heroId);
       const kind = h.weapon?.class === 'ranged' ? 'ranged' : h.chargeMs >= BALANCE.flourishChargeMs ? 'flourish' : 'light';
       const r = this.combat.attack(heroId, null, kind);
-      // Fable queues a press made late in a swing; dropping it made most presses do nothing.
-      if (!r.ok && r.reason === 'cooldown' && h.attackCooldownMs <= BALANCE.swingBufferMs) slot.queued = kind === 'flourish' ? 'light' : kind;
-      else this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+      if (r.ok) this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
+      // Fable queues a press made late in a swing or a flinch; dropping it made most presses
+      // do nothing. One press is held at most, and it is shown only when it fires.
+      else if ((r.reason === 'cooldown' || r.reason === 'stunned') && Math.max(h.attackCooldownMs, h.stunnedMs) <= BALANCE.swingBufferMs) {
+        slot.queued = kind === 'flourish' ? 'light' : kind;
+        slot.queuedMs = BALANCE.swingBufferMs;
+      }
     }
     if (b & BUTTONS.CAST && !(prev & BUTTONS.CAST)) {
       const spell = SPELL_SLOTS[((b >> SPELL_SHIFT) & 0xf) - 1];
@@ -470,6 +514,9 @@ export class CombatSim implements RegionSim {
       if (!h.alive) {
         if (slot.downMs !== null && (slot.downMs -= dtMs) <= 0) this.respawn(slot);
         continue;
+      }
+      if ((slot.calmMs += dtMs) >= HEALTH_REGEN.calmMs && h.health < h.maxHealth) {
+        h.health = Math.min(h.maxHealth, h.health + (h.maxHealth * HEALTH_REGEN.sharePerSec * dtMs) / 1000);
       }
       if (slot.actMs > 0 && (slot.actMs -= dtMs) <= 0) slot.actAnim = 0;
       const [mx, my] = slot.move;
@@ -489,7 +536,7 @@ export class CombatSim implements RegionSim {
     for (const [id, slot] of this.heroes) {
       const h = slot.hero;
       if (!slot.queued) continue;
-      if (!h.alive || h.blocking) slot.queued = null;
+      if (!h.alive || h.blocking || (slot.queuedMs -= dtMs) < 0) slot.queued = null;
       else if (h.attackCooldownMs <= 0 && h.stunnedMs <= 0) {
         this.combat.attack(id, null, slot.queued);
         this.showAct(slot, Anim.Attack, SWING_SHOW_MS);
@@ -603,6 +650,10 @@ export class CombatSim implements RegionSim {
     }
     const slot = this.heroes.get(v.id);
     if (!slot) return;
+    // A flourish being wound up is lost with the fall; the button is read afresh after.
+    this.charging.delete(v.id);
+    (v as Hero).chargeMs = 0;
+    slot.queued = null;
     // Felled by the watch: the law takes over (arrest and a cell), so no phial, penalty or respawn.
     if (this.law?.onHeroDowned(v.id, d.killer?.id ?? null)) {
       this.combat.revive(v.id, 0.5);
@@ -649,8 +700,9 @@ export class CombatSim implements RegionSim {
   private respawn(slot: HeroSlot): void {
     const h = slot.hero;
     const moveAway = !slot.phial && !!this.s.respawn;
-    if (!slot.phial) h.pos = { ...slot.home };
-    this.combat.revive(h.id, slot.phial ? 1 : 0.5);
+    // The respawn gate is picked from where the hero fell, so they stay there until it is.
+    if (!slot.phial && !moveAway) h.pos = { ...slot.home };
+    this.combat.revive(h.id, slot.phial ? 1 : RESPAWN_HEALTH_SHARE);
     h.will = h.maxWill;
     h.combo = 0;
     slot.downMs = null;
@@ -658,8 +710,12 @@ export class CombatSim implements RegionSim {
     // Moving between channels is not allowed mid-step: do it once the step is over.
     if (moveAway) {
       const id = h.id;
+      const fell = { ...h.pos };
       queueMicrotask(() => {
-        if (this.heroes.get(id)?.hero === h) this.s.respawn!(id);
+        if (this.heroes.get(id) !== slot || this.s.respawn!(id, fell)) return;
+        // Nowhere to send them: back at the entry point, as without a respawn service.
+        h.pos = { ...slot.home };
+        this.s.moved?.(id, h.pos);
       });
     }
   }
@@ -670,9 +726,10 @@ function state(c: Hero | Creature, defId: number): EntityState {
   return { id: c.id, def_id: defId, x: r(c.pos.x), y: r(c.pos.y), z: r(c.pos.z), yaw: r(c.yaw), anim: c.alive ? c.anim : Anim.Death, health: Math.ceil(c.health) };
 }
 
-export const combatSimFactory =
-  (s: WorldServices): SimFactory =>
-  (region, channelId) =>
-    new CombatSim(region, channelId, s);
+export const combatSimFactory = (s: WorldServices): SimFactory => {
+  // One record per app, not per module: tests run many apps that reuse hero ids.
+  const carried = new Map<number, CarriedVitals>();
+  return (region, channelId) => new CombatSim(region, channelId, s, carried);
+};
 
 const dist2d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
