@@ -45,6 +45,12 @@ bool looks_like_hero(uintptr_t a) {
            read(phys, &pvt, 4) && pvt == kPhysicsVtable;
 }
 
+/** Bit 0 of +0x91: the engine is removing the thing (an area change); its memory goes soon. */
+bool being_removed(uintptr_t a) {
+    uint8_t flags = 0;
+    return !read(a + kFlags91, &flags, 1) || (flags & 1);
+}
+
 constexpr size_t kScanPiece = 64 * 1024;
 
 /** Walks the process's own private, writable, committed memory. */
@@ -127,7 +133,7 @@ uintptr_t physics_of(uintptr_t thing) {
 }
 
 uintptr_t local_hero() {
-    if (g_hero && !looks_like_hero(g_hero)) {
+    if (g_hero && (!looks_like_hero(g_hero) || being_removed(g_hero))) {
         g_hero = 0;
         fo::log("thing: lost the hero (area change or front end)");
     }
@@ -141,7 +147,8 @@ uintptr_t local_hero() {
         buf.resize(size / 4);
         if (!read(lo, buf.data(), buf.size() * 4)) return;
         for (size_t i = 0; i < buf.size(); ++i)
-            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4) && !is_stand_in(lo + i * 4)) {
+            if (buf[i] == kHeroVtable && looks_like_hero(lo + i * 4) && !being_removed(lo + i * 4) &&
+                !is_stand_in(lo + i * 4)) {
                 found = lo + i * 4;
                 return;
             }
