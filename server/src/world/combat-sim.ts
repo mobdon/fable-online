@@ -647,6 +647,10 @@ export class CombatSim implements RegionSim {
     }
     const slot = this.heroes.get(v.id);
     if (!slot) return;
+    // A flourish being wound up is lost with the fall; the button is read afresh after.
+    this.charging.delete(v.id);
+    (v as Hero).chargeMs = 0;
+    slot.queued = null;
     // Felled by the watch: the law takes over (arrest and a cell), so no phial, penalty or respawn.
     if (this.law?.onHeroDowned(v.id, d.killer?.id ?? null)) {
       this.combat.revive(v.id, 0.5);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CombatSim, BUTTONS } from '../src/world/combat-sim.js';
+import { CombatSim, BUTTONS, DEATH } from '../src/world/combat-sim.js';
 import { FALLBACK_DATA } from '../src/data/game-data.js';
 import { MemorySink } from '../src/analytics/events.js';
 import { monsterAi } from '../src/world/ai/combat-ai.js';
@@ -152,6 +152,23 @@ test('a test monster killed by its hero is logged with the damage that did it', 
   assert.equal(kill!.heroId, 1);
   assert.equal(kill!.killer, 'hero:1');
   assert.ok(kill!.heroDamage! > 0);
+});
+
+test('a flourish being charged when the hero falls is gone when they get up', () => {
+  const sim = arena();
+  sim.addHero(2, { x: 0, y: 1, z: 0 });
+  const h = sim.hero(1)!;
+  const other = sim.hero(2)!;
+  h.pvp = other.pvp = true;
+  sim.applyInput(1, { seq: 0, moveX: 0, moveY: 0, buttons: BUTTONS.ATTACK, cameraYaw: 0 });
+  for (let t = 0; t < 300; t += TICK) sim.step(TICK);
+  h.health = 1;
+  other.yaw = Math.PI;
+  assert.ok(sim.combat.attack(2, 1, 'light').ok);
+  assert.equal(h.alive, false);
+  for (let t = 0; t < DEATH.respawnMs + 2000; t += TICK) sim.step(TICK);
+  assert.equal(h.alive, true);
+  assert.equal(h.chargeMs, 0, 'no charge carried through death');
 });
 
 test('hero swings: a press while flinching is held and fires when the flinch ends, shown only then', () => {
