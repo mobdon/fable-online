@@ -396,14 +396,23 @@ export class AiDirector implements AiHooks {
       if (pt.at + pt.dir < 0 || pt.at + pt.dir >= pt.route.length) pt.dir = pt.dir === 1 ? -1 : 1;
       pt.at += pt.dir;
     }
-    const next = pt.route[pt.at]!;
-    b.home = { ...next };
-    b.state = 'wander';
-    this.goTo(b, next, b.p.walkSpeed, Anim.Walk);
-    if (!b.goal) {
-      // No way there on the ground: walk it straight rather than freeze.
-      this.goTo(b, next, b.p.walkSpeed, Anim.Walk, true);
+    // Walk to the next point it can actually reach. Points with no way there on the ground
+    // are skipped; with none reachable it stands still (never a walk on the spot).
+    for (let tries = 0; tries < pt.route.length; tries++) {
+      const next = pt.route[pt.at]!;
+      this.goTo(b, next, b.p.walkSpeed, Anim.Walk);
+      if (b.goal) {
+        b.home = { ...next };
+        b.state = 'wander';
+        return;
+      }
+      if (pt.at + pt.dir < 0 || pt.at + pt.dir >= pt.route.length) pt.dir = pt.dir === 1 ? -1 : 1;
+      pt.at += pt.dir;
     }
+    this.stop(b);
+    b.state = 'idle';
+    b.c.anim = Anim.Idle;
+    b.stateUntil = this.now + 5000;
   }
 
   private fight(b: Brain): void {
@@ -794,9 +803,11 @@ export class AiDirector implements AiHooks {
       const ny = c.pos.y + (dy / d) * left;
       if (nav && !nav.walkable(nx, ny) && nav.walkable(c.pos.x, c.pos.y)) {
         // Something shoved us off the planned line (knockback): plan again next think.
+        // Not moving, so no walk animation (a creature that can't go on would walk on the spot).
         this.stop(b);
         b.nextThink = this.now;
-        break;
+        if (c.anim === Anim.Walk || c.anim === Anim.Run || c.anim === Anim.Strafe) c.anim = Anim.Idle;
+        return;
       }
       c.pos.x = nx;
       c.pos.y = ny;

@@ -1113,6 +1113,7 @@ void start() {
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");
     s.puppets = std::make_unique<game::PuppetPool>(heroDef);
     s.puppets->set_animate(env_flag("FABLE_ONLINE_PUPPET_ANIMS", true));
+    s.puppets->set_scripted_mode(env_flag("FABLE_ONLINE_PUPPET_SCRIPTED", true));
     // Fable's co-op spirit creatures over party members: never run in game yet, so opt-in.
     s.spirits.set_enabled(env_flag("FABLE_ONLINE_PARTY_SPIRITS", false));
     // Fable's PC controls attack on the left mouse button. Block has no fixed key yet, so it

@@ -232,3 +232,27 @@ test('dev despawns reach the inner sim through the town layer', () => {
   assert.deepEqual(r, { removed: ['CREATURE_WOLF'] });
   assert.deepEqual(calls, ['nearest']);
 });
+
+test('with town folk hidden, clients get guards but not the server villagers', () => {
+  const app = testApp();
+  const clock = new WorldClock({ dayMs: 3600_000, epoch: 0, startFraction: 0.5, weatherSlotMs: 60_000, seed: 7 }, () => 0);
+  const law = new Law(app.db, app.economy, app.sink, mergeRules({ jurisdictions: [{ id: 't', regions: ['TestRegion'], kickTo: 'X' }] }), undefined, () => 0, () => 0.5);
+  const make = (showFolk: boolean) =>
+    withTown((region, ch) => new CombatSim(region, ch, { data: D, spawns: { regions: {} }, events: app.sink, law: { law, events: app.sink } }), { data: FALLBACK_TOWN, clock, showFolk })(REGION, 'TestRegion#1');
+  const ids = (s: RegionSim) => (s.step(TICK), s.snapshot().map((e) => e.id));
+  const hidden = ids(make(false));
+  assert.ok(hidden.length >= 2, 'guards are there');
+  assert.ok(hidden.every((id) => id < 900_000_000), 'no villagers');
+  assert.ok(ids(make(true)).some((id) => id >= 900_000_000), 'villagers when shown');
+});
+
+test('no town watch is posted on the Guild grounds', () => {
+  const app = testApp();
+  const clock = new WorldClock({ dayMs: 3600_000, epoch: 0, startFraction: 0.5, weatherSlotMs: 60_000, seed: 7 }, () => 0);
+  const law = new Law(app.db, app.economy, app.sink, mergeRules({ jurisdictions: [{ id: 't', regions: ['TestRegion'], kickTo: 'X' }] }), undefined, () => 0, () => 0.5);
+  const data = structuredClone(FALLBACK_TOWN);
+  data.villages.VILLAGE_GUILD_COMPLEX_OUTSIDE = data.villages.VILLAGE_TEST!;
+  data.regions.TestRegion!.villages[0]!.def = 'VILLAGE_GUILD_COMPLEX_OUTSIDE';
+  const sim = withTown((region, ch) => new CombatSim(region, ch, { data: D, spawns: { regions: {} }, events: app.sink, law: { law, events: app.sink } }), { data, clock })(REGION, 'TestRegion#1') as RegionSim & { inner: CombatSim };
+  assert.equal([...sim.inner.combat.all.values()].filter((c) => c.kind === 'creature').length, 0);
+});

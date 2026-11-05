@@ -39,6 +39,8 @@ class PuppetPool {
 
     /** Off: puppets are only moved, never animated (the behaviour before gaits). */
     void set_animate(bool on) { animate_ = on; }
+    /** New creature puppets go into Fable's scripted mode so their own AI stays off. */
+    void set_scripted_mode(bool on) { scriptedMode_ = on; }
 
     /** Applies one round of table output. Must run on a thread that may call the engine. */
     void sync(const std::vector<world::Spawn>& spawned, const std::vector<uint32_t>& removed,
@@ -72,6 +74,7 @@ class PuppetPool {
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        uint32_t shownAfterMs = 0;  // when a hidden puppet that has been placed may be shown
         float lastHealth = -1;
         Gait gait = Gait::None;
         Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
@@ -100,6 +103,7 @@ class PuppetPool {
 
     std::string heroDef_;
     bool animate_ = true;
+    bool scriptedMode_ = true;
     std::unordered_map<uint32_t, Puppet> live_;
     /** Parked puppets by def, ready to be shown again instead of spawning another. */
     std::unordered_multimap<std::string, Puppet> pool_;

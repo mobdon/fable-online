@@ -69,6 +69,12 @@ void set_drawable(ThingRef& t, bool on);
 /** Whether the local game lets the player target and hurt it: off for server creatures. */
 void set_attackable(ThingRef& t, bool on);
 void set_damageable(ThingRef& t, bool on);
+/**
+ * Puts the creature in Fable's scripted mode (`.AddScriptedMode`): its own brain stops picking
+ * actions (no targeting, no combat moves), so only the mod's actions run. False when the thing
+ * has no mode stack (heroes, objects) and nothing was done.
+ */
+bool add_scripted_mode(ThingRef& t, const char* label);
 /** Releases a thing from being bound to a script. */
 void set_free(ThingRef& t);
 /** Turns the thing to face `yaw` radians. */
