@@ -26,6 +26,9 @@ constexpr uint32_t kShowAfterPlacedMs = 150;
 constexpr uint32_t kRetryRefusedMs = 100;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
 constexpr float kSpawnRadius = 6.0f;
+/** Scripted mode is tried this often, this many times, until the creature's mode stack is there. */
+constexpr uint32_t kScriptedRetryMs = 500;
+constexpr uint32_t kScriptedTries = 12;
 /** Parked puppets kept per def. Beyond this they are retired. */
 constexpr size_t kPoolPerDef = 8;
 /**
@@ -131,6 +134,20 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
             p.lastCommandsMs = 0;
             p.createdMs = nowMs;
             p.deadSinceMs = 0;
+            // Nothing from the entity it stood in for last: no flinch from its old health, no
+            // half-done swing sequence, no pending retry.
+            p.lastHealth = -1;
+            p.flinchUntilMs = 0;
+            p.strikes = 0;
+            p.retryAtMs = 0;
+            p.animOk = false;
+            p.shownAfterMs = 0;
+            p.wantedSinceMs = 0;
+            p.lastAnimMs = 0;
+            // Park leaves scripted mode on; one that never took it gets more tries from drive().
+            p.scriptedTries = 0;
+            p.scriptedRetryMs = 0;
+            try_scripted_mode(p, nowMs);
             live_.emplace(s.id, std::move(p));
             ++stats_.reused;
             return true;
@@ -162,10 +179,8 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     // Without this a hostile creature's own Fable AI takes the hero as its target and turns
     // down the mod's walk and swing actions (online-17: a bandit refused ST_WALK and stood still
     // while the server's copy fought). Scripted mode is how quest scripts take a creature over.
-    if (scriptedMode_) {
-        bool ok = script::add_scripted_mode(p.ref, "FO_PUPPET");
-        fo::log("puppet: %s %s", name, ok ? "in scripted mode (its own AI is off)" : "has no mode stack; left as it is");
-    }
+    // CreateNear's creature may not be finished yet: drive() tries again on later ticks.
+    try_scripted_mode(p, nowMs);
     p.lastCommandsMs = nowMs;
     p.createdMs = nowMs;
     p.thingAddr = p.ref.thing();
@@ -174,6 +189,21 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     live_.emplace(s.id, std::move(p));
     ++stats_.spawned;
     return true;
+}
+
+void PuppetPool::try_scripted_mode(Puppet& p, uint32_t nowMs) {
+    if (!scriptedMode_ || p.scripted || p.scriptedTries >= kScriptedTries) return;
+    if (p.scriptedTries && static_cast<int32_t>(nowMs - p.scriptedRetryMs) < 0) return;
+    ++p.scriptedTries;
+    p.scriptedRetryMs = nowMs + kScriptedRetryMs;
+    // add_scripted_mode only calls the engine once it has found the mode stack, so a failed
+    // try changes nothing and is safe to repeat.
+    p.scripted = script::add_scripted_mode(p.ref, "FO_PUPPET");
+    if (p.scripted)
+        fo::log("puppet: %s in scripted mode (its own AI is off)%s", p.scriptName.c_str(),
+                p.scriptedTries > 1 ? " on a later try" : "");
+    else if (p.scriptedTries == kScriptedTries)
+        fo::log("puppet: %s has no mode stack after %u tries; left as it is", p.scriptName.c_str(), kScriptedTries);
 }
 
 void PuppetPool::park(uint32_t id) {
@@ -283,6 +313,7 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
         hold(nowMs, kHoldAfterLossMs);
         return;
     }
+    try_scripted_mode(p, nowMs);
 
     // A dead creature is left where it fell, playing its death and then lying still; the
     // server will stop sending it when the corpse is gone.

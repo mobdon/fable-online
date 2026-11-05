@@ -91,6 +91,9 @@ class PuppetPool {
         uintptr_t thingAddr = 0;  // the CThing, kept out of the hero scan
         Pos parkedAt;             // where a parked puppet is held, far from everyone
         bool parkedAway = false;
+        bool scripted = false;       // in Fable's scripted mode (never taken off: park keeps it)
+        uint32_t scriptedTries = 0;  // tries so far: the mode stack may not exist right after CreateNear
+        uint32_t scriptedRetryMs = 0;
         uint32_t deadSinceMs = 0;  // the server said it died at this time (0: alive)
         Pos diedAt;                // where it fell; it is kept there
     };
@@ -100,6 +103,7 @@ class PuppetPool {
     void send_away(Puppet& p);
     void hold_parked(uint32_t nowMs);
     void retire(Puppet& p);
+    void try_scripted_mode(Puppet& p, uint32_t nowMs);
     bool may_remove() const;
     void drive(const world::Pose& p, uint32_t nowMs);
     void animate(Puppet& p, const world::Pose& pose, uint32_t nowMs);
