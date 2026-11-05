@@ -141,6 +141,13 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     script::set_attackable(p.ref, false);
     script::set_damageable(p.ref, false);
     script::clear_commands(p.ref);
+    // Without this a hostile creature's own Fable AI takes the hero as its target and turns
+    // down the mod's walk and swing actions (online-17: a bandit refused ST_WALK and stood still
+    // while the server's copy fought). Scripted mode is how quest scripts take a creature over.
+    if (scriptedMode_) {
+        bool ok = script::add_scripted_mode(p.ref, "FO_PUPPET");
+        fo::log("puppet: %s %s", name, ok ? "in scripted mode (its own AI is off)" : "has no mode stack; left as it is");
+    }
     p.lastCommandsMs = nowMs;
     p.createdMs = nowMs;
     p.thingAddr = p.ref.thing();

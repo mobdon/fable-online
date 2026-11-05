@@ -30,6 +30,11 @@ constexpr unsigned kSetFree = 0x7BC;         // (reference*)
 constexpr unsigned kLookInDirection = 0x768; // (reference*, float yaw, bool)
 constexpr unsigned kHeroHealth = 0x404;      // () -> float
 constexpr unsigned kHeroMaxHealth = 0x408;   // () -> float
+// .AddScriptedMode (ref*, CCharString* label): pushes a CModeScripted (vtable 0x01267670) on the
+// creature's mode stack (component type 0x31), the mode quest scripts use so a creature's own
+// brain stops choosing actions and only scripted ones run. The label is only a name.
+constexpr unsigned kAddScriptedMode = 0xBB4;
+constexpr uint32_t kModeStackComponentType = 0x31;
 
 // NTCScriptedControl: what the script runner's `.PlayLoopingAnim` ends up calling.
 // tools/re-notes/05-spawn-and-scripted-control.md, "Playing animations".
@@ -283,6 +288,32 @@ void set_free(ThingRef& t) { one_arg(t, kSetFree); }
 void set_drawable(ThingRef& t, bool on) { flag(t, kDrawable, on); }
 void set_attackable(ThingRef& t, bool on) { flag(t, kAttackable, on); }
 void set_damageable(ThingRef& t, bool on) { flag(t, kDamageable, on); }
+
+bool add_scripted_mode(ThingRef& t, const char* label) {
+    uintptr_t obj = iface();
+    if (!obj || !t.held()) return false;
+    // Fable's handler reads the mode stack without checking it exists: only call it for a
+    // thing whose sorted component list holds type 0x31.
+    uintptr_t thing = t.thing();
+    if (!thing || !readable(thing + kThingComponents, 8)) return false;
+    uintptr_t begin = read_ptr(thing + kThingComponents), end = read_ptr(thing + kThingComponents + 4);
+    if (!begin || end <= begin || (end - begin) % 8 || end - begin > 512 * 8) return false;
+    bool found = false;
+    for (uintptr_t p = begin; p < end; p += 8) {
+        uintptr_t type = read_ptr(p);
+        if (type == kModeStackComponentType && read_ptr(p + 4)) {
+            found = true;
+            break;
+        }
+        if (type > kModeStackComponentType) break;
+    }
+    if (!found) return false;
+    void* fn = slot(obj, kAddScriptedMode);
+    if (!fn) return false;
+    Str str(label);
+    as<void(__thiscall*)(void*, void*, void*)>(fn)(reinterpret_cast<void*>(obj), t.raw(), str.raw());
+    return true;
+}
 
 void look_in_direction(ThingRef& t, float yaw) {
     uintptr_t obj = iface();
