@@ -60,6 +60,10 @@ bool read(State& out) {
         !rd(r + kSnowOn, &snowOn, 1) || !rd(r + kRainAmount, &rainAmt, 4) || !rd(r + kSnowAmount, &snowAmt, 4))
         return false;
     s.found = true;
+    s.rainOn = rainOn != 0;
+    s.snowOn = snowOn != 0;
+    float most = 1.0f;
+    if (rd(r + kMax, &most, 4) && std::isfinite(most) && most > 0.0f) s.most = most;
     s.rainOverride = rainOn ? rainAmt : -1.0f;
     s.snowOverride = snowOn ? snowAmt : -1.0f;
     out = s;
