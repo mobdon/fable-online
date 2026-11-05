@@ -189,7 +189,13 @@ export function createApp(
           ai: opts.ai ?? monsterAi(navs),
           law: lawServices,
           // Bound late: travel needs the director, which needs this sim.
-          respawn: (heroId) => travelRef?.respawn(heroId) != null,
+          respawn: (heroId, fell) => travelRef?.respawn(heroId, fell) != null,
+          moved: (heroId, at) => {
+            const ch = director.channelOf(heroId);
+            if (!ch) return;
+            const p = ch.toWorld(at);
+            director.sendTo(heroId, JSON.stringify({ t: 'pos_correct', x: p.x, y: p.y, z: p.z, reason: 'respawn', area: ch.areaOf(heroId) }));
+          },
           ...(navs ? { nav: (r: string) => navs.get(r) } : {}),
         })
       : cfg.navDir

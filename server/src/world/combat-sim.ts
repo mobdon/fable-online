@@ -71,10 +71,13 @@ export interface WorldServices {
   law?: LawServices;
   /**
    * A hero who died without a phial gets back up here: move them to their respawn point
-   * (the nearest Cullis Gate, src/world/travel/travel.ts). Called after the channel's step,
-   * never during it. Returns false when it could not move them: they stay at their home.
+   * (the Cullis Gate nearest `fell`, where they died: src/world/travel/travel.ts). Called
+   * after the channel's step, never during it. Returns false when it could not move them:
+   * they are put back at their channel entry point and `moved` is called.
    */
-  respawn?: (heroId: number) => boolean;
+  respawn?: (heroId: number, fell: Vec3) => boolean;
+  /** The server moved a hero inside the channel on its own (not a region change): tell the client. */
+  moved?: (heroId: number, at: Vec3) => void;
   /** Walkable ground for the guards (the region's navmesh); without it they walk straight lines. */
   nav?: (region: string) => NavMesh | undefined;
 }
@@ -697,7 +700,8 @@ export class CombatSim implements RegionSim {
   private respawn(slot: HeroSlot): void {
     const h = slot.hero;
     const moveAway = !slot.phial && !!this.s.respawn;
-    if (!slot.phial) h.pos = { ...slot.home };
+    // The respawn gate is picked from where the hero fell, so they stay there until it is.
+    if (!slot.phial && !moveAway) h.pos = { ...slot.home };
     this.combat.revive(h.id, slot.phial ? 1 : RESPAWN_HEALTH_SHARE);
     h.will = h.maxWill;
     h.combo = 0;
@@ -706,8 +710,12 @@ export class CombatSim implements RegionSim {
     // Moving between channels is not allowed mid-step: do it once the step is over.
     if (moveAway) {
       const id = h.id;
+      const fell = { ...h.pos };
       queueMicrotask(() => {
-        if (this.heroes.get(id)?.hero === h) this.s.respawn!(id);
+        if (this.heroes.get(id) !== slot || this.s.respawn!(id, fell)) return;
+        // Nowhere to send them: back at the entry point, as without a respawn service.
+        h.pos = { ...slot.home };
+        this.s.moved?.(id, h.pos);
       });
     }
   }

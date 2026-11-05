@@ -238,11 +238,12 @@ export class Travel {
    * A hero who died gets back up at the Cullis Gate nearest to where they fell (on the world
    * map, so it can be in another region), which costs them the walk back. No unlock is
    * needed and no travel rule applies: this is not travel the hero chose. Gates in barred
-   * regions are skipped. Returns the gate, or null when there is none (the hero stays).
+   * regions are skipped. `fell` is where they died, in the channel's frame (default: where
+   * the sim has them now). Returns the gate, or null when there is none (the hero stays).
    */
-  respawn(heroId: number): string | null {
+  respawn(heroId: number, fell?: Vec3): string | null {
     const ch = this.director.channelOf(heroId);
-    const pos = ch?.sim.position(heroId);
+    const pos = fell ?? ch?.sim.position(heroId);
     if (!ch || !pos) return null;
     const o = this.director.originOf(ch.region.name);
     const at = { x: pos.x + o.x, y: pos.y + o.y };
