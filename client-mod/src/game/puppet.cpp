@@ -1,5 +1,7 @@
 #include "puppet.h"
 
+#include <cmath>
+
 #include <windows.h>
 
 #include <cstdio>
@@ -18,6 +20,8 @@ constexpr uint32_t kClearCommandsAnimatedMs = 4000;
 constexpr uint32_t kAnimateAfterMs = 2000;
 // How long a reported hit shows as a flinch.
 constexpr uint32_t kFlinchMs = 350;
+// A new or reused puppet is shown this long after its first position write.
+constexpr uint32_t kShowAfterPlacedMs = 150;
 // After a refused animation, how soon it is tried again.
 constexpr uint32_t kRetryRefusedMs = 100;
 /** The engine picks the spot within this many metres of the hero; we move it from there. */
@@ -112,8 +116,8 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
         if (p.ref.alive()) {
             p.spawn = s;
             p.parkedAway = false;
-            script::set_drawable(p.ref, true);
-            p.hidden = false;
+            // Shown only once it stands where the server has it (drive), not at its parking spot.
+            p.hidden = true;
             p.gait = p.wanted = Gait::None;
             p.lastCommandsMs = 0;
             p.createdMs = nowMs;
@@ -140,6 +144,10 @@ bool PuppetPool::spawn_for(const world::Spawn& s, uint32_t nowMs) {
     // damage a puppet: it would show results the server never agreed to.
     script::set_attackable(p.ref, false);
     script::set_damageable(p.ref, false);
+    // CreateNear puts it within a few metres of the hero: keep it out of sight until the
+    // server's position has been written, so it doesn't pop up next to the player first.
+    script::set_drawable(p.ref, false);
+    p.hidden = true;
     script::clear_commands(p.ref);
     // Without this a hostile creature's own Fable AI takes the hero as its target and turns
     // down the mod's walk and swing actions (online-17: a bandit refused ST_WALK and stood still
@@ -172,6 +180,7 @@ void PuppetPool::park(uint32_t id) {
     script::set_drawable(p.ref, false);
     send_away(p);
     p.hidden = true;
+    p.shownAfterMs = 0;
     p.gait = p.wanted = Gait::None;
     if (pool_.count(p.def) >= kPoolPerDef) {
         retire(p);
@@ -252,6 +261,21 @@ void PuppetPool::drive(const world::Pose& pose, uint32_t nowMs) {
     }
 
     write_pos(thing, Pos{pose.x, pose.y, pose.z}, true, pose.yaw);
+    if (p.hidden) {
+        // Written at least once, and a few frames later so the engine has moved it there.
+        if (p.shownAfterMs == 0) p.shownAfterMs = nowMs + kShowAfterPlacedMs;
+        if (static_cast<int32_t>(nowMs - p.shownAfterMs) >= 0) {
+            Pos at;
+            bool there = read_pos(thing, at) && std::fabs(at.x - pose.x) < 2.0f && std::fabs(at.y - pose.y) < 2.0f;
+            // Never kept invisible for good: after a second it is shown wherever it is.
+            if (there || static_cast<int32_t>(nowMs - p.shownAfterMs) >= 1000) {
+                if (!there) fo::log("puppet: %s shown before its position was confirmed", p.scriptName.c_str());
+                script::set_drawable(p.ref, true);
+                p.hidden = false;
+                p.shownAfterMs = 0;
+            }
+        }
+    }
     // The server's verdict on hits, visible in the log even while animations are off.
     if (p.lastHealth >= 0 && pose.health != p.lastHealth && stats_.healthLogs < 200) {
         ++stats_.healthLogs;

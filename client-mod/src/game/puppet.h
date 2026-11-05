@@ -74,6 +74,7 @@ class PuppetPool {
         std::string scriptName;
         uint32_t lastCommandsMs = 0;
         bool hidden = false;
+        uint32_t shownAfterMs = 0;  // when a hidden puppet that has been placed may be shown
         float lastHealth = -1;
         Gait gait = Gait::None;
         Gait wanted = Gait::None;  // the gait the server asks for, waiting out kGaitSettleMs
