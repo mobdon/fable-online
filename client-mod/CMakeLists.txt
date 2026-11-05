@@ -1,5 +1,5 @@
 set(FO_MOD_SOURCES
-  src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/armourlook.cpp src/config.cpp src/scoreboard.cpp
+  src/dllmain.cpp src/log.cpp src/probe.cpp src/devkit.cpp src/herolook.cpp src/config.cpp src/scoreboard.cpp
   src/sync.cpp
   src/game/hero.cpp
   src/game/hook.cpp src/game/puppet.cpp src/game/script.cpp src/game/spawns.cpp src/game/thing.cpp src/game/things.cpp
@@ -10,7 +10,7 @@ set(FO_MOD_SOURCES
   src/menu/menu.cpp src/menu/menu_model.cpp
   src/display/camera_patch.cpp src/display/widescreen.cpp src/display/frame_probe.cpp src/display/present.cpp src/display/hud_patch.cpp src/display/hud_scale.cpp
   src/assets/fable_font.cpp src/assets/fable_ui.cpp
-  ../shared/art/big.cpp ../shared/art/lzo1x.cpp ../shared/art/dxt.cpp ../shared/art/tint.cpp)
+  ../shared/art/big.cpp ../shared/art/lzo1x.cpp ../shared/art/dxt.cpp)
 
 add_library(fable_online SHARED ${FO_MOD_SOURCES})
 target_compile_definitions(fable_online PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _WIN32_WINNT=0x0601)
