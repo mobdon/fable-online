@@ -142,6 +142,7 @@ struct State {
     /** Hero experience kept in step with the server (only when its welcome offers it). */
     world::XpSync xp;
     bool serverXp = false;
+    bool gearFailLogged = false;
     bool xpOn = true;
     uint32_t lastXpMs = 0;
     uint32_t xpWrites = 0;
@@ -689,7 +690,14 @@ void report_gear(uint32_t nowMs) {
     s.lastGearReadMs = nowMs;
     uintptr_t hero = game::local_hero();
     game::HeroGear g;
-    if (!hero || !game::read_gear(hero, g)) return;
+    if (!hero) return;
+    if (!game::read_gear(hero, g)) {
+        if (!s.gearFailLogged && *game::gear_missing()) {
+            s.gearFailLogged = true;
+            fo::log("sync: can't read the hero's gear (%s)", game::gear_missing());
+        }
+        return;
+    }
     std::string worn;
     for (const std::string& a : g.armour) worn += (worn.empty() ? "" : ", ") + a;
     if (!s.gearLogged || g.melee != s.lastGear.melee || g.ranged != s.lastGear.ranged || g.armour != s.lastGear.armour ||

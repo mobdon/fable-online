@@ -8,7 +8,7 @@ namespace {
 // Component list on every thing: a vector of { int type, component* } (tools/re-notes/12-renown.md).
 constexpr uint32_t kComponentsBegin = 0x44;
 constexpr uint32_t kComponentsEnd = 0x48;
-constexpr size_t kMaxComponents = 64;
+constexpr size_t kMaxComponents = 256;
 
 // CTCHeroExperience
 constexpr uint32_t kTotal = 0x10;
@@ -33,9 +33,11 @@ bool write(uintptr_t addr, const void* in, size_t n) {
 uintptr_t component(uintptr_t thing, uint32_t vtable) {
     uint32_t range[2] = {};
     if (!read(thing + kComponentsBegin, range, sizeof range) || range[1] < range[0]) return 0;
+    // The hero carries many components (more than 64): read up to kMaxComponents, never give up on a long list.
     size_t n = (range[1] - range[0]) / 8;
-    if (n == 0 || n > kMaxComponents) return 0;
-    uint32_t pairs[kMaxComponents * 2];
+    if (n > kMaxComponents) n = kMaxComponents;
+    if (n == 0) return 0;
+    static uint32_t pairs[kMaxComponents * 2];
     if (!read(range[0], pairs, n * 8)) return 0;
     for (size_t i = 0; i < n; ++i) {
         uint32_t c = pairs[i * 2 + 1], vt = 0;

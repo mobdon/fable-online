@@ -25,4 +25,7 @@ constexpr size_t kMaxWorn = 12;
  */
 bool read_gear(uintptr_t hero, HeroGear& out);
 
+/** Why read_gear failed last, for the log ("" after a good read). */
+const char* gear_missing();
+
 }  // namespace fo::game

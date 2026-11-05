@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+
 namespace fo::game {
 namespace {
 
@@ -78,9 +80,10 @@ bool weapon_at(uintptr_t comp, uint32_t handle, std::string& out) {
 uintptr_t component(uintptr_t hero, uint32_t vtable) {
     uint32_t range[2] = {};
     if (!read(hero + kComponentsBegin, range, sizeof(range))) return 0;
-    if (range[1] < range[0] || range[1] - range[0] > 64 * 8 || (range[1] - range[0]) % 8) return 0;
-    uint32_t pairs[64 * 2];
-    const size_t n = (range[1] - range[0]) / 8;
+    // The hero carries many components (more than 64): read up to 256 pairs, never give up on a long list.
+    if (range[1] < range[0] || (range[1] - range[0]) % 8) return 0;
+    static uint32_t pairs[256 * 2];
+    const size_t n = std::min<size_t>((range[1] - range[0]) / 8, 256);
     if (!n || !read(range[0], pairs, n * 8)) return 0;
     for (size_t i = 0; i < n; ++i) {
         uint32_t comp = pairs[i * 2 + 1], vt = 0, owner = 0;
@@ -108,13 +111,28 @@ bool worn_clothing(uintptr_t hero, std::vector<std::string>& out) {
     return true;
 }
 
+namespace {
+char g_missing[96] = "";
+}
+
+const char* gear_missing() { return g_missing; }
+
 bool read_gear(uintptr_t hero, HeroGear& out) {
     uint8_t flags = 0;
     if (!hero || !read(hero + kFlags91, &flags, 1) || (flags & 1)) return false;
     const uintptr_t comp = component(hero, kInvWeaponsVtable);
-    if (!comp) return false;
+    if (!comp) {
+        uint32_t range[2] = {};
+        read(hero + kComponentsBegin, range, sizeof(range));
+        wsprintfA(g_missing, "no weapons component among %d", static_cast<int>((range[1] - range[0]) / 8));
+        return false;
+    }
     HeroGear g;
-    if (!weapon_at(comp, kMeleeHandle, g.melee) || !weapon_at(comp, kRangedHandle, g.ranged)) return false;
+    if (!weapon_at(comp, kMeleeHandle, g.melee) || !weapon_at(comp, kRangedHandle, g.ranged)) {
+        lstrcpyA(g_missing, "weapon handle unreadable");
+        return false;
+    }
+    g_missing[0] = 0;
     // Clothing that can't be read is left out of the report: the server then keeps the ledger's.
     g.armourKnown = worn_clothing(hero, g.armour);
     out = g;
