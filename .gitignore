@@ -33,3 +33,7 @@ events/
 ops/monitoring/.env
 shared/defs/nav/
 shared/defs/nav-regions/
+
+# Claude Code toolkit output (tools/claude-toolkit): local only
+graphify-out/
+.serena/
