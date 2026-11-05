@@ -60,6 +60,7 @@ export class CombatSystem implements CombatPort {
   private spellCooldown = new Map<string, number>();
   private deathListeners: DeathListener[] = [];
   private hitListeners: HitListener[] = [];
+  private contactListeners: ((a: Combatant, t: Combatant) => void)[] = [];
   private healLevels: readonly number[];
 
   constructor(
@@ -73,6 +74,11 @@ export class CombatSystem implements CombatPort {
 
   onHit(fn: HitListener): void {
     this.hitListeners.push(fn);
+  }
+
+  /** Every attack that reaches its target, including ones blocked or soaked to 0 damage. */
+  onContact(fn: (a: Combatant, t: Combatant) => void): void {
+    this.contactListeners.push(fn);
   }
 
   onDeath(fn: DeathListener): void {
@@ -292,6 +298,7 @@ export class CombatSystem implements CombatPort {
       h.shield -= soak;
       dmg -= soak;
     }
+    for (const fn of this.contactListeners) fn(a, t);
     if (dmg <= 0) return 0;
     t.health = Math.max(0, t.health - dmg);
     const by = this.damageBy.get(t.id) ?? new Map<number, number>();

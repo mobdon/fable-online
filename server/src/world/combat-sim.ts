@@ -181,6 +181,13 @@ export class CombatSim implements RegionSim {
     // Creatures don't fight each other, except the town watch and monsters.
     this.combat = new CombatSystem(s.data, hooks, (a, t) => harm(a, t) || this.watchFight(a, t));
     this.combat.onDeath((d) => this.onDeath(d));
+    // Any blow, even one blocked or soaked to nothing, keeps both sides out of regen.
+    this.combat.onContact((a, t) => {
+      for (const c of [a, t]) {
+        const slot = c.kind === 'hero' ? this.heroes.get(c.id) : undefined;
+        if (slot) slot.calmMs = 0;
+      }
+    });
     this.combat.onHit((a, t, _dmg, killed) => {
       const now = Date.now();
       if (a.kind === 'hero') this.lastHit.set(a.id, now);
