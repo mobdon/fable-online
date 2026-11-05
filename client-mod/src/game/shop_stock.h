@@ -29,6 +29,7 @@ struct Report {
     unsigned banned_defs = 0;       // item defs matched by the rule
     unsigned chunks_rewritten = 0;
     std::vector<std::string> cleared;  // names of the items whose rows were emptied (unique)
+    std::vector<uint32_t> banned;      // entry indexes of the banned item defs
 };
 
 /** Fable's field-name hash: reflected CRC-32, polynomial 0xEDB88320, init 0, no final xor. */

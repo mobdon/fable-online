@@ -145,6 +145,7 @@ Report filter(const std::vector<uint8_t>& g, const std::vector<uint8_t>& names, 
         }
     }
     r.banned_defs = static_cast<unsigned>(banned.size());
+    r.banned.assign(banned.begin(), banned.end());
 
     // Empty the banned rows of every shop.
     const uint32_t type_key = fable_hash("Type"), qty_key = fable_hash("Quantity"), max_key = fable_hash("MaxStock");
