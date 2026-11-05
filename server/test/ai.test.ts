@@ -225,3 +225,21 @@ test('a monster swing shows first and lands after the wind-up, so the blow and t
   assert.ok(swingShownAt >= 0 && landedAt >= 0, 'swung and hit');
   assert.ok(landedAt - swingShownAt >= SWING_WINDUP_MS - TICK, `hit ${landedAt - swingShownAt} ms after the swing showed`);
 });
+
+test('a patrol point off the ground counts as reached at the nearest ground: the beat goes on', () => {
+  // Walkable for y < 6; the top four rows are wall.
+  const rows = [...Array.from({ length: 4 }, () => '#'.repeat(40)), ...Array.from({ length: 6 }, () => '.'.repeat(40))];
+  const sim = new NavSim(asciiNav(rows));
+  const g = sim.spawn('CREATURE_BS_GUARD', { x: 5, y: 3, z: 0 }, { faction: 'guard' });
+  // The far end is 2 m inside the wall: paths end at the snapped point, 2 m short of it.
+  sim.ai.setPatrol(g.id, [{ x: 5, y: 3, z: 0 }, { x: 35, y: 8, z: 0 }]);
+  let reachedFar = false;
+  let backHome = false;
+  for (let t = 0; t < 60_000 && !backHome; t += TICK) {
+    sim.step(TICK);
+    if (g.pos.x > 33) reachedFar = true;
+    if (reachedFar && g.pos.x < 7) backHome = true;
+  }
+  assert.ok(reachedFar, 'walked to the far end');
+  assert.ok(backHome, `turned back along the beat (stuck at ${g.pos.x.toFixed(1)}, ${g.pos.y.toFixed(1)} anim ${g.anim})`);
+});
