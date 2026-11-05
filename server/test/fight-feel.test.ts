@@ -10,11 +10,11 @@ import { BALANCE } from '../src/combat/rules.js';
 const TICK = 50;
 const BANDIT = 'CREATURE_BANDIT_GRUNT_LEVEL1';
 
-function arena() {
+function arena(events = new MemorySink()) {
   const sim = new CombatSim({ name: 'TestRegion', uid: 1, sea: false, neighbours: [] }, 'TestRegion#1', {
     data: FALLBACK_DATA,
     spawns: { regions: { TestRegion: { creatures: [], generators: [] } } },
-    events: new MemorySink(),
+    events,
     ai: monsterAi(),
     spawnOptions: { rng: () => 0.5 },
   });
@@ -134,4 +134,22 @@ test("a circling bandit stays inside a bare-handed hero's reach", () => {
     if (t > 3000) furthest = Math.max(furthest, Math.hypot(b.pos.x, b.pos.y));
   }
   assert.ok(furthest <= reach, `circled out to ${furthest.toFixed(2)} m, reach is ${reach} m`);
+});
+
+test('a test monster killed by its hero is logged with the damage that did it', () => {
+  const events = new MemorySink();
+  const sim = arena(events);
+  sim.devSpawn(1, BANDIT, 2);
+  const b = bandit(sim);
+  b.health = 1;
+  b.blocking = false;
+  press(sim, Math.atan2(-b.pos.x, b.pos.y));
+  for (let t = 0; t < 200; t += TICK) sim.step(TICK);
+  const all = events.events as { type: string; heroId?: number; killer?: string | null; heroDamage?: number }[];
+  assert.ok(all.some((e) => e.type === 'dev_spawn' && e.heroId === 1));
+  const kill = all.find((e) => e.type === 'dev_kill');
+  assert.ok(kill, 'the kill was logged');
+  assert.equal(kill!.heroId, 1);
+  assert.equal(kill!.killer, 'hero:1');
+  assert.ok(kill!.heroDamage! > 0);
 });

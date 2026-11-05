@@ -139,7 +139,8 @@ export class CombatSim implements RegionSim {
   private watchMs = 0;
   private nav: NavMesh | undefined;
   /** Staff dev spawns: they never pay loot or experience, so they can't be farmed for gold. */
-  private devSpawned = new Set<number>();
+  /** Test monsters from the Developer page: who made each one, and when. */
+  private devSpawned = new Map<number, { heroId: number; at: number }>();
   private guardAi?: AiDirector;
 
   constructor(
@@ -244,7 +245,10 @@ export class CombatSim implements RegionSim {
     const pick = what === 'nearest' ? near.slice(0, 1) : near;
     if (!pick.length) return { error: `No server monsters within ${reach} m.` };
     const removed: string[] = [];
-    for (const { c } of pick) if (this.spawns.remove(c.id)) removed.push(c.defName);
+    for (const { c } of pick) {
+      this.devSpawned.delete(c.id);
+      if (this.spawns.remove(c.id)) removed.push(c.defName);
+    }
     return { removed };
   }
 
@@ -260,7 +264,8 @@ export class CombatSim implements RegionSim {
     // Turned round to face the hero.
     const c = this.spawns.spawnExtra(defName, at, h.yaw + Math.PI);
     if (c) {
-      this.devSpawned.add(c.id);
+      this.devSpawned.set(c.id, { heroId, at: Date.now() });
+      this.s.events.emit({ type: 'dev_spawn', heroId, creature: defName, id: c.id, channelId: this.channelId });
       // A test monster is there to be fought: it comes for whoever spawned it at once,
       // rather than waiting to spot them (it used to stand about for ten seconds).
       this.ai?.pursue?.(c.id, heroId);
@@ -563,7 +568,15 @@ export class CombatSim implements RegionSim {
         return;
       }
       this.spawns.died(c.id);
-      if (this.devSpawned.delete(c.id)) return;
+      const dev = this.devSpawned.get(c.id);
+      if (dev) {
+        // A test monster pays nothing, but its death is logged so a test fight can be checked.
+        this.devSpawned.delete(c.id);
+        let heroDamage = 0;
+        for (const [id, n] of d.damageBy) if (this.heroes.has(id)) heroDamage += n;
+        this.s.events.emit({ type: 'dev_kill', heroId: dev.heroId, creature: c.defName, id: c.id, channelId: this.channelId, killer: d.killer ? `${d.killer.kind}:${d.killer.id}` : null, heroDamage: Math.round(heroDamage), aliveMs: Date.now() - dev.at });
+        return;
+      }
       // Credit goes to the hero who did the most damage, so kill-stealing a nearly dead monster doesn't pay.
       let best: number | null = null;
       let most = 0;
