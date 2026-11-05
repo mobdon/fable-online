@@ -164,7 +164,9 @@ export class Channel {
     }
     this.sim.step(dtMs);
     this.tick++;
-    if (this.players.size === 0) return;
+    // A hero still loading the region gets no frames until region_ready: its Fable would
+    // place stand-ins in a level that is not there yet.
+    if (this.players.size === this.loading.size) return;
     const all = this.entities();
     const head = `{"t":"tick","tick":${this.tick},"last_input_seq":`;
 
@@ -172,12 +174,13 @@ export class Channel {
     // same thing, so encode it once.
     if (this.interestRadius <= 0 && this.oneArea()) {
       const encoded = JSON.stringify(this.wire(all));
-      for (const p of this.players.values()) p.send(`${head}${p.lastSeq},"entities":${encoded}}`);
+      for (const p of this.players.values()) if (!this.loading.has(p.heroId)) p.send(`${head}${p.lastSeq},"entities":${encoded}}`);
       return;
     }
 
     const r2 = this.interestRadius * this.interestRadius;
     for (const p of this.players.values()) {
+      if (this.loading.has(p.heroId)) continue;
       const me = this.sim.position(p.heroId);
       const myArea = this.areaOf(p.heroId);
       // A player whose own position is unknown gets everything rather than nothing.
