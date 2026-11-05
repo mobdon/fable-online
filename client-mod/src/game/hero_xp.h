@@ -18,9 +18,11 @@ constexpr uint32_t kInventoryAbilitiesVtable = 0x01256AD4;
 
 /** Reads the hero's pools and levels. False until both components are found and look sane. */
 bool read_xp(uintptr_t hero, world::XpSnapshot& out);
+// The components are found by type in the hero's component list (0x68 experience, 0x6F
+// abilities, as Fable's own getters at 0x56FF3D / 0x56FFC5 do), checked against the vtables.
 /** Writes pools, total and levels into the hero's components. */
 bool write_xp(uintptr_t hero, const world::XpSnapshot& s);
-/** For the log: which component is missing, or "" when both are there. */
-const char* xp_missing(uintptr_t hero);
+/** For the log: why the last read_xp or write_xp failed. */
+const char* xp_why();
 
 }  // namespace fo::game

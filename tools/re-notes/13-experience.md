@@ -24,6 +24,13 @@ Its save code (vtable slot 1, `0x006D8E30`) names the fields:
   experience. So a purchase is paid from its own pool first, then from general.
 - `0x006D6510 (i)` / `0x006D6520 (i)` read a stat pool / a stat level.
 
+## Finding the components
+
+Both are in the hero's sorted `{type, component*}` list at thing+0x44. Fable's own getters
+look them up by type: `0x56FF3D` asks for type `0x68` (CTCHeroExperience), `0x56FFC5` for
+type `0x6F` (CTCInventoryAbilities). A hero has more than 64 components, so a scan that
+stops early misses them (online-17 logged "the experience component not found").
+
 ## Ability levels: CTCInventoryAbilities (vtable `0x01256AD4`)
 
 `+0x160` points at 20 slots of `{int level, CHeroAbilityDef*}`. Level -1 means the hero
