@@ -102,7 +102,8 @@ script name with no card pays at most `FO_QUEST_DEFAULT_MAX_GOLD` (0 by default)
 only if the quest is real, hasn't been paid before (or its repeat interval passed), every item
 is one the card gives, and the hero is under the daily quest-gold cap; anything else pays
 nothing and is logged as `quest_reward_rejected`. Gold and renown above the quest's cap are
-cut down to it and logged as `quest_reward_trimmed`. Overrides go in
+cut down to it and logged as `quest_reward_trimmed`. A claim records renown but does not add it
+to the hero: renown comes from the reported total. Overrides go in
 `content/quest-rewards.json`.
 
 **Region channels that autoscale** (`src/world/director.ts`). One channel is one copy of one

@@ -143,9 +143,9 @@ export class QuestRewards {
         this.db.run('UPDATE quest_claims SET tx_id = ? WHERE id = ?', r.txId, claimId);
       }
       items.forEach((it, i) => this.economy.mintItem(heroId, it, 1, 'quest_reward', `${key}:item:${i}`));
-      // Renown itself arrives as the running total in renown_report (heroes/renown.ts), which
-      // brings heroes.renown up to Fable's figure under its own caps. Adding the quest's renown
-      // here too would count it twice when the report lands first, so the claim only records it.
+      // Renown is recorded on the claim only. The hero's renown comes from the client's running
+      // total (renown_report, under its import and daily caps), which already includes this
+      // quest's renown; adding it here as well would count it twice.
       if (trimmed)
         this.events.emit({ type: 'quest_reward_trimmed', heroId, quest: c.quest, claimedGold, gold, claimedRenown, renown });
       this.events.emit({ type: 'quest_reward', heroId, quest: c.quest, gold, items: items.length });

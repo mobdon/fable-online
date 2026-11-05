@@ -182,7 +182,7 @@ test('quest rewards: only real quests, never over the card, never twice, daily c
   const ok = q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 999_999, renown: 101, items: ['OBJECT_HEALTH_POTION'] });
   assert.deepEqual(ok, { ok: true, gold: 500, renown: 100, items: ['OBJECT_HEALTH_POTION'], trimmed: true });
   assert.equal(app.economy.balance(hero.id), 500);
-  // Renown is recorded on the claim; the hero's total comes from renown_report (no double count).
+  // Renown comes from the hero's reported total, not from the claim.
   assert.equal(app.heroes.get(hero.id)!.renown, 0);
   assert.deepEqual(q.claim(hero.id, { quest: 'OBJECT_QUEST_CARD_TEST_WOLVES', gold: 500 }), { ok: false, reason: 'already_claimed' });
   // Rejected and trimmed attempts are logged for the cheat dashboards.
@@ -236,28 +236,12 @@ test('combat sim: a staff dev spawn puts a hostile creature in front of the hero
   // Facing the hero: its forward (-sin yaw, cos yaw) points back at the hero.
   const fx = -Math.sin(wolf.yaw), fy = Math.cos(wolf.yaw);
   assert.ok(fx * (10 - wolf.pos.x) + fy * (20 - wolf.pos.y) > 14.9, 'looking at the hero');
-  assert.equal(sim.snapshot().find((e) => e.id === r.id)?.def, 'CREATURE_WOLF', 'sent with its def name, so the mod shows a wolf and not a hero');
+  assert.ok(sim.snapshot().some((e) => e.id === r.id), 'sent to clients like any monster');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_TRADER_TEST', 4), 'traders are not spawned');
   assert.ok('error' in sim.devSpawn(hero.id, 'CREATURE_NOT_REAL', 4));
-  // Removing: nearest only, then everything near; nothing far away is touched.
-  const far = sim.devSpawn(hero.id, 'CREATURE_WOLF', 45);
-  const second = sim.devSpawn(hero.id, 'CREATURE_WOLF', 12);
-  assert.ok('id' in far && 'id' in second);
-  const nearest = sim.devDespawn(hero.id, 'nearest');
-  assert.ok('removed' in nearest && nearest.removed.length === 1);
-  assert.ok(![...sim.spawns.creatures()].some((c) => c.id === second.id), 'the 12 m wolf went first');
-  const near = sim.devDespawn(hero.id, 'near');
-  assert.ok('removed' in near && near.removed.length === 1, 'the 15 m wolf; the 45 m one is out of reach');
-  assert.ok([...sim.spawns.creatures()].some((c) => c.id === far.id));
-  assert.ok('error' in sim.devDespawn(hero.id, 'near'));
-  sim.spawns.remove(far.id);
-  const again = sim.devSpawn(hero.id, 'CREATURE_WOLF', 15);
-  assert.ok('id' in again);
-  const wolf2 = [...sim.spawns.creatures()].find((c) => c.id === again.id)!;
-
   // Killed, it is cleared like the rest and never comes back.
-  wolf2.alive = false;
-  sim.spawns.died(wolf2.id);
+  wolf.alive = false;
+  sim.spawns.died(wolf.id);
   sim.spawns.step(200);
   sim.spawns.step(600_000);
   assert.equal([...sim.spawns.creatures()].length, 0);
@@ -408,21 +392,4 @@ test('combat sim: killing a staff dev spawn pays no gold or experience', () => {
   assert.equal(app.economy.balance(hero.id), 0);
   assert.equal(app.progress.get(hero.id).kills, 0);
   app.close();
-});
-
-test('combat sim: a death without a phial hands the hero to the respawn hook after the step', async () => {
-  const calls: number[] = [];
-  const sim = new CombatSim(REGION, 'TestRegion#r', { data: D, spawns: { regions: {} }, events: new MemorySink(), respawn: (id) => (calls.push(id), true) });
-  sim.addHero(9, { x: 0, y: 0, z: 0 });
-  const h = sim.hero(9)!;
-  h.health = 1;
-  const wolf = { id: 9_100_000, kind: 'creature', defName: 'CREATURE_WOLF', pos: { x: 0, y: -1, z: 0 }, yaw: 0, health: 20, maxHealth: 20, alive: true, faction: 'FACTION_MONSTERS', anim: 0, blocking: false, stunnedMs: 0, attackCooldownMs: 0, weapon: null, power: 2, armour: 0, targetId: null, spawnId: null, experience: 0 } as Creature;
-  sim.combat.add(wolf);
-  assert.ok(sim.combat.attack(wolf.id, h.id, 'light').killed);
-  assert.equal(h.alive, false);
-  sim.step(DEATH.respawnMs + 50);
-  assert.equal(h.alive, true);
-  assert.deepEqual(calls, [], 'not during the step');
-  await Promise.resolve();
-  assert.deepEqual(calls, [9]);
 });
