@@ -20,7 +20,7 @@ export type RenownResult =
  * Fable, so the mod reads the hero's total renown there (CTCHeroStats RenownTotal) and
  * reports it. The report is a number a cheat can choose, so:
  *  - the first non-zero report for a hero is the one-off import of what they earned before, capped
- *    at `importMax`;
+ *    at `importMax`; what the cap cut is subtracted from every later report;
  *  - after that, a report only ever raises the server's renown, by at most `dailyMax` per
  *    UTC day across all reports;
  *  - a lower report changes nothing: the server's number never drops because of a client.
@@ -37,8 +37,8 @@ export class Renown {
   report(heroId: number, total: number, now = Date.now()): RenownResult {
     if (!Number.isSafeInteger(total) || total < 0 || total > MAX_REPORTED_RENOWN) return { ok: false, reason: 'bad_total' };
     return this.db.tx(() => {
-      const h = this.db.get<{ renown: number; renown_imported_at: number | null }>(
-        'SELECT renown, renown_imported_at FROM heroes WHERE id = ?',
+      const h = this.db.get<{ renown: number; renown_imported_at: number | null; renown_import_cut: number }>(
+        'SELECT renown, renown_imported_at, renown_import_cut FROM heroes WHERE id = ?',
         heroId,
       );
       if (!h) return { ok: false as const, reason: 'no_hero' as const };
@@ -52,10 +52,13 @@ export class Renown {
         const take = Math.min(total, Math.max(0, this.rules.importMax));
         capped = take < total;
         gained = Math.max(0, take - h.renown);
-        this.db.run('UPDATE heroes SET renown_imported_at = ? WHERE id = ?', now, heroId);
+        // Fable keeps counting from its own total: remember what the cap cut, so later
+        // reports are read net of it.
+        const cut = Math.max(0, total - (h.renown + gained));
+        this.db.run('UPDATE heroes SET renown_imported_at = ?, renown_import_cut = ? WHERE id = ?', now, cut, heroId);
       } else {
         kind = 'daily';
-        const want = total - h.renown;
+        const want = total - h.renown_import_cut - h.renown;
         if (want > 0) {
           const day = new Date(now).toISOString().slice(0, 10);
           const row = this.db.get<{ gained: number }>('SELECT gained FROM renown_days WHERE hero_id = ? AND day = ?', heroId, day);

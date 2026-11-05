@@ -7,6 +7,8 @@ import { GameError } from '../errors.js';
 import { Law } from './law.js';
 import { BARKS, TEXT, barkId, type CrimeKind, type Jurisdiction } from './rules.js';
 import { inAnyZone, type TownZone } from '../world/town/zones.js';
+import { shopIdOf } from '../world/town/townsfolk.js';
+import { SHOP_REACH, type ShopDef } from '../economy/shops.js';
 
 /** Villagers and traders that can witness crimes and report them to a guard. */
 export const VILLAGER_DEF = /VILLAGER|TRADER|SHOPKEEPER|BARMAN|CHILD|_WIFE|_HUSBAND|FARMER/;
@@ -43,6 +45,8 @@ export interface LawServices {
   stealthPieces?: (heroId: number) => number;
   /** Shops and homes that belong to heroes can never be stolen from. */
   playerOwned?: (shopId: string) => boolean;
+  /** The server's shops by id (the app wires this to Shops.get). Without it nothing can be stolen. */
+  shop?: (shopId: string) => ShopDef | undefined;
   rng?: () => number;
   /** Where law frames go (the app wires this to the Director). */
   out?: { send(heroId: number, msg: Record<string, unknown>): void; broadcast(channelId: string, msg: Record<string, unknown>): void };
@@ -145,18 +149,27 @@ export class ChannelLaw {
     this.witnessed(heroId, kind, { value });
   }
 
-  /** A steal request. The guards' sight lines feed the spotted roll. */
+  /**
+   * A steal request. `shop` is the shop's uid in this region, as in shop_open/shop_buy. The
+   * shop must be one the server knows in this region, stock the item, and the hero must stand
+   * within its reach. The guards' sight lines feed the spotted roll.
+   */
   steal(heroId: number, shop: string, defId: string, opts: { pickpocket?: boolean; clientSpotted?: boolean }, key: string) {
     const h = this.hero(heroId);
     if (!h || !h.alive) throw new GameError('offline', 'Not in the world');
+    const shopId = shopIdOf(this.ch.region, shop);
+    const s = this.s.shop?.(shopId);
+    if (!s || s.region !== this.ch.region) throw new GameError('no_shop', 'No such shop', 404);
+    if (!s.stock.includes(defId)) throw new GameError('not_stocked', 'This shop does not sell that');
+    if (s.pos && dist(h.pos, s.pos) > (s.reach ?? SHOP_REACH)) throw new GameError('too_far', 'You are not at that shop');
     const guard = this.seenBy(h.pos, 'guard');
     const r = this.s.law.steal(
       heroId,
       {
-        shop,
+        shop: shopId,
         defId,
         town: this.town?.id ?? null,
-        npcOwned: !(this.s.playerOwned?.(shop) ?? false),
+        npcOwned: !(this.s.playerOwned?.(shopId) ?? false),
         guardInView: !!guard,
         isDay: this.s.isDay?.() ?? true,
         stealthPieces: this.s.stealthPieces?.(heroId) ?? 0,

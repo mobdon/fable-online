@@ -6,11 +6,21 @@ import { DEFAULT_RULES } from '../src/law/rules.js';
 import { NavSim } from '../src/world/nav-sim.js';
 import { field } from './nav-fixture.js';
 import { profileFor } from '../src/world/ai/profiles.js';
+import type { ShopDef } from '../src/economy/shops.js';
 
 const TICK = 50;
 
+/** A town shop at (20, 22) selling a sword and apples, as shopsFromTown builds them. */
+const STORE = (region: string, uid = 'general_store'): ShopDef => ({
+  id: `${region}:${uid}`,
+  region,
+  pos: { x: 20, y: 22, z: 0 },
+  reach: 6,
+  stock: ['IronLongsword', 'Apple'],
+});
+
 /** A 40 x 40 patch of Bowerstone with the law wired in and a hand-driven clock. */
-function town(region = 'BowerstoneSlums') {
+function town(region = 'BowerstoneSlums', shops: ShopDef[] = [STORE(region)]) {
   const app = testApp();
   app.economy.policies.length = 0;
   let now = Date.UTC(2026, 10, 3, 12);
@@ -30,6 +40,7 @@ function town(region = 'BowerstoneSlums') {
       law,
       events: app.sink,
       rng: () => 0,
+      shop: (id) => shops.find((s) => s.id === id),
       out: {
         send: (heroId, msg) => void out.push({ to: heroId, msg }),
         broadcast: (_c, msg) => void out.push({ to: 'all', msg }),
@@ -221,13 +232,28 @@ test('stealing in plain view of a guard is almost always spotted and the guard c
   const t = town();
   const g = t.sim.spawn('CREATURE_BS_GUARD', { x: 20, y: 12, z: 0 }, { faction: 'guard', yaw: 0 });
   const h = t.hero({ x: 20, y: 20 }, 2000);
-  const r = t.chLaw.steal(h, 'bs_general_store', 'IronLongsword', {}, key());
+  const r = t.chLaw.steal(h, 'general_store', 'IronLongsword', {}, key());
   assert.equal(r.chance, 0.95);
   assert.equal(r.spotted, true); // rng 0.5 < 0.95
   assert.ok(t.barks().some((b) => b.includes('SEEN_MODERATE_CRIME')));
   t.run(3000);
   assert.equal(t.prompts(h).length, 1);
   assert.ok(Math.hypot(g.pos.x - 20, g.pos.y - 20) < 3);
+});
+
+test('a steal must name a real shop in this region, an item it stocks, and the hero must be at it', () => {
+  const t = town('BowerstoneSlums', [STORE('BowerstoneSlums'), STORE('BowerstoneSouth', 'far_shop')]);
+  const h = t.hero({ x: 20, y: 20 }, 2000);
+  const code = (c: string) => (e: unknown) => (e as { code?: string }).code === c;
+  assert.throws(() => t.chLaw.steal(h, 'made_up_shop', 'IronLongsword', {}, key()), code('no_shop'));
+  assert.throws(() => t.chLaw.steal(h, 'far_shop', 'IronLongsword', {}, key()), code('no_shop'), 'a shop in another region');
+  assert.throws(() => t.chLaw.steal(h, 'general_store', 'HealthPotion', {}, key()), code('not_stocked'));
+  t.sim.hero(h)!.pos.y = 40;
+  assert.throws(() => t.chLaw.steal(h, 'general_store', 'IronLongsword', {}, key()), code('too_far'));
+  t.sim.hero(h)!.pos.y = 20;
+  t.chLaw.steal(h, 'general_store', 'IronLongsword', {}, key());
+  const row = t.app.db.get<{ shop: string }>('SELECT shop FROM law_steals WHERE hero_id = ?', h);
+  assert.equal(row?.shop, 'BowerstoneSlums:general_store', 'stock is counted against the real shop id');
 });
 
 test('a hero felled by the watch is arrested, not killed', () => {

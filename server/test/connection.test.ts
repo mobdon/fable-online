@@ -297,6 +297,11 @@ test('an account with no hero gets one named after it on its first join', async 
     // The second join plays the same hero.
     const again = await post('/launcher/v1/join', { region: 'albion-1', client_version: '0.1.0' }, auth.access_token);
     assert.equal(again.hero.id, join.hero.id);
+    // Another account whose letters are the same gets a different name, not a refused join.
+    const auth2 = await post('/launcher/v1/register', { username: 'sparrow_99', password: 'password123' });
+    const join2 = await post('/launcher/v1/join', { region: 'albion-1', client_version: '0.1.0' }, auth2.access_token);
+    assert.ok(join2.ticket, JSON.stringify(join2));
+    assert.match(join2.hero.name, /^Sparrow[a-z]+$/);
     const m = await (await fetch(base + '/launcher/v1/manifest')).json() as any;
     assert.deepEqual(m.files, [], 'no manifest published: nothing to patch, and the launcher may play');
   } finally {

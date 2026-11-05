@@ -144,6 +144,7 @@ export function createApp(
     events,
     isDay: () => !clock.isNight(),
     stealthPieces: (heroId) => economy.inventory(heroId).filter((i) => i.location === 'equipped' && /STEALTH/i.test(i.def_id)).length,
+    shop: (id) => shops.get(id),
     out: {
       send: (heroId, msg) => director.sendTo(heroId, JSON.stringify(msg)),
       broadcast: (channelId, msg) => director.broadcastTo(channelId, JSON.stringify(msg)),
