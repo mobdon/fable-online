@@ -279,6 +279,8 @@ void draw_tags(const Config& cfg) {
                        : !g_have_view ? "no camera view matrix seen"
                        : !g_have_proj ? "no perspective projection seen"
                        : !sync::world_shown() ? sync::world_hidden_reason()
+                       // Paused, Fable's view matrix is not the play camera: tags jumped to mid-screen.
+                       : modsettings::fable_menu_open() ? "hidden: a Fable menu is open"
                        : !g_hero.valid ? "no hero position"
                        : nullptr;
     note_tag_gate(gate ? gate : "drawing");
