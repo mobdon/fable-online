@@ -1227,6 +1227,20 @@ void dev_despawn(bool all_near) {
     net::world_send(all_near ? "{\"t\":\"dev_despawn\",\"what\":\"near\"}" : "{\"t\":\"dev_despawn\",\"what\":\"nearest\"}");
 }
 
+/**
+ * A Developer button can report one click more than once (seen as three identical weather
+ * requests within 60 ms), so the same staff sky request is sent once a second at most.
+ */
+bool dev_sky_repeat(const std::string& frame) {
+    static std::string last;
+    static DWORD lastMs = 0;
+    DWORD now = GetTickCount();
+    if (frame == last && now - lastMs < 1000) return true;
+    last = frame;
+    lastMs = now;
+    return false;
+}
+
 void dev_time(float hour) {
     if (!net::world_connected()) {
         modsettings::notify("Not connected to a server.");
@@ -1234,6 +1248,7 @@ void dev_time(float hour) {
     }
     char buf[64];
     std::snprintf(buf, sizeof buf, "{\"t\":\"dev_time\",\"hour\":%.2f}", hour);
+    if (dev_sky_repeat(buf)) return;
     fo::log("sync: asking the server to set the realm time to %.2f", hour);
     net::world_send(buf);
 }
@@ -1245,6 +1260,7 @@ void dev_weather(const char* weather) {
     }
     char buf[96];
     std::snprintf(buf, sizeof buf, "{\"t\":\"dev_weather\",\"weather\":%s,\"minutes\":30}", json::quote(weather ? weather : "auto").c_str());
+    if (dev_sky_repeat(buf)) return;
     fo::log("sync: asking the server for %s weather", weather ? weather : "auto");
     net::world_send(buf);
 }

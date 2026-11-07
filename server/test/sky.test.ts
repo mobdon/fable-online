@@ -41,7 +41,9 @@ test('clock: forced weather covers outdoor regions until it runs out, never inte
   now += 61_000;
   const rolled = new WorldClock({}, () => now).weatherAt('Oakvale');
   assert.deepEqual(c.weatherAt('Oakvale'), rolled, 'back to the seeded rolls afterwards');
+  c.forceWeather('fog');
   c.forceWeather('rain');
+  assert.equal(c.sky('Oakvale').previous, 'fog', 'a force replacing a force fades from it');
   c.forceWeather(null);
   assert.deepEqual(c.weatherAt('Oakvale'), rolled);
 });

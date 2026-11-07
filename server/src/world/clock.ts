@@ -109,7 +109,7 @@ export class WorldClock {
   /** Days added by a staff time change (dev_time). Not stored: a restart goes back to the plain clock. */
   private shiftDays = 0;
   /** Weather a staff member forced on every outdoor region until `until` (dev_weather). */
-  private forced: { weather: Weather; intensity: number; since: number; until: number } | null = null;
+  private forced: { weather: Weather; intensity: number; since: number; until: number; previous: Weather | null } | null = null;
   /** Bumped on every staff change so skyKey changes and channels resend the sky at once. */
   private version = 0;
 
@@ -140,7 +140,9 @@ export class WorldClock {
 
   /** Staff tool: the same weather on every outdoor region for `ms`; null weather goes back to the rolls. */
   forceWeather(weather: Weather | null, ms = 10 * 60_000, t = this.now()): void {
-    this.forced = weather ? { weather, intensity: weather === 'clear' ? 0 : 1, since: t, until: t + ms } : null;
+    // A force replacing one still running fades from that one, not from the rolled weather.
+    const before = this.forced && t < this.forced.until ? this.forced.weather : null;
+    this.forced = weather ? { weather, intensity: weather === 'clear' ? 0 : 1, since: t, until: t + ms, previous: before } : null;
     this.version++;
   }
 
@@ -204,7 +206,7 @@ export class WorldClock {
     if (f) {
       since = f.since;
       until = f.until;
-      previous = this.rolledAt(region, f.since - 1).weather;
+      previous = f.previous ?? this.rolledAt(region, f.since - 1).weather;
     }
     return {
       day_fraction: Math.round(this.dayFraction(t) * 1e6) / 1e6,
