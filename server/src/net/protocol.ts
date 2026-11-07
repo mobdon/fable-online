@@ -48,6 +48,10 @@ export type ClientMessage =
    * amount (src/combat/healing.ts), or refuses. `key` makes a resend spend nothing twice.
    */
   | { t: 'heal'; share: number; key: string }
+  /** Client monsters: a monster died in the player's own game (world coordinates). */
+  | { t: 'kill'; def: string; x: number; y: number; z: number }
+  /** Client monsters: the hero lost this share of max health in the player's own game. */
+  | { t: 'hurt'; share: number }
   /**
    * The weapons equipped in the client's Fable (def names, '' for an empty slot) and the
    * clothing worn (absent when the mod could not read it). A claim: the server only uses
@@ -232,6 +236,12 @@ export function decode(raw: string): ClientMessage {
     }
     case 'shop_open':
       return { t: 'shop_open', shop: shopUid(m.shop) };
+    case 'kill':
+      if (typeof m.def !== 'string' || !/^[A-Z0-9_]{1,64}$/.test(m.def) || !isNum(m.x) || !isNum(m.y) || !isNum(m.z)) throw new ProtocolError('bad kill');
+      return { t: 'kill', def: m.def, x: m.x, y: m.y, z: m.z };
+    case 'hurt':
+      if (!isNum(m.share) || m.share <= 0 || m.share > 1) throw new ProtocolError('bad hurt');
+      return { t: 'hurt', share: m.share };
     case 'heal':
       if (!isNum(m.share) || m.share <= 0 || m.share > 2) throw new ProtocolError('bad heal');
       return { t: 'heal', share: m.share, key: clientKey(m.key) };

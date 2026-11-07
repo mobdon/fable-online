@@ -11,7 +11,8 @@ import type { Progress } from '../heroes/progress.js';
 import type { AiHooks, AttackKind, Creature, Hero } from './entities.js';
 import type { RegionDef } from './regions.js';
 import type { EntityState, PlayerInput, RegionSim, SimFactory, SimHealing, Vec3 } from './sim.js';
-import { HOSTILE_FACTIONS, SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
+import { DEFAULT_SPAWN_OPTIONS, HOSTILE_FACTIONS, SpawnManager, allocCreatureId, type SpawnOptions, type SpawnsFile } from './spawns.js';
+import { ClientKillLedger, DEFAULT_CLIENT_KILL_OPTIONS, type KillClaim } from './client-kills.js';
 import { creatureFromDef } from '../combat/loadout.js';
 import { AiDirector } from './ai/brain.js';
 import { Anim, type AiWorld, type Creature as AiCreature } from './ai/types.js';
@@ -67,6 +68,11 @@ export interface WorldServices {
   harm?: HarmPolicy;
   ai?: (ctx: AiContext) => ChannelAi;
   spawnOptions?: Partial<SpawnOptions>;
+  /**
+   * Monsters run in each player's own Fable: the server spawns none and pays the kills the
+   * mod reports, checked against the region's spawn table (client-kills.ts).
+   */
+  clientMonsters?: boolean;
   /** Crime and the town watch. Without it there are no guards and nothing is a crime. */
   law?: LawServices;
   /**
@@ -163,6 +169,8 @@ export class CombatSim implements RegionSim {
   /** Test monsters from the Developer page: who made each one, and when. */
   private devSpawned = new Map<number, { heroId: number; at: number }>();
   private guardAi?: AiDirector;
+  /** FO_CLIENT_MONSTERS: which reported kills pay. */
+  private readonly clientKills?: ClientKillLedger;
 
   constructor(
     readonly region: RegionDef,
@@ -207,7 +215,15 @@ export class CombatSim implements RegionSim {
       heroes: () => [...this.heroes.values()].map((h) => h.hero),
       guards: () => [...this.guards.values()].filter((g) => g.alive),
     });
-    this.spawns.start();
+    if (s.clientMonsters) {
+      const o = { ...DEFAULT_SPAWN_OPTIONS, ...s.spawnOptions };
+      this.clientKills = new ClientKillLedger(s.spawns.regions[region.name], s.data, {
+        ...DEFAULT_CLIENT_KILL_OPTIONS,
+        respawnMs: o.respawnMs,
+        generatorRespawnMs: o.generatorRespawnMs,
+        generatorDefaultActive: o.generatorDefaultActive,
+      });
+    } else this.spawns.start();
     if (s.law) this.law = this.startLaw(s.law);
   }
 
@@ -265,6 +281,34 @@ export class CombatSim implements RegionSim {
       );
     });
     return law;
+  }
+
+  /**
+   * A monster died in the hero's own Fable (client monsters). Pays its experience and gold
+   * once per spawn spot and respawn time; anything past that pays nothing.
+   */
+  clientKill(heroId: number, def: string, at: Vec3): KillClaim | { ok: false; reason: 'off' | 'no_hero' } {
+    if (!this.clientKills) return { ok: false, reason: 'off' };
+    const slot = this.heroes.get(heroId);
+    if (!slot) return { ok: false, reason: 'no_hero' };
+    const claim = this.clientKills.claim(def, at, slot.hero.pos, Date.now());
+    if (!claim.ok) return claim;
+    const c = creatureFromDef(allocCreatureId(), def, at, this.s.data);
+    this.s.progress?.kill(heroId, c.experience);
+    this.s.experience?.grantKill(heroId, c.experience, { strength: 1, skill: 0, will: 0 }, BALANCE.xpGeneralShare, def);
+    const loot = this.s.loot?.award(heroId, c) ?? { gold: 0, items: [] };
+    this.s.events.emit({ type: 'kill', heroId, creature: def, channelId: this.channelId, experience: c.experience, gold: loot.gold, items: loot.items.length });
+    return claim;
+  }
+
+  /** The hero took damage from a monster in their own Fable (client monsters): `share` of max health. */
+  clientHurt(heroId: number, share: number): number {
+    if (!this.clientKills) return 0;
+    const slot = this.heroes.get(heroId);
+    if (!slot || !(share > 0)) return 0;
+    slot.calmMs = 0;
+    this.lastHit.set(heroId, Date.now());
+    return this.combat.outsideDamage(heroId, Math.min(1, share) * slot.hero.maxHealth);
   }
 
   devDespawn(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string } {

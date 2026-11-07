@@ -48,6 +48,8 @@ bool read_gold(uintptr_t thing, int32_t& gold, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();
+/** The hero found by the last local_hero() call, without scanning (0 if none yet). */
+uintptr_t cached_hero();
 /** Forgets the cached hero: call on a region change. */
 void forget_hero();
 /** Marks a stand-in (another player shown with the hero's def) so the hero scan skips it. */

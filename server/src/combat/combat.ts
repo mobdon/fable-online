@@ -329,6 +329,19 @@ export class CombatSystem implements CombatPort {
     return dmg;
   }
 
+  /**
+   * Damage dealt outside the sim (a monster in the player's own game, which already applied
+   * its own armour and blocks): no attacker, no armour. Returns the damage taken.
+   */
+  outsideDamage(targetId: number, amount: number): number {
+    const t = this.all.get(targetId);
+    if (!t || !t.alive || !(amount > 0)) return 0;
+    const dmg = Math.max(1, Math.round(amount));
+    t.health = Math.max(0, t.health - dmg);
+    if (t.health <= 0) this.kill(t, null);
+    return dmg;
+  }
+
   private kill(t: Combatant, killer: Combatant | null): void {
     t.alive = false;
     t.blocking = false;

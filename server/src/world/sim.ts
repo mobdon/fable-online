@@ -83,6 +83,10 @@ export interface RegionSim {
    * 50 m; `near`: every one within 30 m). Returns the defs removed, or why nothing was.
    */
   devDespawn?(heroId: number, what: 'nearest' | 'near'): { removed: string[] } | { error: string };
+  /** Client monsters: a kill the mod reports (region frame). Sims without them leave this out. */
+  clientKill?(heroId: number, def: string, at: Vec3): { ok: boolean; reason?: string; slot?: string };
+  /** Client monsters: damage the hero took in their own game, as a share of max health. */
+  clientHurt?(heroId: number, share: number): number;
   devSpawn?(heroId: number, defName: string, distance: number, side?: number): { id: number } | { error: string };
   addHero(heroId: number, at: Vec3): void;
   /**

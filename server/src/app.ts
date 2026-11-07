@@ -182,6 +182,7 @@ export function createApp(
             staff: staffHero(heroId),
             pvp: cfg.pvpEverywhere || !!heroes.get(heroId)?.pvp_unlocked,
           }),
+          clientMonsters: cfg.clientMonsters,
           spawnOptions: {
             respawnMs: cfg.monsterRespawnSec * 1000,
             generatorRespawnMs: cfg.monsterRespawnSec * 1000,

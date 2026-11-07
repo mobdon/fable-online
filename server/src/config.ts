@@ -105,6 +105,8 @@ export interface ServerConfig {
   questsPath: string;
   /** Run combat, spawns and loot in each channel (false = movement-only stand-in). */
   combat: boolean;
+  /** Monsters run in each player's own Fable; the server pays their kills (FO_CLIENT_MONSTERS, default on). */
+  clientMonsters: boolean;
   /**
    * Every hero may fight every other hero, without the Guild mission that unlocks PvP.
    * For test realms only (FO_PVP_ALL=1); off, PvP follows heroes.pvp_unlocked.
@@ -235,6 +237,7 @@ export function loadConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     spawnsPath: str('FO_SPAWNS', '../shared/defs/spawns.json'),
     questsPath: str('FO_QUESTS', '../shared/defs/quests.json'),
     combat: str('FO_COMBAT', '1') !== '0',
+    clientMonsters: str('FO_CLIENT_MONSTERS', '1') !== '0',
     pvpEverywhere: flag('FO_PVP_ALL', false),
     trustClientGear: flag('FO_TRUST_CLIENT_GEAR', false),
     gatesOpen: flag('FO_GATES_OPEN', false),

@@ -36,6 +36,10 @@ size_t count_generators();
 bool install_level_hook();
 /** The creature defs the server spawns itself (from its welcome). Empty: drop nothing. */
 void set_server_defs(const std::vector<std::string>& defs);
+/** The def a level-placed creature was loaded with (empty when it wasn't seen loading). */
+std::string level_def_of(uintptr_t thing);
+/** The thing's def name from the engine's own table (CThing::GetDefName), "" if unreadable. */
+std::string def_name(uintptr_t thing);
 /** Level-placed creatures removed so far this session, for the log. */
 size_t dropped_count();
 
