@@ -239,7 +239,8 @@ export class Experience {
 
       const changed = out.bought.length > 0 || sumOf(out.gained) > 0;
       if (changed) this.save(heroId, pools, cur.total + sumOf(out.gained), stats, abilities);
-      out.state = changed ? this.remember(heroId, this.fromRow(this.row(heroId))) : cur;
+      // Unchanged: the last state the mod was sent, so it carries a seq the mod accepts.
+      out.state = changed ? this.remember(heroId, this.fromRow(this.row(heroId))) : this.state(heroId);
       return out;
     });
     if (res.bought.length || res.imported) this.onLevels?.(heroId);

@@ -48,6 +48,8 @@ bool read_gold(uintptr_t thing, int32_t& gold, std::string* why = nullptr);
 
 /** The local hero's CThingPlayerCreature, found by scanning for its vtable. Cached. */
 uintptr_t local_hero();
+/** The hero found by the last local_hero() call, without scanning (0 if none yet). */
+uintptr_t cached_hero();
 /** Forgets the cached hero: call on a region change. */
 void forget_hero();
 /** Marks a stand-in (another player shown with the hero's def) so the hero scan skips it. */
@@ -87,6 +89,10 @@ std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);
 constexpr uint32_t kHeroVtable = 0x012457FC;      // CThingPlayerCreature
 constexpr uint32_t kPhysicsVtable = 0x0126616C;   // CTCPhysicsControlled
 constexpr uint32_t kPhysicsStandardVtable = 0x01265F84;  // CTCPhysicsStandard
+/** Monsters' physics: derives from CTCPhysicsStandard, so the same position fields, plus
+ *  its own copy of the position at +0x89 (refreshed by its update, 0x007268D0). */
+constexpr uint32_t kPhysicsNavigatorVtable = 0x01266314;  // CTCPhysicsNavigator
+constexpr uint32_t kNavigatorPosCopy = 0x089;
 constexpr uint32_t kCreatureVtable = 0x0125AC0C;  // CThingCreatureBase
 
 }  // namespace fo::game

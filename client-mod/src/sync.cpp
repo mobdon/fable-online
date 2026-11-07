@@ -41,6 +41,7 @@
 #include "world/sky.h"
 #include "world/snapshot.h"
 #include "world/xp_sync.h"
+#include "game/kills.h"
 
 namespace fo::sync {
 namespace {
@@ -155,6 +156,11 @@ struct State {
     /** Hero experience kept in step with the server (only when its welcome offers it). */
     world::XpSync xp;
     bool serverXp = false;
+    /** Client monsters (welcome): this game runs its own monsters and reports kills and hurts. */
+    bool clientMonsters = false;
+    /** After a reported hurt, health is not raised back until the server's answer has had time. */
+    uint32_t hurtHoldUntilMs = 0;
+    unsigned killResults = 0;
     bool xpOn = true;
     uint32_t lastXpMs = 0;
     uint32_t xpWrites = 0;
@@ -186,7 +192,7 @@ void on_connected() {
     overlay::set_fade(0, "");
     g_state->xp.reset();
     g_state->serverXp = false;
-    if (g_state->suppressSpawns) game::spawns::suppress();
+    if (g_state->suppressSpawns && !g_state->clientMonsters) game::spawns::suppress();
 }
 
 void restore_clock();
@@ -209,6 +215,8 @@ void on_disconnected(const std::string& why) {
     overlay::clear_party();
     // With no server driving them, the local generators should run the region again.
     game::spawns::restore();
+    game::kills::set_enabled(false);
+    g_state->clientMonsters = false;
     overlay::on_world_disconnected();
 }
 
@@ -487,7 +495,15 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
         // Kept for the next connection: a dropped link comes back without a new ticket.
         if (!w.resume.empty()) net::world_set_resume(w.resume);
         // The monsters the server runs: the level files' own copies of those are left out.
-        if (s.suppressSpawns) game::spawns::set_server_defs(w.spawnDefs);
+        s.clientMonsters = json.find("\"client_monsters\":true") != std::string::npos;
+        game::kills::set_enabled(s.clientMonsters);
+        if (s.clientMonsters) {
+            // Fable runs the monsters itself: its generators and the level's own monsters stay.
+            game::spawns::set_server_defs({});
+            game::spawns::restore();
+        } else if (s.suppressSpawns) {
+            game::spawns::set_server_defs(w.spawnDefs);
+        }
         // Servers that keep hero experience say so; older ones would drop the connection on xp_sync.
         s.serverXp = json.find("\"xp\":true") != std::string::npos;
         fo::log("sync: joined as %s (entity %u), server ticks %u a second, position reports %s%s", w.name.c_str(),
@@ -599,6 +615,10 @@ void handle_frame(const std::string& json, uint32_t nowMs) {
             return;
         }
         if (json.rfind("{\"t\":\"xp_state\"", 0) == 0) return on_xp_state(json);
+        if (json.rfind("{\"t\":\"kill_result\"", 0) == 0) {
+            if (s.killResults++ < 60) fo::log("sync: server on the kill: %s", json.c_str());
+            return;
+        }
         if (json.find("\"t\":\"heal_result\"") != std::string::npos)
             fo::log("sync: server answered a heal: %s", json.c_str());
         if (json.find("\"t\":\"dev_result\"") != std::string::npos) {
@@ -803,6 +823,25 @@ void report_gear(uint32_t nowMs) {
  * Only frames with max_health (regions running combat on the server) are applied, so a
  * region without server combat leaves Fable's own health alone.
  */
+/** Client monsters: this game's monster deaths and hits on the hero, to the server. */
+void report_kills(uint32_t nowMs) {
+    State& s = *g_state;
+    if (!s.clientMonsters || !net::world_connected()) return;
+    for (const game::kills::Kill& k : game::kills::drain_kills()) {
+        char frame[160];
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"kill\",\"def\":\"%s\",\"x\":%.2f,\"y\":%.2f,\"z\":%.2f}", k.def.c_str(),
+                      k.x, k.y, k.z);
+        net::world_send(frame);
+    }
+    float hurt = game::kills::drain_hurt();
+    if (hurt > 0.0005f) {
+        char frame[64];
+        std::snprintf(frame, sizeof(frame), "{\"t\":\"hurt\",\"share\":%.4f}", hurt > 1.0f ? 1.0f : hurt);
+        net::world_send(frame);
+        s.hurtHoldUntilMs = nowMs + 600;
+    }
+}
+
 void apply_health(uint32_t nowMs) {
     State& s = *g_state;
     if (!net::world_connected() || s.objects.loading()) return s.heals.reset();
@@ -826,6 +865,8 @@ void apply_health(uint32_t nowMs) {
     if (want < 0) return;
     // Waiting on the server's answer to a heal: raise if it says so, never lower yet.
     if (want < hp && s.heals.holding(nowMs)) return;
+    // A local monster's hit is on its way to the server: don't put the health back up meanwhile.
+    if (want > hp && static_cast<int32_t>(s.hurtHoldUntilMs - nowMs) > 0) return;
     if (!game::write_health(hero, want)) return;
     s.heals.wrote(want);
     ++s.healthWrites;
@@ -1094,6 +1135,7 @@ void tick() {
     report_position(now);
     report_combat(now);
     sync_objects(now);
+    report_kills(now);
     apply_health(now);
     show_death(now);
     report_renown(now);
@@ -1165,6 +1207,8 @@ void start() {
     crash_exit::install();
     // Before Fable loads its first level, so the level's own monsters can be left out.
     if (s.suppressSpawns) game::spawns::install_level_hook();
+    // Client monsters: deaths and hits on the hero in this game go to the server.
+    if (env_flag("FABLE_ONLINE_CLIENT_MONSTERS", true)) game::kills::install();
     game::hook::install();
     // Stand-in heroes must not take over the hero's menu pages (map, inventory...).
     game::menu_pages::install();

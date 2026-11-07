@@ -152,7 +152,7 @@ uintptr_t physics_of(uintptr_t thing) {
     // Only a physics component has a position at +0x0C. Right after a creature is made, or
     // for a def built another way, +0x60 can hold something else whose +0x0C is a pointer:
     // writing coordinates there corrupted the engine and crashed its renderer.
-    if (pvt != kPhysicsVtable && pvt != kPhysicsStandardVtable) return 0;
+    if (pvt != kPhysicsVtable && pvt != kPhysicsStandardVtable && pvt != kPhysicsNavigatorVtable) return 0;
     return phys;
 }
 
@@ -195,6 +195,8 @@ uintptr_t local_hero() {
 
 void forget_hero() { g_hero = 0; }
 
+uintptr_t cached_hero() { return g_hero; }
+
 bool not_local_hero(uintptr_t thing) { return is_stand_in(thing) || being_removed(thing); }
 
 void mark_stand_in(uintptr_t thing, bool on) {
@@ -234,6 +236,9 @@ bool write_pos(uintptr_t thing, const Pos& p, bool have_yaw, float yaw) {
     // Both the live position and the one from the last physics step, or the engine's own
     // step would drag the thing back towards where it thought it was.
     bool ok = write(phys + kPosOffset, xyz, sizeof(xyz)) && write(phys + kPrevPosOffset, xyz, sizeof(xyz));
+    // A monster's navigator keeps its own copy of where it was: keep it with the move.
+    uint32_t pvt = 0;
+    if (ok && read(phys, &pvt, 4) && pvt == kPhysicsNavigatorVtable) write(phys + kNavigatorPosCopy, xyz, sizeof(xyz));
     if (ok && have_yaw && std::isfinite(yaw)) {
         const float fwd[2] = {-std::sin(yaw), std::cos(yaw)};
         write(phys + kForwardOffset, fwd, sizeof(fwd));

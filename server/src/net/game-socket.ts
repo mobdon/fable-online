@@ -30,6 +30,8 @@ export class GameSocket {
   private questClaims = new Bucket(0.2, 3);
   private renownReports = new Bucket(0.5, 3);
   private interacts = new Bucket(4, 8);
+  private kills = new Bucket(2, 10);
+  private hurts = new Bucket(20, 40);
   private lawReqs = new Bucket(5, 10);
   private shopActions = new Bucket(4, 10);
   private heals = new Bucket(2, 4);
@@ -138,6 +140,19 @@ export class GameSocket {
         return this.shop(this.heroId, msg);
       case 'party':
         return this.party(this.heroId, msg);
+      case 'kill': {
+        if (!this.kills.take()) return this.dropped('kill flood');
+        const ch = this.app.director.channelOf(this.heroId);
+        if (!ch?.sim.clientKill) return;
+        const r = ch.sim.clientKill(this.heroId, msg.def, ch.toLocal({ x: msg.x, y: msg.y, z: msg.z }));
+        console.log(`kill: hero ${this.heroId} ${msg.def} ${r.ok ? `paid (${r.slot})` : `not paid (${r.reason})`}`);
+        return this.send({ t: 'kill_result', def: msg.def, paid: r.ok, ...(r.ok ? {} : { reason: r.reason }) });
+      }
+      case 'hurt': {
+        if (!this.hurts.take()) return;
+        this.app.director.channelOf(this.heroId)?.sim.clientHurt?.(this.heroId, msg.share);
+        return;
+      }
       case 'heal':
         if (!this.heals.take()) return this.send({ t: 'heal_result', ok: false, key: msg.key, reason: 'rate' });
         return this.heal(this.heroId, msg.share, msg.key);
@@ -571,9 +586,11 @@ export class GameSocket {
         // Whether the server uses the mod's position reports ('off', 'checked', 'trusted').
         client_move: app.cfg.clientMovement,
         // Monster defs the server runs: the mod drops the level files' own copies of them.
-        ...(app.spawnDefs.length ? { spawn_defs: app.spawnDefs } : {}),
+        ...(app.spawnDefs.length && !app.cfg.clientMonsters ? { spawn_defs: app.spawnDefs } : {}),
         // The server keeps hero experience: the mod may send xp_sync (older servers refuse it).
         xp: true,
+        // Monsters run in the player's own Fable; the mod reports kills and hurts.
+        ...(app.cfg.clientMonsters ? { client_monsters: true } : {}),
       });
       if (resumed) app.events.emit({ type: 'player_resumed', heroId: hero.id });
       app.director.join(hero, link, resumed);

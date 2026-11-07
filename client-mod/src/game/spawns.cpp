@@ -1,3 +1,5 @@
+#include <mutex>
+#include <unordered_map>
 #include "spawns.h"
 
 #include <windows.h>
@@ -116,12 +118,34 @@ bool retarget(uintptr_t site, uintptr_t to) {
     return true;
 }
 
+/** The def each level-placed creature was loaded with, by address (client monsters' kill reports). */
+std::mutex g_levelDefsMu;
+std::unordered_map<uintptr_t, std::string> g_levelDefs;
+unsigned g_defChecks = 0;
+
+void remember_level_def(uintptr_t thing, const char* def) {
+    uint32_t vt = 0;
+    if (!read_mem(thing, &vt, 4) || vt != kAICreatureVtable) return;
+    {
+        std::lock_guard<std::mutex> lock(g_levelDefsMu);
+        if (g_levelDefs.size() > 4096) g_levelDefs.clear();
+        g_levelDefs[thing] = def;
+    }
+    // The engine's own def lookup should name the same def: checked on the first few.
+    if (g_defChecks < 6) {
+        ++g_defChecks;
+        std::string byIndex = def_name(thing);
+        fo::log("spawns: level creature %s, engine def lookup says %s", def, byIndex.empty() ? "(nothing)" : byIndex.c_str());
+    }
+}
+
 uintptr_t __fastcall load_thing_hook(uintptr_t manager, uintptr_t, uintptr_t parser, int mode) {
     ++g_loadDepth;
     g_haveDef = false;
     g_def[0] = '\0';
     uintptr_t thing = reinterpret_cast<LoadThingFn>(kLoadThing)(manager, 0, parser, mode);
     --g_loadDepth;
+    if (thing && g_haveDef) remember_level_def(thing, g_def);
     if (!thing || !g_on || !g_filter.active() || !g_haveDef) return thing;
 
     uint32_t vt = 0;
@@ -232,6 +256,26 @@ size_t dropped_count() { return g_dropped; }
 size_t count_generators() {
     // The generator objects carry the vtable we patched, so counting them is a plain scan.
     return scan_vtable(static_cast<uint32_t>(kGeneratorVtable), 4096).size();
+}
+
+std::string level_def_of(uintptr_t thing) {
+    std::lock_guard<std::mutex> lock(g_levelDefsMu);
+    auto it = g_levelDefs.find(thing);
+    return it == g_levelDefs.end() ? std::string() : it->second;
+}
+
+std::string def_name(uintptr_t thing) {
+    // CThing::GetDefName (0x004C7CC0): [[world]+0x20]+0xA4 is a table indexed by the thing's
+    // def index (word at +0x8C); the entry's +4 is the def's name (a CCharString).
+    uint32_t world = 0, mgr = 0, table = 0, entry = 0;
+    uint16_t idx = 0;
+    if (!read_mem(0x013B8A1C, &world, 4) || !world || !read_mem(world + 0x20, &mgr, 4) || !mgr ||
+        !read_mem(mgr + 0xA4, &table, 4) || !table || !read_mem(thing + 0x8C, &idx, 2) ||
+        !read_mem(table + idx * 4u, &entry, 4) || !entry)
+        return {};
+    char name[72];
+    if (!read_char_string(entry + 4, name, sizeof(name)) || std::strncmp(name, "CREATURE_", 9) != 0) return {};
+    return name;
 }
 
 }  // namespace fo::game::spawns
