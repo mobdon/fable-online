@@ -10,8 +10,10 @@
 
 namespace fo::display::camera_latch {
 namespace {
-// CEngine's vtable slot 4: SetCamera(desc), 0x00B23B50. desc: position +0x00, forward +0x0C,
-// up +0x18 (floats, world space, Z up). The engine builds the frame's view from it.
+// CEngine's vtable slot 4: SetCamera(desc), 0x00B23B50. desc: position +0x00, up +0x0C,
+// forward +0x18 (floats, world space, Z up). The engine builds the frame's view from it.
+// (Logged in play: +0x0C = (0.00, 0.43, 0.90), +0x18 = (0.00, 0.90, -0.43), a view tilted down.
+// Reading +0x0C as the forward made the level "forward" flip with the pitch.)
 constexpr uint32_t kSetCameraSlot = 0x012A0F4C, kSetCamera = 0x00B23B50;
 using SetCamera_t = void(__thiscall*)(void*, float*);
 SetCamera_t o_set_camera = nullptr;
@@ -102,10 +104,10 @@ double lead(double now) {
 // (hides the turn steps) and that point's height over kHeightTau (small bumps don't reach the
 // view, hills and stairs still do). Across the ground the point follows the hero exactly, so
 // the hero never drifts sideways in the view while running or turning.
-constexpr double kDirTau = 0.05, kHeightTau = 0.3;
+constexpr double kDirTau = 0.05, kHeightTau = 0.4;
 struct Smooth {
     bool have = false;
-    float target[3] = {}, dir[6] = {};   // look-at point; forward and up
+    float target[3] = {}, dir[6] = {};   // look-at point; up (desc +0x0C) and forward (desc +0x18)
     double dist = 0;
     double at = 0;
     unsigned frames = 0, snaps = 0;
@@ -148,7 +150,7 @@ double hero_distance(const float* desc) {
         have = fo::game::hero_pos_now(hero);
     }
     if (!have) return -1;
-    const double d = (hero[0] - desc[0]) * desc[3] + (hero[1] - desc[1]) * desc[4] + (hero[2] + 1.5 - desc[2]) * desc[5];
+    const double d = (hero[0] - desc[0]) * desc[6] + (hero[1] - desc[1]) * desc[7] + (hero[2] + 1.5 - desc[2]) * desc[8];
     return d > 0.5 && d < 40.0 ? d : -1;
 }
 
@@ -157,8 +159,8 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
     if (sm.have) {
         const double dt = now - sm.at;
         const double dx = desc[0] - sm.shown_pos[0], dy = desc[1] - sm.shown_pos[1], dz = desc[2] - sm.shown_pos[2];
-        const double dot = static_cast<double>(desc[3]) * sm.dir[0] + static_cast<double>(desc[4]) * sm.dir[1] +
-                           static_cast<double>(desc[5]) * sm.dir[2];
+        const double dot = static_cast<double>(desc[6]) * sm.dir[3] + static_cast<double>(desc[7]) * sm.dir[4] +
+                           static_cast<double>(desc[8]) * sm.dir[5];
         if (dt > 0.3 || dt < 0 || dx * dx + dy * dy + dz * dz > 6.0 * 6.0 || dot < 0.5) {
             sm.have = false;   // a cut, a teleport or a pause: jump straight there
             ++sm.snaps;
@@ -173,7 +175,7 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
     }
     if (!sm.have) {
         sm.dist = hd;
-        for (int i = 0; i < 3; ++i) sm.target[i] = static_cast<float>(desc[i] + desc[3 + i] * sm.dist);
+        for (int i = 0; i < 3; ++i) sm.target[i] = static_cast<float>(desc[i] + desc[6 + i] * sm.dist);
         std::memcpy(sm.dir, desc + 3, sizeof sm.dir);
         std::memcpy(sm.shown_pos, desc, sizeof sm.shown_pos);
         sm.at = now;
@@ -187,7 +189,7 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
                  kh = 1.0 - std::exp(-dt / kHeightTau);
     sm.dist = hd;   // the hero's own distance this frame: the point the camera turns round
     // Where Fable's camera looks this frame, at the eased distance.
-    const double tx = desc[0] + desc[3] * sm.dist, ty = desc[1] + desc[4] * sm.dist, tz = desc[2] + desc[5] * sm.dist;
+    const double tx = desc[0] + desc[6] * sm.dist, ty = desc[1] + desc[7] * sm.dist, tz = desc[2] + desc[8] * sm.dist;
     const float old_z = sm.target[2];
     ease(&sm.target[0], tx, kf);
     ease(&sm.target[1], ty, kf);
@@ -198,7 +200,7 @@ bool smooth(Smooth& sm, const float* desc, double now, float* out) {
     sm.raw_dz += std::fabs(tz - sm.last_raw_z);
     sm.shown_dz += std::fabs(sm.target[2] - old_z);
     sm.last_raw_z = static_cast<float>(tz);
-    for (int i = 0; i < 3; ++i) out[i] = static_cast<float>(sm.target[i] - sm.dir[i] * sm.dist);
+    for (int i = 0; i < 3; ++i) out[i] = static_cast<float>(sm.target[i] - sm.dir[3 + i] * sm.dist);
     std::memcpy(out + 3, sm.dir, sizeof sm.dir);
     std::memcpy(sm.shown_pos, out, sizeof sm.shown_pos);
     ++sm.frames;
@@ -215,7 +217,7 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
     const uint32_t site = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(__builtin_return_address(0)));
     if (!desc || !readable(desc, 0x24)) { o_set_camera(self, desc); return; }
     const double now = now_s();
-    const double h = heading(desc + 3);
+    const double h = heading(desc + 6);
     if (g.have_heading) {
         const double d = wrap_pi(h - g.last_heading);
         if (!g.updated_since_frame) {
@@ -264,7 +266,7 @@ void __fastcall hk_set_camera(void* self, void*, float* desc) {
     if (shoulder != 0.0f) {
         // Over the shoulder: move the camera sideways, level, keeping its direction, so the
         // hero sits off the centre of the view. Positive = the hero's right, negative = left.
-        const double fx = desc[3], fy = desc[4], len = std::sqrt(fx * fx + fy * fy);
+        const double fx = desc[6], fy = desc[7], len = std::sqrt(fx * fx + fy * fy);
         if (len > 1e-3) {
             // Right of the view, level: (fy, -fx) for a level forward (fx, fy). Fable's world is
             // right-handed with Z up. Checked against a frame capture: with the view looking
