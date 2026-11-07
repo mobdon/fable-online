@@ -5,6 +5,7 @@
 #include "../log.h"
 #include "hud_scale.h"
 #include "mouse_look.h"
+#include "menu_cursor.h"
 
 namespace fo::display {
 namespace {
@@ -165,6 +166,7 @@ void after_present(IDirect3DDevice9*) {
     }
     g_last = now;
     mouse_look::poll_mouse();
+    menu_cursor::on_present();
     if (++g_frames == 600) {
         // Once, a few seconds in: the render loop's thread and callers, to compare with the camera's.
         const uint32_t* sp = reinterpret_cast<const uint32_t*>(__builtin_frame_address(0));

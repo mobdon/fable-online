@@ -1,15 +1,19 @@
 #pragma once
-// Fable's menu cursor (NUISystem::CMouseCursor) only moves when the game reads the mouse, 15 times
-// a second, so at high frame rates the drawn cursor trails the hand in steps. The game reads the
-// mouse as GetCursorPos minus where it last put the cursor, then warps it back. Between reads,
-// the movement Fable will see next is already known, so the cursor is drawn there now.
+// Fable's menu cursor moves only when the game reads the mouse (DirectInput, about 28 times a
+// second in menus; the Windows cursor is held at the window centre), so at high frame rates it
+// trails the hand. Its picture is drawn every frame as one textured quad, the last sprite of
+// the frame (CEnginePrimitiveManager2DSprites, DrawIndexedPrimitiveUP returning to 0x00A0AF2C).
 //
-// CMouseCursor's vtable (0x0124C22C) slot 23 (0x0055C600) gives the cursor's position scaled for
-// the screen. The mod wraps that slot: it adds the movement since Fable's last read, times a
-// factor it learns by comparing how far Fable moves the cursor with the movement each read saw.
-// Until that factor fits well, nothing changes.
+// The mod learns which texture that quad uses (the same texture is the frame's last single-quad
+// sprite for a second, outside play), learns how far the quad moves per unit of mouse motion
+// Fable takes in, and then draws the quad ahead by the motion polled since Fable's last read.
+// Until both are learned, nothing changes.
+#include <d3d9.h>
+
 namespace fo::display::menu_cursor {
-void install();
-void before_read();   // around CMouseDX's read (mouse_look's hook)
-void after_read();
+// From the sprite draw hook. Returns moved vertices, or nullptr to draw them as they are.
+const void* sprite(IDirect3DDevice9* d, const void* data, UINT first, UINT count, UINT prims, UINT stride);
+void on_motion(long dx, long dy);   // mouse motion polled this frame
+void on_present();                  // once a frame
+void before_read();                 // around CMouseDX's read (mouse_look's hook)
 }  // namespace fo::display::menu_cursor

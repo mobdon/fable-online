@@ -1,4 +1,5 @@
 #include "hud_scale.h"
+#include "menu_cursor.h"
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -264,6 +265,8 @@ HRESULT WINAPI hk_DrawIndexedPrimitiveUP(IDirect3DDevice9* d, D3DPRIMITIVETYPE t
                                          const void* idx, D3DFORMAT fmt, const void* data, UINT stride) {
     void* ret = __builtin_return_address(0);
     if (reinterpret_cast<uintptr_t>(ret) == kSpriteDraw) {
+        if (const void* v = menu_cursor::sprite(d, data, min_index, verts, prims, stride))
+            return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
         if (const void* v = bottom_sprites(d, data, min_index, verts, stride))
             return o_DrawIndexedPrimitiveUP(d, t, min_index, verts, prims, idx, fmt, v, stride);
     } else if (from_fable(ret)) {
