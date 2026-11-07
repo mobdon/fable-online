@@ -253,13 +253,38 @@ void draw_party_list() {
 }
 
 bool g_logged_frame_camera = false;
+unsigned g_tag_frame_cam = 0, g_tag_view_cam = 0, g_frame_rejects = 0;  // frames placed with each camera
+const char* g_tag_gate = "not drawn yet";
+uint32_t g_tag_gate_ms = 0;
+void note_tag_gate(const char* why) {
+    if (why == g_tag_gate) return;
+    // Loads flip it briefly; log a change only once it has held for half a second.
+    static const char* pending = nullptr;
+    static uint32_t since = 0;
+    const uint32_t now = GetTickCount();
+    if (why != pending) { pending = why; since = now; return; }
+    if (now - since < 500) return;
+    fo::log("tags: %s (was: %s for %u s)", why, g_tag_gate, (now - g_tag_gate_ms) / 1000);
+    g_tag_gate = why;
+    g_tag_gate_ms = now;
+}
 constexpr uint32_t kTagGold = 0xFFFFD84A;      // own tag: Fable's pewter bar tinted gold
 constexpr uint32_t kTagStaffRed = 0xFFD8281E;  // DEV / GM badge
 
 void draw_tags(const Config& cfg) {
-    if (!cfg.tags_enabled || !g_chat.tags_enabled() || !g_have_view || !g_have_proj) return;
-    // Not over loading screens, teleports and their fades, nor while the hero is lost.
-    if (!sync::world_shown() || !g_hero.valid) return;
+    // Why tags are (not) drawn, logged when it changes: tags that silently never show have
+    // cost several test builds.
+    const char* gate = !cfg.tags_enabled ? "off in fable_online.ini / Mod settings"
+                       : !g_chat.tags_enabled() ? "off in Realm chat (/tags)"
+                       : !g_have_view ? "no camera view matrix seen"
+                       : !g_have_proj ? "no perspective projection seen"
+                       : !sync::world_shown() ? sync::world_hidden_reason()
+                       // Paused, Fable's view matrix is not the play camera: tags jumped to mid-screen.
+                       : modsettings::fable_menu_open() ? "hidden: a Fable menu is open"
+                       : !g_hero.valid ? "no hero position"
+                       : nullptr;
+    note_tag_gate(gate ? gate : "drawing");
+    if (gate) return;
     float vp[16];
     mul(g_view, g_proj, vp);
     // Place tags with the camera the engine drew this frame with (after camera smoothing and
@@ -268,16 +293,32 @@ void draw_tags(const Config& cfg) {
     // off the hero.
     float cpos[3], cfwd[3], cup[3], cview[16];
     const float* gv = &g_view._11;
-    if (display::camera_latch::frame_camera(cpos, cfwd, cup, 0.25) &&
-        ui::view_from_camera(cpos, cfwd, cup, gv, cview)) {
+    float dot = 0, moved = 0;
+    const bool have_frame = display::camera_latch::frame_camera(cpos, cfwd, cup, 0.25) &&
+                            ui::view_from_camera(cpos, cfwd, cup, gv, cview);
+    // The frame camera is only trusted while it shows nearly the same camera as the game's view
+    // matrix (smoothing and the shoulder offset move it a little, not a lot). A frame camera
+    // that disagrees put the tags off screen in play; they then showed only during loads,
+    // when the frame camera goes stale and the game's view is used.
+    if (have_frame && ui::views_agree(cview, gv, 0.8f, 3.0f, dot, moved)) {
         D3DMATRIX v;
         std::memcpy(&v, cview, sizeof cview);
         mul(v, g_proj, vp);
+        ++g_tag_frame_cam;
         if (!g_logged_frame_camera) {
             g_logged_frame_camera = true;
-            fo::log("tags: placed with the engine's frame camera; SetTransform view row 4 %.1f %.1f %.1f, frame camera %.1f %.1f %.1f",
-                    gv[12], gv[13], gv[14], cview[12], cview[13], cview[14]);
+            fo::log("tags: placed with the engine's frame camera (axes within dot %.3f, %.2f from the game's view)", dot, moved);
         }
+    } else if (have_frame) {
+        ++g_tag_view_cam;
+        if (g_frame_rejects++ < 3)
+            fo::log("tags: frame camera disagrees with the game's view (worst axis dot %.3f, %.2f apart), using the game's view; "
+                    "frame camera pos %.1f %.1f %.1f fwd %.2f %.2f %.2f up %.2f %.2f %.2f; game view %.2f %.2f %.2f / %.2f %.2f %.2f / "
+                    "%.2f %.2f %.2f / %.1f %.1f %.1f",
+                    dot, moved, cpos[0], cpos[1], cpos[2], cfwd[0], cfwd[1], cfwd[2], cup[0], cup[1], cup[2], gv[0], gv[1], gv[2],
+                    gv[4], gv[5], gv[6], gv[8], gv[9], gv[10], gv[12], gv[13], gv[14]);
+    } else {
+        ++g_tag_view_cam;
     }
     ui::TagSettings s;
     s.head_height = cfg.tag_height;
@@ -1133,8 +1174,9 @@ void log_stats() {
     // Racy reads of render-thread counters; fine for a log line.
     size_t tags;
     { std::lock_guard<std::mutex> lock(g_mu); tags = g_tags.size(); }
-    fo::log("overlay: %u frames, camera view sets %u, perspective sets %u, %u name tags in range%s",
-            g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags),
+    fo::log("overlay: %u frames, camera view sets %u, perspective sets %u, %u name tags in range, tags %s "
+            "(placed by frame camera %u, game view %u)%s",
+            g_frames, g_view_sets, g_proj_sets, static_cast<unsigned>(tags), g_tag_gate, g_tag_frame_cam, g_tag_view_cam,
             (g_frames && !g_view_sets) ? "  <- no camera matrix seen: name tags can't be placed yet" : "");
 }
 bool input_blocked_now() { return input_blocked(); }

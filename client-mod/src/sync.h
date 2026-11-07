@@ -34,6 +34,8 @@ int own_renown();
  * are drawn only then. Any thread.
  */
 bool world_shown();
+/** Why world_shown() is false (a fixed string for the log), or nullptr when it is true. */
+const char* world_hidden_reason();
 /** Staff accounts only: moves the realm's clock forward to `hour` (0..24) for every player. */
 void dev_time(float hour);
 /** Staff accounts only: `weather` ("rain", "storm", ...) on every outdoor region for 30 minutes; "auto" ends it. */

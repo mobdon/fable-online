@@ -49,6 +49,25 @@ bool view_from_camera(const float pos[3], const float fwd[3], const float up[3],
     return true;
 }
 
+bool views_agree(const float a[16], const float b[16], float min_dot, float max_move, float& worst_dot, float& moved) {
+    // Column c of the 3x3 is the camera's axis c in world space; row 4 is -dot(axis, position).
+    auto eye = [](const float m[16], float e[3]) {
+        for (int k = 0; k < 3; ++k) e[k] = -(m[12] * m[k * 4] + m[13] * m[k * 4 + 1] + m[14] * m[k * 4 + 2]);
+    };
+    worst_dot = 1.0f;
+    for (int c = 0; c < 3; ++c) {
+        const float d = a[c] * b[c] + a[4 + c] * b[4 + c] + a[8 + c] * b[8 + c];
+        const float la = std::sqrt(a[c] * a[c] + a[4 + c] * a[4 + c] + a[8 + c] * a[8 + c]);
+        const float lb = std::sqrt(b[c] * b[c] + b[4 + c] * b[4 + c] + b[8 + c] * b[8 + c]);
+        worst_dot = std::min(worst_dot, la > 1e-6f && lb > 1e-6f ? d / (la * lb) : -1.0f);
+    }
+    float ea[3], eb[3];
+    eye(a, ea);
+    eye(b, eb);
+    moved = std::sqrt((ea[0] - eb[0]) * (ea[0] - eb[0]) + (ea[1] - eb[1]) * (ea[1] - eb[1]) + (ea[2] - eb[2]) * (ea[2] - eb[2]));
+    return std::isfinite(worst_dot) && std::isfinite(moved) && worst_dot >= min_dot && moved <= max_move;
+}
+
 namespace {
 void read_tag(const json::Value& v, Tag& t) {
     t.id = static_cast<uint32_t>(v.num("id"));

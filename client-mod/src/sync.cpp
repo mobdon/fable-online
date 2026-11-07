@@ -173,6 +173,7 @@ std::atomic<uint32_t> g_worldShownMs{0};
 /** Name tags stay hidden this long after a load or a stall, so they don't flash over the fade. */
 constexpr uint32_t kTagsAfterLoadMs = 1500;
 std::atomic<uint32_t> g_busyUntilMs{0};
+std::atomic<const char*> g_busyWhy{"hidden: loading"};
 
 void on_connected() {
     if (!g_state) return;
@@ -1067,7 +1068,8 @@ void tick() {
     State& s = *g_state;
     uint32_t now = clock_ms();
     crash_exit::game_alive(GetTickCount());  // crash_exit compares with GetTickCount
-    if (s.lastTickMs && now - s.lastTickMs > kLoadStallMs) {
+    const bool stalled = s.lastTickMs && now - s.lastTickMs > kLoadStallMs;
+    if (stalled) {
         fo::log("sync: the game stalled %u ms (an area load?), telling the server", now - s.lastTickMs);
         s.loadSeen = true;
         s.reporter.reset();
@@ -1079,7 +1081,13 @@ void tick() {
     if (!heroNow || heroNow != s.lastHero) s.puppets->hold(now, kHoldAfterLoadMs);
     // Name tags: only over a world that is being played. A stall (an area load on this
     // thread), a missing or new hero, or a region load in progress hides them for a moment.
-    if (s.loadSeen || !heroNow || heroNow != s.lastHero || s.objects.loading()) g_busyUntilMs = now + kTagsAfterLoadMs;
+    // (Not loadSeen: it stays set until the next position report, which a hero standing
+    // still may not send for a long time.)
+    const char* busy = stalled ? "hidden: the game just stalled (area load)"
+                       : !heroNow ? "hidden: no local hero"
+                       : heroNow != s.lastHero ? "hidden: hero object changed"
+                       : s.objects.loading() ? "hidden: region load under way" : nullptr;
+    if (busy) { g_busyUntilMs = now + kTagsAfterLoadMs; g_busyWhy = busy; }
     g_worldShownMs = now;
     s.lastHero = heroNow;
 
@@ -1126,9 +1134,14 @@ void tick() {
 
 }  // namespace
 
-bool world_shown() {
+bool world_shown() { return world_hidden_reason() == nullptr; }
+
+const char* world_hidden_reason() {
     const uint32_t now = clock_ms(), at = g_worldShownMs.load();  // tick() stamps with clock_ms()
-    return at && now - at < 250 && static_cast<int32_t>(now - g_busyUntilMs.load()) >= 0;
+    if (!at) return "hidden: online sync hasn't ticked yet";
+    if (now - at >= 250) return "hidden: online sync not ticking (loading?)";
+    if (static_cast<int32_t>(now - g_busyUntilMs.load()) < 0) return g_busyWhy.load();
+    return nullptr;
 }
 
 int own_renown() {
