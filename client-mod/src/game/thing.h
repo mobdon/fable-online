@@ -87,6 +87,10 @@ std::vector<uintptr_t> scan_vtable(uint32_t vtable, size_t limit);
 constexpr uint32_t kHeroVtable = 0x012457FC;      // CThingPlayerCreature
 constexpr uint32_t kPhysicsVtable = 0x0126616C;   // CTCPhysicsControlled
 constexpr uint32_t kPhysicsStandardVtable = 0x01265F84;  // CTCPhysicsStandard
+/** Monsters' physics: derives from CTCPhysicsStandard, so the same position fields, plus
+ *  its own copy of the position at +0x89 (refreshed by its update, 0x007268D0). */
+constexpr uint32_t kPhysicsNavigatorVtable = 0x01266314;  // CTCPhysicsNavigator
+constexpr uint32_t kNavigatorPosCopy = 0x089;
 constexpr uint32_t kCreatureVtable = 0x0125AC0C;  // CThingCreatureBase
 
 }  // namespace fo::game

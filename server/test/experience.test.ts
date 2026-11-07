@@ -224,3 +224,18 @@ test('protocol: xp_sync is checked strictly', () => {
   ])
     assert.throws(() => decode(JSON.stringify({ t: 'xp_sync', base: 0, ...bad })), ProtocolError);
 });
+
+test('xp: a report with nothing new is answered with a numbered state the mod accepts', () => {
+  const { app, hero, xp } = setup();
+  xp.grant(hero.id, { general: 500 }, 'admin');
+  const s = xp.state(hero.id);
+  const r = xp.sync(hero.id, same(s));
+  assert.equal(r.bought.length + r.gained.general, 0);
+  assert.ok(r.state.seq > 0, 'seq 0 is refused by the mod');
+  assert.equal(r.state.seq, s.seq);
+  assert.equal(r.state.general, 500);
+  // The import answer is numbered too.
+  const other = makeHero(app).hero.id;
+  assert.ok(xp.sync(other, empty({ general: 10 })).state.seq > 0);
+  app.close();
+});
