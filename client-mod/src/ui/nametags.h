@@ -51,6 +51,10 @@ std::string format_renown(double renown);   // 12500 -> "12,500 renown"
 // to point the way ref's does, so the result follows the engine's convention. False for a
 // degenerate camera.
 bool view_from_camera(const float pos[3], const float fwd[3], const float up[3], const float* ref, float out[16]);
+// Whether two view matrices (row vectors, D3D layout) show nearly the same camera: each axis
+// within acos(min_dot) of the other's and the camera positions within max_move. Fills the
+// smallest axis dot and the distance between the positions.
+bool views_agree(const float a[16], const float b[16], float min_dot, float max_move, float& worst_dot, float& moved);
 
 class TagStore {
 public:

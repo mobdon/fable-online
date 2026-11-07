@@ -252,6 +252,19 @@ static void test_view_from_camera() {
     CHECK(vx > 0.49f && vx < 0.51f);
     const float zero[3] = {0, 0, 0};
     CHECK(!ui::view_from_camera(pos, zero, up, ref, m));
+    // Agreement with the game's view: the same camera moved 0.5 agrees; a camera looking
+    // another way, or far off, does not.
+    float dot = 0, moved = 0;
+    CHECK(ui::view_from_camera(left, fwd, up, ref, m));
+    CHECK(ui::views_agree(m, ref, 0.8f, 3.0f, dot, moved));
+    CHECK(moved > 0.49f && moved < 0.51f && dot > 0.99f);
+    const float side[3] = {1, 0, 0};
+    CHECK(ui::view_from_camera(pos, side, up, nullptr, m));
+    CHECK(!ui::views_agree(m, ref, 0.8f, 3.0f, dot, moved));
+    const float far[3] = {0, -20, 0};
+    CHECK(ui::view_from_camera(far, fwd, up, ref, m));
+    CHECK(!ui::views_agree(m, ref, 0.8f, 3.0f, dot, moved));
+    CHECK(moved > 19.9f);
 }
 
 static void test_party() {
