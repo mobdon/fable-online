@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 
 namespace fo::game::weather {
 namespace {
@@ -67,6 +68,24 @@ bool read(State& out) {
     s.rainOverride = rainOn ? rainAmt : -1.0f;
     s.snowOverride = snowOn ? snowAmt : -1.0f;
     out = s;
+    return true;
+}
+
+bool fix_snow_fade() {
+    // 0x00B52901: mov eax, [ecx+0x5C8]  ->  mov eax, [ecx+0x5CC]
+    constexpr uintptr_t kAt = 0x00B52901;
+    static const uint8_t kOld[6] = {0x8B, 0x81, 0xC8, 0x05, 0x00, 0x00};
+    static const uint8_t kNew[6] = {0x8B, 0x81, 0xCC, 0x05, 0x00, 0x00};
+    uint8_t now[6] = {};
+    if (!rd(kAt, now, sizeof now)) return false;
+    if (std::memcmp(now, kNew, sizeof now) == 0) return true;
+    if (std::memcmp(now, kOld, sizeof now) != 0) return false;
+    DWORD old = 0;
+    auto* at = reinterpret_cast<uint8_t*>(kAt);
+    if (!VirtualProtect(at, sizeof kNew, PAGE_EXECUTE_READWRITE, &old)) return false;
+    std::memcpy(at, kNew, sizeof kNew);
+    VirtualProtect(at, sizeof kNew, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), at, sizeof kNew);
     return true;
 }
 

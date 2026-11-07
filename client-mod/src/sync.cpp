@@ -1146,6 +1146,9 @@ void start() {
     // Fable's clock follows the realm's (FABLE_ONLINE_SYNC_CLOCK=0 leaves it alone).
     s.syncClock = env_flag("FABLE_ONLINE_SYNC_CLOCK", true);
     s.syncWeather = env_flag("FABLE_ONLINE_SYNC_WEATHER", true);
+    // Fable's snow fade reads the rain amount, so rain always brought snow with it.
+    if (s.syncWeather)
+        fo::log("sync: snow fade fix %s", game::weather::fix_snow_fade() ? "in place" : "NOT applied (unexpected code at 0x00B52901)");
     // Hero experience from the server (FABLE_ONLINE_XP=0 leaves Fable's own alone).
     s.xpOn = env_flag("FABLE_ONLINE_XP", true);
     std::string heroDef = env("FABLE_ONLINE_HERO_DEF", "CREATURE_HERO");

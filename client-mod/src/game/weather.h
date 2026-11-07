@@ -21,4 +21,12 @@ bool read(State& out);
 bool set_rain(float amount);
 bool set_snow(float amount);
 
+/**
+ * Fixes a retail bug: Fable's snow fade (0x00B52900) starts from the rain amount (+0x5C8)
+ * instead of the snow amount (+0x5CC), so whenever rain falls snow follows it at nearly the
+ * same strength. Rewrites that one displacement byte. Safe to call again; false if the
+ * code is not what the Steam Fable.exe has there.
+ */
+bool fix_snow_fade();
+
 }  // namespace fo::game::weather

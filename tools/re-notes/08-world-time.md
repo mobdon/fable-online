@@ -104,6 +104,15 @@ particles (amount * 128 particles; below 1/128 is off). The override is reset wh
 vtable). Rain, storm, snow and blizzard from the server's `sky` frame are drawn; clear, cloudy,
 fog and interiors give the area its own weather back. `FABLE_ONLINE_SYNC_WEATHER=0` turns it off.
 
+### Retail bug: snow follows rain
+
+The snow fade `0x00B52900` starts from `[ecx+0x5C8]` (the rain amount) where the rain fade
+`0x00B52870` reads its own. So whenever rain is drawn, snow is set to nearly the same amount
+every frame, whatever the snow override says (retail areas never have both, so it never
+showed). With rain overridden to 0.8 the game drew heavy snow and rain together. The mod
+rewrites the displacement byte at `0x00B52903` (`C8` to `CC`) at start-up
+(`game::weather::fix_snow_fade`), after checking the six bytes `8B 81 C8 05 00 00`.
+
 ## Still open
 
 - Fog and cloud: no override found for the third theme amount (+0x170) yet.
